@@ -88,6 +88,10 @@ rows=2, seq=318, markers=14, with Mac fp16 logits to check parity).
   the Pixel 8 and matches the Mac **byte-for-byte** (`{"cmd":"decide_test"}`: `input_ids_match: true`,
   `marker_pos_match: true`, decision BACK / target 0). `Tokenizer.kt` (DJL) + `LayaInput.kt` + `Decide.kt`
   integrated and compiling; DJL's `.so` needs `libc++_shared.so` bundled in `jniLibs/` (D-022).
-- **Remaining for standalone (2d):** port `build_candidates`/`parse_forest` to Kotlin (candidates from the
-  live a11y forest — the agents' port assumed the caller supplies them), a live `decide` command reading the
-  real screen, and an on-device run loop (load-on-demand model) replacing the Mac driver.
+- **Phase 2d — standalone run loop BUILT & verified on-device [measured]:** `Candidates.kt` ports
+  `build_candidates`/`parse_forest` (the `selfcheck` command matches the Python labels exactly on the
+  Pixel 8), `Runner.kt` ports the OPEN_APP/INPUT_TEXT payload rules, and `AgentService.runGoal` runs the
+  full read→decide→approve→act loop (model loaded on demand with the D-023 config, approval overlay, 3-skip
+  / 3-repeat guards). `MainActivity` has a goal field + Run button — type a goal in the app and it runs with
+  **no Mac**. Not yet exercised: a full multi-step live episode (each step needs a human tap, so it wasn't
+  auto-tested here) and a cool latency on a real multi-candidate screen.

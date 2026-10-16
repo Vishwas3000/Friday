@@ -8,7 +8,9 @@ Not for the Play Store (it bans autonomous accessibility agents, D-012).
 - **Phase 1 (now):** the app is the **eyes and hands** — an AccessibilityService that reads the screen tree and
   performs actions. **Laya runs on the Mac** and drives the app over USB (`adb forward`). Fast to iterate, and the
   model's quality is measured on the real device.
-- **Phase 2:** move Laya **into the app** (ONNX Runtime, CPU), so there is no PC. Resource budget below.
+- **Phase 2 (built):** Laya runs **inside the app** (ONNX Runtime, fp16, CPU arena off — D-023), so there
+  is no PC: type a goal in the app and it decides on-device. Export → quantize → on-device decode are all
+  verified (research/06); the run loop is `AgentService.runGoal`. Resource budget below.
 - **Phase 3:** smarter decisions — short-listing long screens, a real completion check, calibrated confidence.
 
 ## Parts

@@ -121,7 +121,7 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Why:** The upstream code expects AndroidControl's node schema. An XML-native port is about as small as an adapter, and it was checked line by line. The Kotlin app will need its own port anyway.
 - **Rejected:** vendoring the files unchanged plus an adapter (research agent 01's recommendation).
 - **Revisit:** if any replay shows a label mismatch.
-- **Who / status:** Claude · Proposed
+- **Who / status:** Claude · Done — Python `scripts/laya_android.py` + Kotlin `Candidates.kt` (Phase 2d), the latter validated on-device: the `selfcheck` command reproduces the Python's candidate labels exactly (2026-10-16).
 
 ### D-014 — Don't declare `isAccessibilityTool`
 - **Decision:** Our service ships without `android:isAccessibilityTool="true"`.
