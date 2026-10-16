@@ -24,4 +24,8 @@ android {
 dependencies {
     // Phase 2: run Laya's exported ONNX on-device. Full build (not -mobile) for the ModernBERT op set.
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+    // On-device tokenizer: load the checkpoint's tokenizer.json byte-identically (D-022). 0.33.0 is the
+    // only release shipping the Android arm64 .so; abiFilters above keeps just that one.
+    implementation("ai.djl.huggingface:tokenizers:0.33.0")
+    runtimeOnly("ai.djl.android:tokenizer-native:0.33.0")
 }

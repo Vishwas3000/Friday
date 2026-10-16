@@ -178,8 +178,9 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Why:** byte-identical by construction (the Gemma-2/mmBERT BPE with `byte_fallback`, 256k vocab); 0.33.0 is the only release shipping the Android arm64 `.so` (8 MB). Id-parity vs `transformers` verified on 5 strings [measured, research/07].
 - **Gotcha:** `tokenizer.json` embeds `truncation{max_length:48}`; the Kotlin wrapper MUST build with `optTruncation(false)/optPadding(false)` or every state is cut to 48 tokens (laya's transformers path ignores it).
 - **Rejected:** laya-java tokenizer (HashMap merges → ~100–250 MB ART heap); DJL 0.38.0 (no Android native); hand-rolled JNI; sentencepiece-android (no `.model` ships).
-- **Open:** DJL-on-Android parity is confirmed by source reading, not yet a real device run — that is the integration gate.
-- **Who / status:** Claude (subagent) · Proposed
+- **Confirmed [measured on-device 2026-10-16]:** on the Pixel 8 the DJL tokenizer yields **byte-identical** input to Python — `decide_test` reports `input_ids_match: true`, `marker_pos_match: true`, and the full on-device tokenize→build→ORT→decode returns BACK / target 0, matching the Mac. The ported Kotlin (`Tokenizer.kt` + `LayaInput.kt`) composes exactly.
+- **Build note:** `libdjl_tokenizer.so` dynamically needs `libc++_shared.so`, which DJL's aar omits (ORT static-links its own). We commit the NDK's arm64 copy at `android/app/src/main/jniLibs/arm64-v8a/`.
+- **Who / status:** Claude (subagent + integration) · Validated
 
 ### D-023 — On-device runtime config = fp16 + ORT CPU arena disabled, 4 threads (the gate result)
 - **Decision:** run the exported model on-device as **fp16** with `setCPUArenaAllocator(false)` + `setMemoryPatternOptimization(false)` and 4 intra-op threads.

@@ -84,5 +84,10 @@ rows=2, seq=318, markers=14, with Mac fp16 logits to check parity).
   much over arena-on at the same temperature.
 - **Parity is still a smoke test** (4 synthetic states). Replay real `captures/` states for the ≥99% gate.
 - **int8 accuracy recovery** (keep the op head fp32) is the lever if we later need the 3.5× speedup.
-- **Phase 2c (standalone)**: tokenizer via DJL (D-022, done — `phase2-staging/Tokenizer.kt`) + the Kotlin
-  input/decode port + wiring into `AgentService`, so the phone decides with no Mac.
+- **Phase 2c — on-device decode PROVEN [measured 2026-10-16]:** the full tokenize→build→ORT→decode runs on
+  the Pixel 8 and matches the Mac **byte-for-byte** (`{"cmd":"decide_test"}`: `input_ids_match: true`,
+  `marker_pos_match: true`, decision BACK / target 0). `Tokenizer.kt` (DJL) + `LayaInput.kt` + `Decide.kt`
+  integrated and compiling; DJL's `.so` needs `libc++_shared.so` bundled in `jniLibs/` (D-022).
+- **Remaining for standalone (2d):** port `build_candidates`/`parse_forest` to Kotlin (candidates from the
+  live a11y forest — the agents' port assumed the caller supplies them), a live `decide` command reading the
+  real screen, and an on-device run loop (load-on-demand model) replacing the Mac driver.

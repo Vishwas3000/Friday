@@ -48,6 +48,7 @@ def main():
     ap.add_argument("--xnnpack", action="store_true")
     ap.add_argument("--lowmem", action="store_true")
     ap.add_argument("--model", default="laya-android.fp16.onnx")
+    ap.add_argument("--decide", action="store_true", help="full on-device tokenize+build+ORT+decode on the fixture")
     ap.add_argument("--no-push", action="store_true")
     a = ap.parse_args()
 
@@ -56,10 +57,15 @@ def main():
     if not a.no_push:
         push_into_files(model, model.name)
         push_into_files(fixture, fixture.name)
+        if a.decide:
+            tok = MODELS / "tokenizer.json"
+            assert tok.exists(), "copy tokenizer.json into models/ first"
+            push_into_files(tok, tok.name)
 
     sh("forward", "tcp:%d" % PORT, "localabstract:layatest_agent")
-    cmd = {"cmd": "bench", "iters": a.iters, "threads": a.threads, "xnnpack": a.xnnpack,
-           "lowmem": a.lowmem, "model": a.model}
+    cmd = ({"cmd": "decide_test", "model": a.model} if a.decide else
+           {"cmd": "bench", "iters": a.iters, "threads": a.threads, "xnnpack": a.xnnpack,
+            "lowmem": a.lowmem, "model": a.model})
     try:
         conn = socket.create_connection(("127.0.0.1", PORT), timeout=900)
     except OSError:
