@@ -224,4 +224,5 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 ### D-030 — Keep Laya warm; load it in parallel; pre-warm on open
 - **Decision:** one shared engine in the service, model and tokenizer loaded in parallel plus one warm-up pass, freed after 3 idle minutes (never mid-request), pre-warmed when the owner opens Friday.
 - **Why [measured 2026-10-16]:** a cold Laya request cost ~23 s (model 10 s, tokenizer 8 s, first pass 4.5 s); rule-routed requests don't load Laya at all. Keeps D-016's load-on-demand / free-when-idle.
-- **Who / status:** Claude · Built, pending device measurement
+- **Measured on the Pixel 8 (2026-10-17):** cold request 4.6 s with the files in Android's page cache (model 2.8 s ‖ tokenizer 2.3 s, then a 1.4 s routing pass; a truly cold cache measured 10 s ‖ 8 s), warm 1.4 s — was ~24 s.
+- **Who / status:** Claude · Validated

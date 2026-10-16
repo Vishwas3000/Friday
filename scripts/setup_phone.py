@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -50,18 +51,21 @@ def main():
     print(f"installing {APK.name}...")
     print(sh(*dev, "install", "-r", str(APK)))
 
-    enabled = shell(*(dev[1:] and dev) or (), "settings", "get", "secure", "enabled_accessibility_services")
-    # `dev` already consumed by sh(); re-pass via shell helper below
-    enabled = sh("shell", *dev, "settings", "get", "secure", "enabled_accessibility_services")
-    current = [s for s in (enabled or "").split(":") if s and s != "null"]
-    if SERVICE not in current:
-        current.append(SERVICE)
-        sh("shell", *dev, "settings", "put", "secure", "enabled_accessibility_services", ":".join(current))
-    sh("shell", *dev, "settings", "put", "secure", "accessibility_enabled", "1")
-
-    now = sh("shell", *dev, "settings", "get", "secure", "enabled_accessibility_services")
-    if SERVICE not in now:
-        sys.exit("could not enable the service. Turn on 'Laya agent' by hand: Settings > Accessibility.")
+    # An app update makes Android re-check accessibility services and rewrite the list; an enable
+    # that lands mid-check gets wiped (seen 2026-10-17), so wait and retry.
+    for _ in range(4):
+        time.sleep(2)
+        enabled = sh("shell", *dev, "settings", "get", "secure", "enabled_accessibility_services")
+        current = [s for s in (enabled or "").split(":") if s and s != "null"]
+        if SERVICE not in current:
+            current.append(SERVICE)
+            sh("shell", *dev, "settings", "put", "secure", "enabled_accessibility_services", ":".join(current))
+        sh("shell", *dev, "settings", "put", "secure", "accessibility_enabled", "1")
+        time.sleep(1)
+        if SERVICE in sh("shell", *dev, "settings", "get", "secure", "enabled_accessibility_services"):
+            break
+    else:
+        sys.exit("could not enable the service. Turn on 'Friday' by hand: Settings > Accessibility.")
 
     sh(*dev, "forward", f"tcp:{PORT}", "localabstract:layatest_agent")
     print(f"\nready. service enabled, bridge on tcp:{PORT}.")
