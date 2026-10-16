@@ -60,10 +60,24 @@ nothing to pool. The bridge is one thread.
 - Gate on `MemAvailable` (not MemFree); if it is low, pause and tell the owner rather than risk an OOM kill.
 - Measure per build: peak RSS, step latency, and battery per 100 steps.
 
-## Safety (D-011, D-014)
-- Default: approve every step on the phone; a big **Stop** ends the run.
-- Risky-word targets always ask, even in `--yes`.
-- Stop on three identical actions or three skips.
+## The assistant (D-024)
+Type a request in Friday and tap **Run on this phone**. `Assistant` handles it:
+1. **Route** to one of 16 skills (`Skills.kt`): keyword rules first, Laya for paraphrases, and below 0.7
+   confidence Friday asks "do you want me to…".
+2. **Skill** (`PhoneSkills.kt`; Media / People & places in progress; anything else → `GenericSkill`): slots by
+   rule (`Slots.kt`), app from the catalog + your remembered pick (`AppResolver.kt`, D-027), then the cheapest
+   way to do it — an API answer, a direct intent, or Laya on the narrowest screen (D-028).
+3. **Answer** card with the result. A banner shows progress with **Stop**.
+
+Laya loads only when a step needs it, stays warm for 3 minutes, and pre-warms when you open Friday (D-030).
+Bridge tests: `{"cmd":"selfcheck"}` (parsers), `{"cmd":"route","text":…}` (routing + timings), `{"cmd":"run","goal":…}`.
+
+## Safety (D-011, D-014, D-025, D-026)
+- **Approvals (D-025):** safe steps run on their own; typing and taps on send/pay/buy/book/delete/call/confirm/allow…
+  always ask (Run / Skip / Stop). Stop on three identical actions or three skips.
+- **Money apps are read-only (D-026):** Friday never types or taps Pay/Send/Transfer in UPI/bank/card apps, even if
+  you tap Run. On fingerprint, screen-lock and UPI-PIN screens it waits for you and never acts.
 - **No `isAccessibilityTool` flag** — so Android keeps permission dialogs and installer buttons out of the agent's
-  reach. The agent does not target banking/UPI apps (they detect and block accessibility by design).
-- Every step is logged to `captures/` (git-ignored; it holds on-screen text).
+  reach. System Allow dialogs (Wi-Fi, Bluetooth) are yours to tap. Apps that block accessibility are respected.
+- The Mac driver logs each step to `captures/` (git-ignored; it holds on-screen text). The on-phone assistant
+  logs no screen content or answers.

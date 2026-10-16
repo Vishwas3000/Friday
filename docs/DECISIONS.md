@@ -189,3 +189,39 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Rejected:** dynamic int8 as the default (3.5× faster at 677 ms and 389 MB, but it **breaks the operation decision** — op top-1 2/4, max |Δprob| 0.11); keeping the arena (1.35 GB, over budget); 8 threads (1201 ms).
 - **Revisit:** int8 with the operation head/scorer kept fp32 if we later need the speed; a cool, throttling-isolated latency for the winning config is still to confirm.
 - **Who / status:** Claude · Proposed
+
+### D-024 — Friday is an assistant: route → slots → app → do → read → answer
+- **Decision:** a typed request runs through `Assistant` (Android): **route** it to one of 16 skills (keyword rules first, Laya for paraphrases, ask the owner below 0.7 confidence); the **skill** fills slots by rule, resolves the app, acts, optionally reads data off the screen, and returns an **answer** card. Laya *chooses* (skills, slot spans, UI steps); rules *produce* (dates, times, app choice, math). Safety sits under the skill interface so no skill can skip it.
+- **Why [measured, research/09]:** routing — rules 100% seen / 6% paraphrased, Laya 82% / 81%, hybrid 100% / 81%, confidence calibrated (≥0.9 → 100% right). Slots — rule-trimmed spans + Laya: 77% exact vs 0%. On-device routing matches the Mac to two decimals.
+- **Rejected:** a generative LLM brain for now (D-021); one open-ended Laya loop for everything (it can't fill slots or pick apps).
+- **Who / status:** user directed ("plan everything… build it end to end", 2026-10-16) · Claude designed · Built (dbd7e58)
+
+### D-025 — Approvals: auto-run safe steps, always ask on risky ones
+- **Decision:** scrolling, going back, opening apps and ordinary taps run on their own. Typing, and taps on send/pay/buy/order/book/delete/call/confirm/allow/… always ask (Run / Skip / Stop). A status banner with **Stop** is shown while Friday works.
+- **Why:** a 30-step task can't need 30 taps; the owner chose this (2026-10-16). Supersedes D-011's ask-every-step default for the on-phone assistant.
+- **Who / status:** user · Decided
+
+### D-026 — Money apps are in scope, read-only
+- **Decision:** inside UPI/bank/card/tracker apps (`AppResolver.MONEY`) Friday **never** types and **never** taps Pay/Send/Transfer/Request/… — blocked even if the owner taps Run. On fingerprint / screen-lock / UPI-PIN screens Friday waits for the owner and never acts. Money answers are shown, not logged.
+- **Why:** the owner wants "what were my expenses last month" and will authenticate with their own fingerprint (2026-10-16). Replaces the old "banking/UPI out of scope" line. Where an app blocks accessibility, we still respect it (D-014; research/11).
+- **Who / status:** user (scope) · Claude (rails) · Built
+
+### D-027 — App choice is a lookup, not a model call
+- **Decision:** skill → catalog of well-known app ids → installed → the owner's remembered pick (asked once). An app named in the request wins. Laya never picks among all installed apps.
+- **Why [measured, research/09]:** Laya over all 207 apps was right 6–26% of the time, matching words not purpose ("wake" → a sleep tracker), with uncalibrated confidence.
+- **Who / status:** Claude · Built
+
+### D-028 — Execution order: answer > intent/API > narrow screen + Laya
+- **Decision:** answer from an API when possible (battery, storage, next alarm); else a direct intent (alarm, timer, navigation, web search, dial, play-from-search, Wi-Fi request); else open the narrowest screen and let Laya act on a short list; Laya from anywhere is the last resort. System Allow dialogs (Wi-Fi, Bluetooth) are tapped by the owner, never auto-accepted (D-011).
+- **Why:** intents are instant and reliable; Laya is accurate on short lists (research/05, 09, 10).
+- **Who / status:** Claude (from research/10) · Built for Phone & time; Media and People & places in progress
+
+### D-029 — Expenses: measure readability first, then pick the method
+- **Decision:** before building the expenses extractor, check with the owner whether Friday can read each payment app's history (`scripts/probe_screen.py`, structure only — it never prints amounts, names or dates). The owner's UX is "open the app and total it", summing **debits** (not GPay's own monthly figure, which is net of money received). Fallbacks (research/11): a bank statement file parsed on the phone (covers every UPI app and cards), then an in-app total, then summing rows.
+- **Why:** GPay is Flutter and its accessibility tree is unknown; some bank apps block (ICICI won't run with Developer options on).
+- **Who / status:** Claude · Pending (owner probe)
+
+### D-030 — Keep Laya warm; load it in parallel; pre-warm on open
+- **Decision:** one shared engine in the service, model and tokenizer loaded in parallel plus one warm-up pass, freed after 3 idle minutes (never mid-request), pre-warmed when the owner opens Friday.
+- **Why [measured 2026-10-16]:** a cold Laya request cost ~23 s (model 10 s, tokenizer 8 s, first pass 4.5 s); rule-routed requests don't load Laya at all. Keeps D-016's load-on-demand / free-when-idle.
+- **Who / status:** Claude · Built, pending device measurement

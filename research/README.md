@@ -32,7 +32,7 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
      - It cannot get past the PIN lock.
      - FLAG_SECURE blanks screenshots, but the tree is still readable.
      - The system hides permission dialogs and installer buttons (`accessibilityDataSensitive`) from non-assistive services. We keep that wall on purpose (D-014).
-     - Banking and UPI apps detect accessibility services and refuse to run. That is a scope boundary, and we don't fight it.
+     - Some banking apps block accessibility services through in-app security SDKs, and ICICI iMobile won't run with Developer options on. For GPay, PhonePe and Paytm there is no public evidence of an accessibility block (GPay blocks overlays and "unsafe apps"). Readability is measured per app with the owner, not assumed (research/11, D-029). Where an app blocks, we don't fight it.
      - Flutter, canvas and some WebView UIs have poor trees [primary/secondary, 02, 03].
    - `uiautomator dump` **unbinds every enabled accessibility service while it runs** [primary]. Once our app exists, the adb dump path must not run alongside it.
 5. **One native app with Laya inside is possible but slower** [04].
@@ -75,6 +75,10 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 | [05-live-tests.md](05-live-tests.md) | Our measurements: model speed, adb costs, live episodes on the Pixel 8 |
 | [06-onnx-export.md](06-onnx-export.md) | ONNX export (bit-exact) + fp16/int8 + the on-device Pixel 8 gate — latency/RAM measured |
 | [07-ondevice-tokenizer.md](07-ondevice-tokenizer.md) | Tokenizing mmBERT on-device via DJL HuggingFace `tokenizers` (load tokenizer.json) |
+| [08-kotlin-input-port.md](08-kotlin-input-port.md) | The Kotlin port of Laya's input build + decode, verified against the Python |
+| [09-laya-as-assistant-brain.md](09-laya-as-assistant-brain.md) | What Laya is good at as an assistant's brain (routing, slots, app choice), measured; fine-tuning verdict |
+| [10-skills-intents.md](10-skills-intents.md) | Android intents/APIs per skill (alarm, timer, maps, search, music…), what completes without UI |
+| [11-upi-apps-feasibility.md](11-upi-apps-feasibility.md) | Can an accessibility assistant read UPI/bank apps? Per-app behaviour, exports, statement-file option |
 
 ## Quick reference: measured on our hardware (2026-10-16)
 | What | Number |
