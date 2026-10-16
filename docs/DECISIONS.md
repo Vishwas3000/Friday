@@ -226,3 +226,41 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Why [measured 2026-10-16]:** a cold Laya request cost ~23 s (model 10 s, tokenizer 8 s, first pass 4.5 s); rule-routed requests don't load Laya at all. Keeps D-016's load-on-demand / free-when-idle.
 - **Measured on the Pixel 8 (2026-10-17):** cold request 4.6 s with the files in Android's page cache (model 2.8 s ‖ tokenizer 2.3 s, then a 1.4 s routing pass; a truly cold cache measured 10 s ‖ 8 s), warm 1.4 s — was ~24 s.
 - **Who / status:** Claude · Validated
+
+### D-031 — App understanding is learned, not hand-written
+- **Decision:** Friday must not depend on hand-written per-app knowledge ("GPay is for expenses", per-app recipes). What an app is for, and how to operate it, comes from (a) app profiles generated automatically on the phone from what each app declares (label, package-name words, Play category, intent-filter capabilities, launcher shortcuts / App Actions) and (b) a Laya fine-tuned to match requests to those profiles and to operate apps. Platform capabilities used through Android APIs and intents (alarm, timer, navigation, web search, battery) stay — they aren't per-app knowledge.
+- **Why:** owner, 2026-10-17: "we don't want to hardcode usecases for an app… finetune laya to understand the basic utility of all the apps". Measured (research/12): purposes lift app choice 36% → 58%, so profiles are the lever; generating them removes the hand-written list.
+- **Supersedes:** the hand-written purpose catalog planned in research/12 / D-027 (the catalog agent was redirected to an automatic profiler). The 16-skill keyword rules stay only as a fast path for common phrasings.
+- **Who / status:** user (direction) · Claude (method) · Pending — research/14 (data), research/15 (method)
+
+### D-032 — A lightweight on-device LLM writes text; Laya still decides
+- **Decision:** add a small generative model used **only** when a step needs text the owner will see before it's used (message, email and reply bodies). It loads on demand, is freed after, and is never resident together with Laya (D-016). Its output always goes through the approval card before anything is typed or sent.
+- **Why:** owner, 2026-10-17: "if I ask it to write a text it should be able to do it… use some light weight LLM to offload the works when it involves any text outputs". Laya chooses but cannot generate.
+- **Supersedes:** D-021's "no generative LLM near-term", for text output only.
+- **Who / status:** user · Pending — model and runtime from research/13
+
+### D-033 — Teach mode: the owner demonstrates, Friday records, and it can all be deleted
+- **Decision:** the owner types what they'll do and taps **Teach this**. A red banner shows while recording. For each step Friday records the settled screen (raw forest) and the owner's action (tap, long-press, scroll, typed text, opening an app), and **Done** records where the task ends. Cancel keeps nothing. **"Delete all teaching data"** wipes the phone's recordings, `scripts/pull_teach.py --wipe` also removes the Mac copy, and copies used for training on the GPU box are deleted after each run.
+- **Why:** owner chose Teach mode as the training-data source (2026-10-17). It gives the best labels for operating the owner's own apps and for DONE, Laya's weak spot (research/05, 17). Privacy: the owner said the data is "only for me and research purpose, not gonna publish". Deletability: owner, "make sure we can delete the data once we are done".
+- **Who / status:** user · In progress (recorder built; wiring and export in progress)
+
+### D-034 — Train on the owner's remote GPU box, isolated from its other projects
+- **Decision:** fine-tuning runs on the owner's remote CUDA machine: one dedicated directory with its own environment, no global installs or system changes, a GPU-usage check before each run, nothing outside our directory touched. The owner's personal data (Teach mode) may be used there.
+- **Why:** owner offered it, 2026-10-17 ("don't delete or interfere with the existing projects"); Laya-Android's own fine-tune needed an RTX 4090-class GPU (2.7 h).
+- **Who / status:** user · Pending — the instance was unreachable (SSH port closed); waiting for the current port
+
+### D-035 — A wake word for Friday, at very low standby power
+- **Decision:** add a wake word ("Hey Friday") so Friday can be started hands-free, with standby power kept minimal and audio never leaving the phone. Speech-to-text and owner-voice verification follow later.
+- **Why:** owner, 2026-10-17. Fine-tuning research comes first (owner: "but first research on how can we finetune laya").
+- **Who / status:** user · Pending — design from research/16
+
+### D-036 — Friday operates the app it opens: the task continues inside it, and Laya is told what was done
+- **Decision:** "open X and <task>" opens X and hands the rest to Laya inside X, instead of stopping. Friday keeps a trail of what it did in a request (OPEN_APP, taps, typed text — intent launches included) and passes it to Laya as `history`.
+- **Why [measured, research/17]:** both were why Friday "only opened apps". With an empty history Laya re-picks OPEN_APP (0.80–0.95) inside the app; with "OPEN_APP Clock" it picks the right step (CLICK Timers 0.96). On the phone: "open the clock app and go to the stopwatch tab" → CLICK Stopwatch 0.96.
+- **Open:** Laya still overshoots (CLICK Start 0.55 after reaching the goal) → a completion check plus D-033 data.
+- **Who / status:** Claude · Validated on the Pixel 8
+
+### D-037 — An alarm is an alarm, and Friday checks before saying it's done
+- **Decision:** the owner's word decides: "alarm", "wake me" or "remind" makes an alarm (at now + duration for "in 8 mins"); only "timer" makes a timer. After setting an alarm Friday reads Android's next-alarm record before claiming success, otherwise it says it couldn't confirm. Answers say where to find the result.
+- **Why:** owner bug report, 2026-10-17: "set an alarm for 8 mins from now" showed "timer set" and nothing appeared in the alarm list. Logs showed the timer had been set (research/17); the wrong kind, and claimed without checking.
+- **Who / status:** Claude · Validated on the Pixel 8 ("Alarm set for 5:19 AM (in 8 min) — Clock › Alarms", 0.8 s)

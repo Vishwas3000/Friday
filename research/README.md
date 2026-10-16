@@ -79,6 +79,11 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 | [09-laya-as-assistant-brain.md](09-laya-as-assistant-brain.md) | What Laya is good at as an assistant's brain (routing, slots, app choice), measured; fine-tuning verdict |
 | [10-skills-intents.md](10-skills-intents.md) | Android intents/APIs per skill (alarm, timer, maps, search, music…), what completes without UI |
 | [11-upi-apps-feasibility.md](11-upi-apps-feasibility.md) | Can an accessibility assistant read UPI/bank apps? Per-app behaviour, exports, statement-file option |
+| [12-app-knowledge.md](12-app-knowledge.md) | Picking the right app: names 36% → purposes 58% → rules + purposes 91% (measured) |
+| [17-operating-apps.md](17-operating-apps.md) | Why Friday "only opened apps" (fixed: trail + open-and-continue), the alarm bug, speed, operational lessons |
+
+In progress (being written by research agents, 2026-10-17): **13** text-writing LLM (model + runtime, D-032),
+**14** fine-tuning data (D-031), **15** fine-tuning method (D-031), **16** wake word (D-035).
 
 ## Quick reference: measured on our hardware (2026-10-16)
 | What | Number |
