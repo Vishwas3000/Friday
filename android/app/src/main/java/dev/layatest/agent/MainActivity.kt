@@ -45,6 +45,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        AgentService.instance?.prewarm() // load Laya while the owner types (~10 s), so Run doesn't wait for it
         status.text = if (AgentService.instance != null) {
             "Friday: ON\n\nType a goal below and tap Run — Laya decides on this phone and asks before each step."
         } else {

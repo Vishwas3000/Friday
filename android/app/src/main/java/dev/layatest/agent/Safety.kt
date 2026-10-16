@@ -23,6 +23,9 @@ object Safety {
         RegexOption.IGNORE_CASE,
     )
 
+    /** Apps where a plain tap commits: in the dialer, tapping a contact or favourite places the call. */
+    private val COMMIT_ON_TAP = setOf("com.google.android.dialer")
+
     fun isMoneyApp(pkg: String?) = pkg != null && pkg in AppResolver.MONEY
 
     fun verdict(op: String, target: ScreenCandidate?, foreground: String?): Pair<Verdict, String> {
@@ -33,6 +36,7 @@ object Safety {
             if (tap && RISKY.containsMatchIn(label)) return Verdict.BLOCK to "Friday never taps \"$label\" in a money app"
             if (tap && label.isBlank()) return Verdict.ASK to "unlabelled button in a money app"
         }
+        if (tap && foreground in COMMIT_ON_TAP) return Verdict.ASK to "a tap here can place a call"
         if (op == "INPUT_TEXT") return Verdict.ASK to "types text"
         if (tap && RISKY.containsMatchIn(label)) return Verdict.ASK to "\"$label\" could send, pay or change something"
         return Verdict.AUTO to ""

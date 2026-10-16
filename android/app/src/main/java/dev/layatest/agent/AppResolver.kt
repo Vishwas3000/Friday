@@ -36,10 +36,14 @@ class AppResolver(ctx: Context) {
 
     fun remember(skill: String, app: AppInfo) = prefs.edit().putString("app.$skill", app.pkg).apply()
 
-    /** An app named in the request ("open spotify", "on YT Music"): the longest installed label found as whole words. */
-    fun named(request: String): AppInfo? = installed
-        .filter { it.label.isNotBlank() && Regex("\\b${Regex.escape(it.label)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(request) }
-        .maxByOrNull { it.label.length }
+    /** An app named in the request ("open spotify", "on YT Music"): an alias, else the longest installed label as whole words. */
+    fun named(request: String): AppInfo? {
+        ALIASES.entries.firstOrNull { Regex("\\b${it.key}\\b", RegexOption.IGNORE_CASE).containsMatchIn(request) }
+            ?.let { (_, pkg) -> installed.firstOrNull { it.pkg == pkg }?.let { return it } }
+        return installed
+            .filter { it.label.isNotBlank() && Regex("\\b${Regex.escape(it.label)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(request) }
+            .maxByOrNull { it.label.length }
+    }
 
     private fun category(pkg: String) = runCatching { pm.getApplicationInfo(pkg, 0).category }.getOrDefault(ApplicationInfo.CATEGORY_UNDEFINED)
 
@@ -79,6 +83,12 @@ class AppResolver(ctx: Context) {
 
         /** Apps where Friday is read-only (D-026): it never types, and never taps Pay/Send/Transfer and the like. */
         val MONEY: Set<String> = (UPI + BANKS + CARDS + TRACKERS).toSet()
+
+        /** Names people say that aren't the launcher label ("youtube music" would otherwise match "YouTube"). */
+        private val ALIASES = mapOf(
+            "youtube music" to "com.google.android.apps.youtube.music",
+            "google pay" to "com.google.android.apps.nbu.paisa.user",
+        )
 
         private val SYSTEM_CATEGORY = mapOf(
             "play_music" to ApplicationInfo.CATEGORY_AUDIO, "play_video" to ApplicationInfo.CATEGORY_VIDEO,

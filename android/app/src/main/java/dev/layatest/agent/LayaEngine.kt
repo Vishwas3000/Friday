@@ -29,6 +29,15 @@ class LayaEngine(ctx: Context) : AutoCloseable {
         val model = File(ctx.filesDir, MODEL)
         val tokFile = File(ctx.filesDir, "tokenizer.json")
         require(model.exists() && tokFile.exists()) { "Laya isn't on the phone yet (push $MODEL and tokenizer.json)" }
+        // The tokenizer (~8 s) and the model session (~10 s) load in parallel (measured 2026-10-16).
+        var tokLoaded: Tokenizer? = null
+        var tokError: Throwable? = null
+        var tokMs = 0L
+        val tokThread = Thread {
+            val t = SystemClock.elapsedRealtime()
+            try { tokLoaded = Tokenizer(tokFile) } catch (e: Throwable) { tokError = e }
+            tokMs = SystemClock.elapsedRealtime() - t
+        }.apply { start() }
         val t0 = SystemClock.elapsedRealtime()
         session = env.createSession(model.absolutePath, OrtSession.SessionOptions().apply {
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
@@ -36,9 +45,13 @@ class LayaEngine(ctx: Context) : AutoCloseable {
             setCPUArenaAllocator(false)
             setMemoryPatternOptimization(false)
         })
-        val t1 = SystemClock.elapsedRealtime()
-        tok = Tokenizer(tokFile)
-        loadMs = (t1 - t0) to (SystemClock.elapsedRealtime() - t1)
+        val sessionMs = SystemClock.elapsedRealtime() - t0
+        tokThread.join()
+        tokError?.let { session.close(); throw it }
+        tok = tokLoaded!!
+        loadMs = sessionMs to tokMs
+        // The first forward pass pays one-off kernel setup (~4.5 s); pay it here, not on the owner's first request.
+        choose("warm up", "Pick one.", listOf("a" to "yes", "b" to "no"))
     }
 
     /** One choice question about [goal]. Options are (key, text), rendered "key: text"; keep them to 16 or fewer. */

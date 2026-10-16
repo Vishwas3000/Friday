@@ -84,13 +84,17 @@ private val RULES: List<Pair<String, Regex>> = listOf(
     "spend_query" to "\\b(spen[dt]|expens\\w*|transactions?|paid|payments?)\\b|how much did i pay",
     "balance_query" to "\\bbalance\\b",
     "bill_query" to "\\b(bill|dues?)\\b",
-    "alarm_timer" to "\\b(alarm|timer|remind\\w*)\\b",
+    "alarm_timer" to "\\b(alarm|timer|remind\\w*|wake me)\\b",
     "device_status" to "\\b(battery|storage|space left)\\b",
+    // media controls before settings: "turn off the music" is a pause, not a phone setting
+    "play_music" to "\\b(pause|resume|skip)\\b|\\b(next|previous) (song|track)\\b|\\b(stop|turn off) the (music|song)\\b",
     "device_setting" to "\\b(turn (on|off)|enable|disable|brightness|dark mode|wi-?fi|bluetooth|flash ?light|torch)\\b",
+    // rides before calls and shopping: "call me a cab", "order an uber"
+    "ride" to "\\b(ride|cab|auto|taxi|uber|ola|rapido|namma yatri)\\b",
     "call" to "^(call|dial|phone)\\b",
+    "web_search" to "^(search|look up|google)\\b",  // before message: "search for text editors"
     "message" to "\\b(message|text|whatsapp|e-?mail|mail)\\b",
     "navigate" to "\\b(navigate|directions?|get to|route to)\\b",
-    "ride" to "\\b(ride|cab|auto|taxi)\\b",
     "shopping" to "\\b(order|buy|deliver\\w*)\\b",
     "photos" to "\\b(photos?|pictures?|pics)\\b",
     "play_video" to "\\b(watch|videos?|movie|episode|season)\\b",

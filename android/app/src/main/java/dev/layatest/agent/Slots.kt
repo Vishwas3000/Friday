@@ -64,8 +64,9 @@ class Slots(val request: String, private val today: LocalDate = LocalDate.now())
             val h = m.groupValues[1].toInt()
             if (h < 24) return h to m.groupValues[2].toInt()
         }
-        Regex("\\bat\\s+(\\d{1,2})\\b(?!\\s*(min|minute|hour|sec|day))").find(lower)?.let { m ->
-            val h = m.groupValues[1].toInt()
+        // "at 7", "keep an alarm for 6" (Indian English) -- but not "for 10 minutes"
+        Regex("\\b(at|for)\\s+(\\d{1,2})\\b(?!\\s*(min|minute|hour|hr|sec|day|%))").find(lower)?.let { m ->
+            val h = m.groupValues[2].toInt()
             if (h < 24) return h to 0
         }
         return null
@@ -73,13 +74,15 @@ class Slots(val request: String, private val today: LocalDate = LocalDate.now())
 
     private fun parseDuration(): Int? {
         var sec = 0
-        if (Regex("\\bhalf an hour\\b").containsMatchIn(lower)) sec += 1800
-        if (Regex("\\ban hour\\b").containsMatchIn(lower) && "half an hour" !in lower) sec += 3600
+        var t = lower
+        if ("half an hour" in t) { sec += 1800; t = t.replace("half an hour", " ") }
         for ((pat, mult) in listOf("hours?|hrs?" to 3600, "minutes?|mins?" to 60, "seconds?|secs?" to 1)) {
-            Regex("\\b(\\d+)\\s*($pat)\\b").find(lower)?.let { sec += it.groupValues[1].toInt() * mult }
+            Regex("\\b($NUMBER)\\s*($pat)\\b").find(t)?.let { sec += number(it.groupValues[1]) * mult }
         }
         return sec.takeIf { it > 0 }
     }
+
+    private fun number(w: String) = w.toIntOrNull() ?: WORD_NUMBERS.getValue(w.replace(Regex("\\s+"), " "))
 
     private fun parseRange(): TimeRange? {
         val monthName = { d: LocalDate -> d.month.getDisplayName(TextStyle.FULL, Locale.ENGLISH) }
@@ -123,6 +126,15 @@ make let know need want hear throw latest season songs song music videos video a
 yesterday tonight now near best way going happening please""".split(Regex("\\s+")).toSet()
         /** Words that end an [after] slot: "message rahul that I'll be late" -> "rahul". */
         val CUT = setOf("that", "and", "please", "using", "with", "via", "know", "saying", "now", "today", "tomorrow", "on")
+
+        // shortcut: "few" means 5 and "couple" 2; the answer says the number back, so the owner can correct it
+        private val WORD_NUMBERS = mapOf(
+            "a" to 1, "an" to 1, "one" to 1, "two" to 2, "three" to 3, "four" to 4, "five" to 5, "six" to 6,
+            "seven" to 7, "eight" to 8, "nine" to 9, "ten" to 10, "fifteen" to 15, "twenty" to 20, "thirty" to 30,
+            "forty" to 40, "forty five" to 45, "fifty" to 50, "sixty" to 60,
+            "few" to 5, "a few" to 5, "couple" to 2, "a couple" to 2, "a couple of" to 2, "couple of" to 2,
+        )
+        private val NUMBER = WORD_NUMBERS.keys.sortedByDescending { it.length }.joinToString("|") { Regex.escape(it) } + "|\\d+"
     }
 }
 
@@ -146,5 +158,12 @@ fun slotsSelfCheck(): String {
     check(s("message rahul that I'll be late").after("message") == "rahul")
     check(s("message rahul that I'll be late").after("that", cutAt = emptySet()) == "I'll be late")
     check(s("type \"hello world\" in notes").quoted == listOf("hello world"))
+    check(s("keep an alarm for 6").clock == (6 to 0))
+    check(s("timer for 10 minutes").clock == null && s("timer for 10 minutes").durationSec == 600)
+    check(s("remind me in few mins").durationSec == 300)
+    check(s("remind me in a couple of minutes").durationSec == 120)
+    check(s("remind me in half an hour").durationSec == 1800)
+    check(reminderText(s("remind me to call mom in 10 minutes")) == "call mom")
+    check(reminderText(s("remind me in few mins")) == null)
     return "ok"
 }

@@ -57,6 +57,7 @@ class AgentService : AccessibilityService() {
         "bench" -> Bench.run(this, c) // Phase-2 gate: on-device ONNX latency/RAM
         "decide_test" -> Decide.test(this, c) // Phase-2c: full on-device tokenize+build+ORT+decode on the fixture
         "selfcheck" -> JSONObject().put("candidates", candidatesSelfCheck()).put("slots", slotsSelfCheck())
+            .put("media", mediaSelfCheck()).put("people", peopleSelfCheck())
         "route" -> routeTest(c.getString("text"))
         "run" -> { runGoal(c.getString("goal")); JSONObject().put("started", true) }
         else -> error("unknown cmd: $cmd")
@@ -140,11 +141,18 @@ class AgentService : AccessibilityService() {
         return completed
     }
 
-    /** Types into the focused field; unicode-safe, unlike `adb shell input text`. */
+    /**
+     * Types into the focused field; unicode-safe, unlike `adb shell input text`. A search box is then
+     * submitted (Enter), or the search never runs; a chat box never is -- there Enter can send a message
+     * the owner only approved typing.
+     */
     private fun setText(text: String): Boolean {
         val field = findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
         val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
-        return field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        val ok = field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        val search = listOfNotNull(field.hintText, field.contentDescription, field.viewIdResourceName).any { SEARCH_BOX.containsMatchIn(it) }
+        if (ok && search) field.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+        return ok
     }
 
     private fun openApp(pkg: String): Boolean {
@@ -171,6 +179,40 @@ class AgentService : AccessibilityService() {
         }, "friday-request").start()
     }
 
+    // ---- Laya stays warm between requests and is freed after IDLE_MS unused (D-016: load on demand, free when idle) ----
+    private var warm: LayaEngine? = null
+    // off the main thread: releasing waits on the lock that laya() holds while loading (~10 s)
+    private val idleRelease = Runnable { Thread(::releaseLaya, "laya-release").start() }
+
+    internal val layaWarm get() = warm != null
+
+    /** The shared engine, loading it if needed (~10 s). Callers must not close it; call [layaIdle] when done. */
+    @Synchronized internal fun laya(): LayaEngine {
+        main.removeCallbacks(idleRelease)
+        return warm ?: LayaEngine(this).also { warm = it }
+    }
+
+    internal fun layaIdle() {
+        main.removeCallbacks(idleRelease)
+        main.postDelayed(idleRelease, IDLE_MS)
+    }
+
+    @Synchronized private fun releaseLaya() {
+        if (running) return  // never under a request; it re-arms the timer when it finishes
+        warm?.close()
+        warm = null
+    }
+
+    /** Load Laya in the background when the owner opens Friday, so it's warm by the time they tap Run. */
+    fun prewarm() {
+        if (warm == null) Thread({ runCatching { laya(); layaIdle() } }, "laya-prewarm").start()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) idleRelease.run()
+    }
+
     /** The screen once it settles: the forest that Laya and the extractors read. */
     internal fun readState(): JSONObject {
         settle(300, 3000)
@@ -181,15 +223,15 @@ class AgentService : AccessibilityService() {
 
     /** Bridge test: how a request routes on the phone (rule hit, or Laya's pick + confidence); compare research/09. */
     private fun routeTest(text: String): JSONObject {
-        val out = JSONObject().put("rule", ruleSkill(text) ?: JSONObject.NULL)
-        LayaEngine(this).use { laya ->
-            val t = SystemClock.elapsedRealtime()
-            val p = laya.choose(text, "What does the user want Friday to do?", SKILLS.toList())
-            out.put("laya", p.key).put("confidence", p.confidence)
-                .put("session_ms", laya.loadMs.first).put("tokenizer_ms", laya.loadMs.second)
-                .put("choose_ms", SystemClock.elapsedRealtime() - t)
-        }
-        return out
+        val out = JSONObject().put("rule", ruleSkill(text) ?: JSONObject.NULL).put("was_warm", layaWarm)
+        val t0 = SystemClock.elapsedRealtime()
+        val laya = laya()
+        val t1 = SystemClock.elapsedRealtime()
+        val p = laya.choose(text, "What does the user want Friday to do?", SKILLS.toList())
+        layaIdle()
+        return out.put("laya", p.key).put("confidence", p.confidence).put("get_engine_ms", t1 - t0)
+            .put("session_ms", laya.loadMs.first).put("tokenizer_ms", laya.loadMs.second)
+            .put("choose_ms", SystemClock.elapsedRealtime() - t1)
     }
 
     /** Perform one decided op, reusing the action primitives; geometry per scripts/live_adb.py act(). */
@@ -231,7 +273,8 @@ class AgentService : AccessibilityService() {
 
     companion object {
         @Volatile var instance: AgentService? = null
-        private const val MAX_STEPS = 15
+        private const val IDLE_MS = 3 * 60_000L  // ~700 MB stays resident this long after a request (D-016)
+        private val SEARCH_BOX = Regex("search|query|find|look ?up", RegexOption.IGNORE_CASE)
         private val GLOBALS = mapOf(
             "back" to GLOBAL_ACTION_BACK, "home" to GLOBAL_ACTION_HOME, "recents" to GLOBAL_ACTION_RECENTS,
             "notifications" to GLOBAL_ACTION_NOTIFICATIONS, "quick_settings" to GLOBAL_ACTION_QUICK_SETTINGS,

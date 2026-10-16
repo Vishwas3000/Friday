@@ -51,26 +51,44 @@ object DeviceStatus : Skill {
     }
 }
 
-/** "set an alarm for 6 am", "wake me up at 7", "start a 10 minute timer" -- AlarmClock intents with SKIP_UI. */
+/** "remind me to call mom in 10 minutes" -> "call mom": the label the timer/alarm shows when it rings. */
+internal fun reminderText(s: Slots): String? = s.after("remind me to", "remind me about", "remind me of", "reminder to",
+    "reminder for", "reminder about", cutAt = setOf("in", "at", "after", "tomorrow", "tonight", "by", "for", "every"))
+
+/**
+ * "keep an alarm for 6", "wake me up at 7", "remind me to call mom in 10 mins", "remind me in few mins" --
+ * AlarmClock intents with SKIP_UI; a reminder is a labelled timer or alarm. No time given: offer a few.
+ */
 object AlarmTimer : Skill {
     override val id = "alarm_timer"
+    private val IN_MIN = listOf(5, 15, 30, 60)
+    private val AT = listOf(6 to 0, 6 to 30, 7 to 0, 7 to 30, 8 to 0)
 
     override fun run(ctx: SkillContext): String {
-        val s = ctx.slots
-        s.durationSec?.let { sec ->
+        val note = reminderText(ctx.slots)
+        var sec = ctx.slots.durationSec
+        var clock = ctx.slots.clock
+        if (sec == null && clock == null) {
+            if (note != null || Regex("remind|timer", RegexOption.IGNORE_CASE).containsMatchIn(ctx.request)) {
+                val i = ctx.ask("When should I remind you?", IN_MIN.map { if (it < 60) "In $it minutes" else "In 1 hour" }) ?: return "Cancelled"
+                sec = IN_MIN[i] * 60
+            } else {
+                val i = ctx.ask("What time should the alarm ring?", AT.map { "%d:%02d AM".format(it.first, it.second) }) ?: return "Cancelled"
+                clock = AT[i]
+            }
+        }
+        val about = note?.let { " — \"$it\"" } ?: ""
+        sec?.let {
             // Int extras only: String extras are silently ignored (research/10)
-            val ok = ctx.launch(Intent(AlarmClock.ACTION_SET_TIMER)
-                .putExtra(AlarmClock.EXTRA_LENGTH, sec).putExtra(AlarmClock.EXTRA_SKIP_UI, true))
-            return if (ok) "Timer set for ${human(sec)}" else "No clock app took the timer"
+            val ok = ctx.launch(Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, it)
+                .putExtra(AlarmClock.EXTRA_SKIP_UI, true).apply { note?.let { n -> putExtra(AlarmClock.EXTRA_MESSAGE, n) } })
+            return if (ok) "${if (note != null) "Reminder" else "Timer"} set for ${human(it)}$about" else "No clock app took the timer"
         }
-        s.clock?.let { (h, m) ->
-            val ok = ctx.launch(Intent(AlarmClock.ACTION_SET_ALARM)
-                .putExtra(AlarmClock.EXTRA_HOUR, h).putExtra(AlarmClock.EXTRA_MINUTES, m)
-                .putExtra(AlarmClock.EXTRA_SKIP_UI, true))
-            return if (ok) "Alarm set for %d:%02d".format(h, m) else "No clock app took the alarm"
-        }
-        if ("remind" in ctx.request.lowercase(Locale.ROOT)) return "Reminders aren't supported yet — try an alarm with a time"
-        return "Tell me a time (\"6 am\") or a length (\"10 minutes\")"
+        val (h, m) = clock!!
+        val ok = ctx.launch(Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR, h)
+            .putExtra(AlarmClock.EXTRA_MINUTES, m).putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+            .apply { note?.let { n -> putExtra(AlarmClock.EXTRA_MESSAGE, n) } })
+        return if (ok) "Alarm set for %d:%02d%s".format(h, m, about) else "No clock app took the alarm"
     }
 
     private fun human(sec: Int) = listOf(sec / 3600 to "h", sec % 3600 / 60 to "min", sec % 60 to "s")

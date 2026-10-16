@@ -20,11 +20,16 @@ class Assistant(private val svc: AgentService, override val request: String) : S
 
     private val overlay = Overlay(svc)
     private val banner = overlay.banner()
-    private var engine: LayaEngine? = null
+    private var usedLaya = false
+    /** The service's shared, warm engine; loaded on first use (D-016). */
     private val laya: LayaEngine
-        get() = engine ?: run { banner.say("Waking up Laya…"); LayaEngine(svc).also { engine = it } }
+        get() {
+            if (!usedLaya && !svc.layaWarm) banner.say("Waking up Laya…")
+            usedLaya = true
+            return svc.laya()
+        }
 
-    private val skills: Map<String, Skill> = phoneSkills().associateBy { it.id }
+    private val skills: Map<String, Skill> = (phoneSkills() + mediaSkills() + peopleSkills()).associateBy { it.id }
 
     /** Handle the request; returns what to tell the owner. */
     fun run(): String = try {
@@ -38,7 +43,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
         "Something went wrong: ${e.message}"
     } finally {
         banner.remove()
-        engine?.close()
+        if (usedLaya) svc.layaIdle()
     }
 
     override fun appFor(skill: String): AppInfo? {
@@ -55,14 +60,31 @@ class Assistant(private val svc: AgentService, override val request: String) : S
     override fun open(app: AppInfo) = launch(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         .setClassName(app.pkg, app.activity))
 
+    /**
+     * What Friday did in this request, oldest first; Laya's `history` (it reads the last 3). Without
+     * "OPEN_APP X" Laya tries to open the app it is already in (replay 2026-10-17: OPEN_APP 0.80-0.95,
+     * vs the right next step at 0.96 once the history says so), and the policy then blocks it.
+     */
+    private val trail = ArrayList<String>()
+
     override fun launch(intent: Intent): Boolean = try {
         banner.hide()
         svc.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        launched(intent)
         true
     } catch (e: ActivityNotFoundException) {
         false
     } catch (e: SecurityException) {
         false
+    }
+
+    /** Record the app an intent opened the way Laya-Android's training data does: "OPEN_APP <label>". */
+    private fun launched(intent: Intent) {
+        @Suppress("DEPRECATION")
+        val pkg = intent.`package` ?: intent.component?.packageName
+            ?: svc.packageManager.resolveActivity(intent, 0)?.activityInfo?.packageName ?: return
+        val label = apps.installed.firstOrNull { it.pkg == pkg }?.label ?: return
+        historyEntry("OPEN_APP", null, label).let { if (trail.lastOrNull() != it) trail += it }
     }
 
     override fun foreground() = svc.foregroundPkg()
@@ -114,11 +136,11 @@ class Assistant(private val svc: AgentService, override val request: String) : S
         if (verdict == Safety.Verdict.ASK && confirm(describe(op, target, null), why, target) != "run") return false
         banner.hide()
         svc.act(op, target, null, cands)
+        trail += historyEntry(op, target?.toCandidate(), null)
         return true
     }
 
     override fun runLaya(subgoal: String, maxSteps: Int, typeText: String?): Outcome {
-        val history = ArrayList<String>()
         val blocked = HashSet<String>()  // targets skipped or refused, so Laya doesn't pick them again
         var misses = 0
         for (step in 1..maxSteps) {
@@ -132,7 +154,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
             }
             val cands = scr.candidates.filter { key(it) !in blocked }
             say("Thinking… (step $step)")
-            val s = laya.step(subgoal, history, cands)
+            val s = laya.step(subgoal, trail, cands)
             if (s.op == "DONE") return Outcome.DONE
             val target = s.target?.let { cands.getOrNull(it) }
             val payload: Any? = when (s.op) {
@@ -156,7 +178,6 @@ class Assistant(private val svc: AgentService, override val request: String) : S
             }
             if (skipped) {
                 if (target != null) blocked += key(target)
-                history += "SKIP ${s.op}"
                 if (++misses >= 3) return Outcome.STUCK
                 continue
             }
@@ -164,8 +185,8 @@ class Assistant(private val svc: AgentService, override val request: String) : S
             say(describe(s.op, target, payload))
             banner.hide()
             if (s.op == "OPEN_APP") open(payload as AppInfo) else svc.act(s.op, target, payload, scr.candidates)
-            history += historyEntry(s.op, target?.toCandidate(), (payload as? AppInfo)?.label ?: payload as? String)
-            if (history.size >= 3 && history.takeLast(3).toSet().size == 1) return Outcome.STUCK
+            trail += historyEntry(s.op, target?.toCandidate(), (payload as? AppInfo)?.label ?: payload as? String)
+            if (trail.size >= 3 && trail.takeLast(3).toSet().size == 1) return Outcome.STUCK
             Thread.sleep(300)
         }
         return Outcome.MAX_STEPS
