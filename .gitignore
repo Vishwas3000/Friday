@@ -5,3 +5,10 @@ __pycache__/
 # screen dumps/screenshots from the phone contain personal data: never commit
 captures/
 *.xml.dump
+# Android build output
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/local.properties
+*.apk

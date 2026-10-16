@@ -20,6 +20,9 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 | D-013 | 2026-10-16 | Port laya-android's candidate rules instead of vendoring the files | Claude | Proposed |
 | D-014 | 2026-10-16 | Don't declare `isAccessibilityTool`; keep the platform's sensitive-view wall | Claude | Proposed |
 | D-015 | 2026-10-16 | Skip uiautomator2 for the bench; build the app's own tree export instead | Claude | Proposed |
+| D-016 | 2026-10-16 | Strict on-device resource budget for Phase 2 (Laya ≤0.8 GB, one pass at a time, load on demand) | Claude | Proposed |
+| D-017 | 2026-10-16 | App name = Friday (package stays dev.layatest.agent) | user | Decided |
+| D-018 | 2026-10-16 | V1 = Phase 1 (app = eyes+hands, Laya on Mac, approve each step); on-device model + monitoring deferred | Claude | Proposed |
 
 ---
 
@@ -72,7 +75,7 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Why:** The user asked to "pack all these things into a native app" with everything local. ONNX Runtime CPU is the only runtime proven on this graph and available on the Pixel 8. Its TPU is closed to third parties and NNAPI is deprecated.
 - **Rejected:** LiteRT GPU first (fixed shapes, fp16 LayerNorm risk; kept as Plan B); NNAPI/TPU; ExecuTorch; Gemini Nano.
 - **Open risk:** on-phone latency is estimated at 1.3–6.5 s per step [UNCERTAIN]. Measure it before committing; the fallback is Laya on the Mac over USB/Wi-Fi.
-- **Who / status:** Claude · **Pending** the user's agreement on the phasing
+- **Who / status:** Claude · Agreed: staged, app first (user chose 2026-10-16). Phase 1 validated on the Pixel 8 — see research/05.
 
 ### D-009 — Text and app names: rules + Laya choice first
 - **Decision:**
@@ -130,4 +133,21 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Decision:** Don't add openatx/uiautomator2 (agent 02's POC suggestion). Make the app's AccessibilityService the fast tree source, reachable from the Mac over `adb forward` during development.
 - **Why:** uiautomator2 would cut the ~2.5 s dump, but the app's service has to be built anyway. The service gives the training-format forest (all windows, `editable`, important-views-only) that u2 cannot, and doing both is duplicate work.
 - **Rejected:** uiautomator2, which also installs two helper APKs; DroidRun Portal (HEAD is AGPL-3.0 and asks for SMS/contacts permissions).
+- **Who / status:** Claude · Proposed
+
+### D-016 — Strict on-device resource budget (Phase 2)
+- **Decision:** When Laya moves onto the phone: keep it ≤ ~0.8 GB (int8 linears + mmap/quantized embedding table), run one forward pass at a time (operation first, target only for CLICK/LONG_PRESS, ≤1,536 tokens), load the model on demand and free it on `onTrimMemory`/idle, never keep a text LLM resident with it, and gate on `MemAvailable`.
+- **Why:** the user asked to manage memory/resources carefully (2026-10-16); fp32 is 1.28 GB and the phone had ~1.1 GB free at one point. Details in research/04 and docs/app.md.
+- **Rejected:** shipping the fp32 graph; keeping the model resident; dynamic int8 without a ≥99% parity gate (it agrees with fp32 on only 83%).
+- **Who / status:** Claude · Proposed
+
+### D-017 — App name = Friday
+- **Decision:** Display name "Friday" (matches the GitHub repo). Package id stays `dev.layatest.agent` to avoid re-enabling the service and moving source dirs.
+- **Why:** the user named it on 2026-10-16.
+- **Who / status:** user · Decided
+
+### D-018 — V1 scope = Phase 1
+- **Decision:** V1 ships Phase 1: the Friday app is eyes+hands, Laya decides on the Mac over USB, the owner approves every step on the phone, everything local. On-device inference (Phase 2), notification/SMS/call monitoring, and smarter decisioning (short-listing, completion check, calibration) are **not** in V1.
+- **Why:** the user chose "staged, app first" and "ask before every step", and deferred monitoring.
+- **Rejected:** bundling on-device inference into V1 (its latency/accuracy are unmeasured) and monitoring (deferred by the user).
 - **Who / status:** Claude · Proposed

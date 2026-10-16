@@ -65,3 +65,11 @@ _Last updated: 2026-10-16 · Trust tags: [primary] read at source · [secondary]
 ## Dead ends
 - `uiautomator dump --compressed` for speed: no gain (2.53–2.57 s vs 2.57 s) [measured].
 - Homebrew Python 3.15: `xml.etree` is broken (pyexpat symbol missing on macOS 26.2), so the harness can't parse dumps [measured].
+
+## App-bridge validation (Friday, Phase 1) [measured 2026-10-16]
+- The Friday AccessibilityService reads the full window forest in **55–63 ms** (incl. a 300 ms quiet-settle wait), vs ~2,500 ms for `uiautomator dump` — about **40× faster**, and it carries the real `editable` flag the dump lacks.
+- Full loop through the app bridge: "Open the Clock app and go to the Timer tab" → OPEN_APP Clock (0.99) → CLICK into Timers → DONE, in 3 steps. Step-1 observe 58 ms, decide 913 ms (31 launcher candidates, 1,225 tokens).
+- OPEN_APP uses real PackageManager labels (207 launchable apps), not the adb alias table.
+- The approval overlay works end-to-end: it renders the step text, outlines the target, and Run/Skip/Stop round-trips (tapped Run → driver received "run"; overlay cleaned up, 0 leftover windows).
+- Service enabled over adb with **no "restricted settings" prompt** on Android 16, confirming research/02 §4.1 [measured].
+- **Side-effect lesson:** the goal "go to the Timer tab" made the model tap "1m", which *started* a 1-minute timer that later rang. Keep test goals read-only (view/open), and this is a concrete case for the completion check and for per-step approval.
