@@ -3,6 +3,7 @@ package dev.layatest.agent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.os.Looper
 import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.View
@@ -13,6 +14,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import org.json.JSONArray
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /** Shows the proposed step on the phone, outlines its target, and waits for the owner to tap Run, Skip or Stop. */
@@ -58,6 +60,100 @@ class Overlay(private val svc: AgentService) {
         // keep the panel away from the element it is asking about
         add(panel, params(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT,
             if (targetBelowMiddle) Gravity.TOP else Gravity.BOTTOM, 0, 160, touchable = true), views)
+    }
+
+    /** The owner picks one option (or Cancel). Blocks the calling thread; null if cancelled or ignored for 5 min. */
+    fun choose(title: String, options: List<String>): Int? {
+        val picked = ArrayBlockingQueue<Int>(1)
+        val views = mutableListOf<View>()
+        svc.main.post {
+            val ctx = theme()
+            val panel = card(ctx).apply {
+                addView(TextView(ctx).apply { text = title; setTextColor(Color.WHITE); textSize = 16f })
+                options.forEachIndexed { i, o ->
+                    addView(Button(ctx).apply { text = o; isAllCaps = false; setOnClickListener { picked.offer(i) } })
+                }
+                addView(Button(ctx).apply { text = "Cancel"; setOnClickListener { picked.offer(-1) } })
+            }
+            add(panel, params(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER, 0, 0, touchable = true), views)
+        }
+        val i = picked.poll(5, TimeUnit.MINUTES) ?: -1
+        svc.main.post { views.forEach { runCatching { wm.removeView(it) } } }
+        Thread.sleep(250)
+        return i.takeIf { it >= 0 }
+    }
+
+    /** A result card until the owner taps OK (or a minute passes). Doesn't block. */
+    fun answer(text: String) = svc.main.post {
+        val ctx = theme()
+        lateinit var panel: View
+        panel = card(ctx).apply {
+            addView(TextView(ctx).apply { this.text = text; setTextColor(Color.WHITE); textSize = 18f })
+            addView(Button(ctx).apply { this.text = "OK"; setOnClickListener { runCatching { wm.removeView(panel) } } })
+        }
+        wm.addView(panel, params(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER, 0, 0, touchable = true))
+        svc.main.postDelayed({ runCatching { wm.removeView(panel) } }, 60_000)
+    }
+
+    fun banner() = Banner()
+
+    /**
+     * A small status pill with Stop while Friday works. [hide] removes it and waits until it's gone,
+     * before every screen read and tap: some apps ignore touches while another window covers them.
+     */
+    inner class Banner {
+        @Volatile var stopped = false
+            private set
+        @Volatile private var msg = ""
+        private var view: View? = null
+        private var label: TextView? = null
+
+        fun say(text: String) {
+            msg = text
+            svc.main.post { ensure(); label?.text = text }
+        }
+
+        fun stop() { stopped = true }
+
+        fun hide() {
+            onMain { view?.let { runCatching { wm.removeView(it) } }; view = null }
+            Thread.sleep(120)
+        }
+
+        fun remove() = onMain { view?.let { runCatching { wm.removeView(it) } }; view = null }
+
+        private fun ensure() {
+            if (view != null) return
+            val ctx = theme()
+            val pill = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(36, 6, 6, 6)
+                background = GradientDrawable().apply { setColor(0xEE202124.toInt()); cornerRadius = 60f }
+                val l = TextView(ctx).apply { text = msg; setTextColor(Color.WHITE); textSize = 14f }
+                label = l
+                addView(l)
+                addView(Button(ctx).apply { text = "Stop"; setOnClickListener { stopped = true; label?.text = "Stopping…" } })
+            }
+            view = pill
+            wm.addView(pill, params(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.CENTER_HORIZONTAL, 0, 110, touchable = true))
+        }
+    }
+
+    private fun onMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) return block()
+        val done = CountDownLatch(1)
+        svc.main.post { try { block() } finally { done.countDown() } }
+        done.await(2, TimeUnit.SECONDS)
+    }
+
+    private fun theme() = ContextThemeWrapper(svc, android.R.style.Theme_DeviceDefault)
+
+    private fun card(ctx: android.content.Context) = LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(40, 32, 40, 24)
+        background = GradientDrawable().apply { setColor(0xEE202124.toInt()); cornerRadius = 36f }
     }
 
     private fun add(v: View, p: LayoutParams, views: MutableList<View>) {

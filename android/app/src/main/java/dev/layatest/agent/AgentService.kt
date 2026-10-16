@@ -13,10 +13,6 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
-import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.OrtEnvironment
-import ai.onnxruntime.OrtSession
-import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
@@ -60,7 +56,8 @@ class AgentService : AccessibilityService() {
         "global" -> acted(performGlobalAction(GLOBALS[c.getString("action")] ?: error("unknown global action")))
         "bench" -> Bench.run(this, c) // Phase-2 gate: on-device ONNX latency/RAM
         "decide_test" -> Decide.test(this, c) // Phase-2c: full on-device tokenize+build+ORT+decode on the fixture
-        "selfcheck" -> JSONObject().put("result", candidatesSelfCheck()) // Phase-2d: candidate port vs the Python cases
+        "selfcheck" -> JSONObject().put("candidates", candidatesSelfCheck()).put("slots", slotsSelfCheck())
+        "route" -> routeTest(c.getString("text"))
         "run" -> { runGoal(c.getString("goal")); JSONObject().put("started", true) }
         else -> error("unknown cmd: $cmd")
     }
@@ -156,106 +153,47 @@ class AgentService : AccessibilityService() {
         return true
     }
 
-    // ---- Phase 2d: the standalone on-device decide loop (type a goal in the app, no Mac) ----
+    // ---- Friday the assistant: a typed request runs through Assistant (route -> skill -> answer) ----
     @Volatile private var running = false
 
-    /** Start a run for [goal] on a background thread (one at a time). Called from MainActivity / the "run" cmd. */
+    /** Handle one typed request on a background thread (one at a time) and show the answer as a card. */
     fun runGoal(goal: String) {
         if (goal.isBlank() || running) return
         running = true
         Thread({
-            try { loop(goal.trim()) } catch (e: Throwable) { toast("error: ${e.message}") } finally { running = false }
-        }, "laya-run").start()
-    }
-
-    private fun loop(goal: String) {
-        val model = File(filesDir, "laya-android.fp16.onnx")
-        val tokFile = File(filesDir, "tokenizer.json")
-        if (!model.exists() || !tokFile.exists()) { toast("push the model + tokenizer first"); return }
-        val env = OrtEnvironment.getEnvironment()
-        val opts = OrtSession.SessionOptions().apply {
-            setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-            setIntraOpNumThreads(4)
-            setCPUArenaAllocator(false)      // D-023: the arena, not the weights, is the RAM driver
-            setMemoryPatternOptimization(false)
-        }
-        toast("loading Laya…")
-        val session = env.createSession(model.absolutePath, opts)
-        val tok = Tokenizer(tokFile)
-        val apps = appsList()
-        val history = ArrayList<String>()
-        val typed = ArrayList<String>()
-        val blocked = HashSet<String>()  // skipped targets, so the loop doesn't re-pick them
-        var skips = 0
-        try {
-            for (step in 1..MAX_STEPS) {
-                settle(300, 3000)
-                val state = state()
-                val screen = state.getJSONArray("screen")
-                val cands = buildCandidates(state, screen.getInt(0), screen.getInt(1))
-                    .filter { key(it) !in blocked }
-                val built = buildInputs(tok::encode, goal, history, cands.map { it.toCandidate() })
-                val tensors = linkedMapOf(
-                    "input_ids" to OnnxTensor.createTensor(env, built.ort.inputIds),
-                    "attention_mask" to OnnxTensor.createTensor(env, built.ort.attentionMask),
-                    "marker_pos" to OnnxTensor.createTensor(env, built.ort.markerPos),
-                    "marker_mask" to OnnxTensor.createTensor(env, built.ort.markerMask),
-                    "qtype" to OnnxTensor.createTensor(env, built.ort.qtype),
-                )
-                val result = session.run(tensors)
-                @Suppress("UNCHECKED_CAST") val logits = result.get(0).value as Array<FloatArray>
-                @Suppress("UNCHECKED_CAST") val act = result.get(1).value as Array<FloatArray>
-                result.close()
-                tensors.values.forEach { it.close() }
-
-                val ans = decode(logits, act, built)
-                val op = ans.getValue("operation").choiceKey
-                val target = ans["target"]?.let { cands.getOrNull(it.choiceIndex) }
-                val payload: Any? = when (op) {
-                    "OPEN_APP" -> pickApp(goal, apps)
-                    "INPUT_TEXT" -> pickText(goal, typed)
-                    else -> null
-                }
-                if (op == "DONE") { toast("done ✓"); break }
-                if ((op == "OPEN_APP" || op == "INPUT_TEXT") && payload == null) {
-                    toast("$op needs an app name / quoted text in the goal"); break
-                }
-
-                val shown = when {
-                    (op == "CLICK" || op == "LONG_PRESS") && target != null -> target.label.ifEmpty { target.className }
-                    op == "OPEN_APP" -> (payload as Pair<*, *>).first.toString()
-                    op == "INPUT_TEXT" -> "\"$payload\""
-                    else -> ""
-                }
-                val boundsJson = if ((op == "CLICK" || op == "LONG_PRESS") && target != null)
-                    JSONArray(target.bounds.toList()) else null
-                when (Overlay(this).ask("Step $step: $op $shown\nGoal: $goal", boundsJson)) {
-                    "stop" -> break
-                    "skip" -> {
-                        skips++
-                        if (target != null) blocked.add(key(target))
-                        if (skips >= 3) { toast("stopped: 3 skips"); break }
-                        continue
-                    }
-                }
-                skips = 0
-                act(op, target, payload, cands)
-                if (op == "INPUT_TEXT") typed.add(payload as String)
-                history.add(historyEntry(op, target?.toCandidate(),
-                    if (op == "OPEN_APP") (payload as Pair<*, *>).first.toString() else payload as? String))
-                if (history.size >= 3 && history.takeLast(3).toSet().size == 1) { toast("stopped: looping"); break }
-                Thread.sleep(300)
+            try {
+                Overlay(this).answer(Assistant(this, goal.trim()).run())
+            } catch (e: Throwable) {
+                toast("error: ${e.message}")
+            } finally {
+                running = false
             }
-        } finally {
-            tok.close()
-            session.close()
-        }
+        }, "friday-request").start()
     }
 
-    private fun key(c: ScreenCandidate) = "${c.label}@${c.bounds.joinToString(",")}"
+    /** The screen once it settles: the forest that Laya and the extractors read. */
+    internal fun readState(): JSONObject {
+        settle(300, 3000)
+        return state()
+    }
+
+    internal fun foregroundPkg(): String? = rootInActiveWindow?.packageName?.toString()
+
+    /** Bridge test: how a request routes on the phone (rule hit, or Laya's pick + confidence); compare research/09. */
+    private fun routeTest(text: String): JSONObject {
+        val out = JSONObject().put("rule", ruleSkill(text) ?: JSONObject.NULL)
+        LayaEngine(this).use { laya ->
+            val t = SystemClock.elapsedRealtime()
+            val p = laya.choose(text, "What does the user want Friday to do?", SKILLS.toList())
+            out.put("laya", p.key).put("confidence", p.confidence)
+                .put("session_ms", laya.loadMs.first).put("tokenizer_ms", laya.loadMs.second)
+                .put("choose_ms", SystemClock.elapsedRealtime() - t)
+        }
+        return out
+    }
 
     /** Perform one decided op, reusing the action primitives; geometry per scripts/live_adb.py act(). */
-    private fun act(op: String, target: ScreenCandidate?, payload: Any?, cands: List<ScreenCandidate>) {
+    internal fun act(op: String, target: ScreenCandidate?, payload: Any?, cands: List<ScreenCandidate>) {
         when {
             op == "CLICK" || op == "LONG_PRESS" -> target?.let {
                 val cx = (it.bounds[0] + it.bounds[2]) / 2.0
@@ -285,11 +223,6 @@ class AgentService : AccessibilityService() {
             op == "HOME" -> performGlobalAction(GLOBAL_ACTION_HOME)
             op == "WAIT" -> Thread.sleep(2000)
         }
-    }
-
-    private fun appsList(): List<Pair<String, String>> {
-        val a = apps()
-        return (0 until a.length()).map { a.getJSONObject(it).let { o -> o.getString("label") to o.getString("package") } }
     }
 
     private fun screenW() = getSystemService(WindowManager::class.java).maximumWindowMetrics.bounds.width()

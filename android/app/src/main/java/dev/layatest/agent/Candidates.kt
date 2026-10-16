@@ -112,6 +112,15 @@ fun buildCandidates(state: JSONObject, screenW: Int, screenH: Int): List<ScreenC
             it.checked, it.selected, it.enabled, it.box) }
 }
 
+/** A visible text and its box: what the READ step's extractors parse (amounts, dates, names). */
+class ScreenText(val text: String, val bounds: IntArray)
+
+/** Every visible, non-IME node that has its own text, top-to-bottom then left-to-right. */
+fun screenTexts(state: JSONObject): List<ScreenText> = flatten(state)
+    .filter { !it.ime && it.j.getBoolean("visible") && ownText(it.j).isNotEmpty() }
+    .map { n -> val b = n.j.getJSONArray("bounds"); ScreenText(ownText(n.j), IntArray(4) { b.getInt(it) }) }
+    .sortedWith(compareBy({ it.bounds[1] }, { it.bounds[0] }))
+
 /** Asserts the three option_label cases from scripts/laya_android.py __main__ (via a synthetic forest). */
 fun candidatesSelfCheck(): String {
     fun node(cls: String, box: IntArray, kids: List<JSONObject> = emptyList(), text: String = "",

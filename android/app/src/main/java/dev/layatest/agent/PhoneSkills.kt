@@ -1,0 +1,147 @@
+package dev.layatest.agent
+
+import android.app.AlarmManager
+import android.content.Context
+import android.content.Intent
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
+import android.net.Uri
+import android.os.BatteryManager
+import android.os.Environment
+import android.os.StatFs
+import android.provider.AlarmClock
+import android.provider.Settings
+import java.text.DateFormat
+import java.util.Date
+import java.util.Locale
+
+/**
+ * Phone & time skills, in the D-028 order: answer directly > intent/API > the narrowest settings
+ * screen + Laya. Mechanisms from research/10.
+ */
+fun phoneSkills(): List<Skill> = listOf(DeviceStatus, AlarmTimer, DeviceSetting)
+
+/** "what's my battery level", "how much storage is left", "when's my next alarm" -- answered, no UI. */
+object DeviceStatus : Skill {
+    override val id = "device_status"
+
+    override fun run(ctx: SkillContext): String {
+        val r = ctx.request.lowercase(Locale.ROOT)
+        val parts = ArrayList<String>()
+        if (Regex("batter|charg|power").containsMatchIn(r)) parts += battery(ctx.android)
+        if (Regex("storage|space|memory").containsMatchIn(r)) parts += storage()
+        if (Regex("alarm").containsMatchIn(r)) parts += nextAlarm(ctx.android)
+        if (parts.isEmpty()) parts += listOf(battery(ctx.android), storage())
+        return parts.joinToString("\n")
+    }
+
+    private fun battery(c: Context): String {
+        val bm = c.getSystemService(BatteryManager::class.java)
+        return "Battery ${bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)}%" + if (bm.isCharging) ", charging" else ""
+    }
+
+    private fun storage(): String {
+        val s = StatFs(Environment.getDataDirectory().path)
+        return "Storage: %.1f GB free of %.0f GB".format(s.availableBytes / 1e9, s.totalBytes / 1e9)
+    }
+
+    private fun nextAlarm(c: Context): String {
+        val next = c.getSystemService(AlarmManager::class.java).nextAlarmClock ?: return "No alarm set"
+        return "Next alarm: " + DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(next.triggerTime))
+    }
+}
+
+/** "set an alarm for 6 am", "wake me up at 7", "start a 10 minute timer" -- AlarmClock intents with SKIP_UI. */
+object AlarmTimer : Skill {
+    override val id = "alarm_timer"
+
+    override fun run(ctx: SkillContext): String {
+        val s = ctx.slots
+        s.durationSec?.let { sec ->
+            // Int extras only: String extras are silently ignored (research/10)
+            val ok = ctx.launch(Intent(AlarmClock.ACTION_SET_TIMER)
+                .putExtra(AlarmClock.EXTRA_LENGTH, sec).putExtra(AlarmClock.EXTRA_SKIP_UI, true))
+            return if (ok) "Timer set for ${human(sec)}" else "No clock app took the timer"
+        }
+        s.clock?.let { (h, m) ->
+            val ok = ctx.launch(Intent(AlarmClock.ACTION_SET_ALARM)
+                .putExtra(AlarmClock.EXTRA_HOUR, h).putExtra(AlarmClock.EXTRA_MINUTES, m)
+                .putExtra(AlarmClock.EXTRA_SKIP_UI, true))
+            return if (ok) "Alarm set for %d:%02d".format(h, m) else "No clock app took the alarm"
+        }
+        if ("remind" in ctx.request.lowercase(Locale.ROOT)) return "Reminders aren't supported yet — try an alarm with a time"
+        return "Tell me a time (\"6 am\") or a length (\"10 minutes\")"
+    }
+
+    private fun human(sec: Int) = listOf(sec / 3600 to "h", sec % 3600 / 60 to "min", sec % 60 to "s")
+        .filter { it.first > 0 }.joinToString(" ") { "${it.first} ${it.second}" }
+}
+
+/** Wi-Fi, flashlight, brightness directly; everything else via the narrowest settings screen + Laya. */
+object DeviceSetting : Skill {
+    override val id = "device_setting"
+
+    override fun run(ctx: SkillContext): String {
+        val r = ctx.request.lowercase(Locale.ROOT)
+        val off = Regex("\\b(off|disable|stop|deactivate)\\b").containsMatchIn(r)
+        return when {
+            Regex("torch|flash ?light").containsMatchIn(r) -> torch(ctx, !off)
+            Regex("wi-?fi").containsMatchIn(r) -> wifi(ctx, off)
+            Regex("bright|dim\\b|darker|lighter").containsMatchIn(r) && !Regex("dark (mode|theme)").containsMatchIn(r) ->
+                brightness(ctx, r)
+            else -> viaSettings(ctx, r)
+        }
+    }
+
+    private fun torch(ctx: SkillContext, on: Boolean): String {
+        val cm = ctx.android.getSystemService(CameraManager::class.java)
+        val id = cm.cameraIdList.firstOrNull { cm.getCameraCharacteristics(it).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true }
+            ?: return "This phone has no flashlight"
+        cm.setTorchMode(id, on)
+        return "Flashlight ${if (on) "on" else "off"}"
+    }
+
+    /** The system's own one-tap Allow dialog; the owner taps it (Friday never accepts system dialogs). */
+    private fun wifi(ctx: SkillContext, off: Boolean): String {
+        val action = if (off) "android.net.wifi.action.REQUEST_DISABLE" else "android.net.wifi.action.REQUEST_ENABLE"
+        return if (ctx.launch(Intent(action))) "Tap Allow to turn Wi-Fi ${if (off) "off" else "on"}"
+        else viaSettings(ctx, ctx.request.lowercase(Locale.ROOT))
+    }
+
+    private fun brightness(ctx: SkillContext, r: String): String {
+        val c = ctx.android
+        if (!Settings.System.canWrite(c)) {
+            ctx.launch(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${c.packageName}")))
+            return "Allow Friday to modify system settings (one time), then ask again"
+        }
+        val cur = Settings.System.getInt(c.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128)
+        val down = Regex("dim|darker|lower|decrease|reduce|down").containsMatchIn(r)
+        // shortcut: linear 0-255 from a percent; the slider is perceptual (50% ~ 22), so "50%" looks brighter than the slider's 50%
+        val target = Regex("(\\d{1,3}) ?%").find(r)?.let { it.groupValues[1].toInt().coerceIn(1, 100) * 255 / 100 }
+            ?: if (down) maxOf(1, cur / 2) else minOf(255, cur * 2 + 16)
+        Settings.System.putInt(c.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+        Settings.System.putInt(c.contentResolver, Settings.System.SCREEN_BRIGHTNESS, target)
+        return "Brightness ${if (target < cur) "lowered" else "raised"}"
+    }
+
+    /** No API for it (dark mode, Bluetooth, data, DND...): open the narrowest screen, Laya flips the switch. */
+    private fun viaSettings(ctx: SkillContext, r: String): String {
+        val actions = when {
+            Regex("dark (mode|theme)|night mode").containsMatchIn(r) -> listOf("android.settings.DARK_THEME_SETTINGS", Settings.ACTION_DISPLAY_SETTINGS)
+            "bluetooth" in r -> listOf(Settings.ACTION_BLUETOOTH_SETTINGS)
+            Regex("wi-?fi").containsMatchIn(r) -> listOf(Settings.ACTION_WIFI_SETTINGS)
+            Regex("mobile data|\\bdata\\b|internet").containsMatchIn(r) -> listOf(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)
+            Regex("airplane|flight mode").containsMatchIn(r) -> listOf(Settings.ACTION_AIRPLANE_MODE_SETTINGS)
+            Regex("location|gps").containsMatchIn(r) -> listOf(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            Regex("do not disturb|\\bdnd\\b").containsMatchIn(r) -> listOf("android.settings.ZEN_MODE_SETTINGS")
+            else -> emptyList()
+        } + Settings.ACTION_SETTINGS
+        actions.firstOrNull { ctx.launch(Intent(it)) } ?: return "I couldn't open Settings"
+        ctx.waitUntil(4000) { ctx.foreground() == "com.android.settings" }
+        return when (ctx.runLaya(ctx.request, maxSteps = 6)) {
+            Outcome.DONE -> "Done"
+            Outcome.STOPPED -> "Stopped"
+            else -> "I opened the right screen — please flip the switch yourself"
+        }
+    }
+}

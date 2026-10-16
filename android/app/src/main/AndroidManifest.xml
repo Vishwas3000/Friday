@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Skills (research/10): alarm/timer intents, the Wi-Fi Allow dialog, brightness (owner grants it once). -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+
     <!-- Package visibility: lets the agent list launchable apps by label for OPEN_APP. -->
     <queries>
         <intent>

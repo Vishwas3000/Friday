@@ -88,8 +88,11 @@ fun historyEntry(op: String, cand: Candidate? = null, payload: String? = null): 
     else -> op
 }
 
-/** A `choice` question: its id, rendered option strings, and the choice keys those options map to. */
-class Question(val id: String, val qtype: Int, val keys: List<String>, val options: List<String>)
+/** A `choice` question: its id, rendered option strings, the choice keys those options map to, and its instructions. */
+class Question(
+    val id: String, val qtype: Int, val keys: List<String>, val options: List<String>,
+    val instructions: String = Q_INSTRUCTIONS.getValue(id),
+)
 
 private class Item(val ids: LongArray, val markers: IntArray, val qtype: Int)
 
@@ -176,9 +179,26 @@ fun buildInputs(
     return BuiltInputs(collate(items), questions, IntArray(items.size) { items[it].markers.size })
 }
 
+/** json.dumps(dict, ensure_ascii=False) for a flat string->string dict, e.g. {"goal": "play jazz music"}. */
+fun serializeFlat(pairs: List<Pair<String, String>>): String =
+    pairs.joinToString(", ", "{", "}") { (k, v) -> "${jsonStr(k)}: ${jsonStr(v)}" }
+
+/** One generic choice question about [stateText] (routing, slot spans, "did you mean") -- same build as decide(). */
+fun buildChoice(
+    encode: (String, Boolean) -> LongArray,
+    stateText: String,
+    q: Question,
+    maxLen: Int = 3072,
+    headMaxLen: Int = 1536,
+): BuiltInputs {
+    val item = buildSequence(encode, encode(stateText.replace(MASK_TOKEN, " "), false), q, maxLen, headMaxLen)
+    check(item.markers.size == q.options.size) { "question '${q.id}': only ${item.markers.size} of ${q.options.size} options fit" }
+    return BuiltInputs(collate(listOf(item)), listOf(q), intArrayOf(item.markers.size))
+}
+
 /** Port of build_head: [CLS] <type> ins [SEP] ([MASK] opt)* [SEP]; returns ids and each [MASK]'s absolute index. */
 private fun buildHead(encode: (String, Boolean) -> LongArray, q: Question, headMaxLen: Int): Pair<LongArray, IntArray> {
-    val ins = Q_INSTRUCTIONS.getValue(q.id).replace(MASK_TOKEN, " ")
+    val ins = q.instructions.replace(MASK_TOKEN, " ")
     val headTokens = encode("choice question: $ins", false)  // decide() only emits choice questions
     val optIds = q.options.map { opt ->
         // Cap each option at 48 tokens (truncation=True, max_length=48): first-48 of the encoding.
@@ -301,7 +321,7 @@ private fun softmax2(a: FloatArray): Double {
 /** Python round(x, 4): round half to even. */
 private fun round4(x: Double): Double = Math.rint(x * 1e4) / 1e4
 
-private val Q_INSTRUCTIONS = mapOf("operation" to Q_OP, "target" to Q_TARGET)
+internal val Q_INSTRUCTIONS = mapOf("operation" to Q_OP, "target" to Q_TARGET)
 
 // --------------------------------------------------------------------------------------------
 // Assert-based self-check (mirrors the one at the bottom of scripts/laya_android.py). Expected
