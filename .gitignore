@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+# screen dumps/screenshots from the phone contain personal data: never commit
+captures/
+*.xml.dump
