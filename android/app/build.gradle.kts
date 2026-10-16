@@ -12,10 +12,16 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        ndk { abiFilters += "arm64-v8a" } // Pixel 8 only; keeps the ORT native libs (and APK) lean
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
+
+dependencies {
+    // Phase 2: run Laya's exported ONNX on-device. Full build (not -mobile) for the ModernBERT op set.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
 }

@@ -38,8 +38,8 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 5. **One native app with Laya inside is possible but slower** [04].
    - **Runtime:** ONNX Runtime Android on CPU. Laya ships the ONNX exporter and a Java SDK with a parity-tested Gemma-2 tokenizer [primary].
    - **No accelerator:** the Tensor G3 AI chip is closed to third-party apps, and NNAPI is deprecated [primary].
-   - **Speed:** an estimated **1.3–2.7 s per step (int8 linears) or 3–6.5 s (fp32)** on normal screens [UNCERTAIN until measured].
-   - **Quantization:** Laya's quick dynamic int8 changes 17% of decisions [primary], so precision needs a parity gate.
+   - **Speed [measured, 06]:** fp16 **~2.4 s/step** at **688 MB PSS** (ORT CPU arena disabled, 4 threads), decisions exact vs the Mac. The RAM driver is ORT's arena, not the weights — gate passed.
+   - **Quantization [measured, 06]:** dynamic int8 is 3.5× faster (677 ms) and 389 MB but **breaks the operation decision** (our measure + Laya's own 17% figure) — needs the op head kept fp32.
 6. **Text and app names need a "System 2"** [01, 03, 04].
    - **First choice:** rules plus Laya choosing among options. Use quoted spans in the goal for text, and installed-app labels for OPEN_APP, run as a short-list tournament.
    - **Fallback:** a small local LLM, loaded only on those steps. On the Mac: Qwen3.5-4B. On the phone: Qwen3.5-0.8B or FunctionGemma 270M.
@@ -58,7 +58,7 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 2. **Stopping and loops.**
    - DONE recall is 0.55–0.75 [primary]. Ours was weak too [measured].
    - **Mitigations:** a separate completion check, plus the loop guard (already in the harness).
-3. **On-phone speed.** Seconds per step on the CPU [UNCERTAIN]. Measure it before committing; the fallback is Laya on the Mac over USB or Wi-Fi.
+3. **On-phone speed [measured, 06]:** ~2.4 s/step in fp16 (gate passed). Thermal throttling inflates sustained runs (2.4 → 8 s after ~8 back-to-back), so don't loop inference; int8 is 3.5× faster but needs accuracy recovery. Fallback stays Laya on the Mac.
 4. **Accessibility holes:** unlabelled icons appear as `- (FrameLayout)`, and the model has no vision [measured/primary].
 5. **Safety.**
    - Never auto-accept permission pop-ups (arXiv 2608.04755).
@@ -73,6 +73,8 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 | [03-prior-art.md](03-prior-art.md) | Who has tried phone agents (local and cloud), benchmarks, lessons |
 | [04-on-device-inference.md](04-on-device-inference.md) | Running Laya on the Pixel 8 (ONNX Runtime), quantization, System-2 LLMs, RAM |
 | [05-live-tests.md](05-live-tests.md) | Our measurements: model speed, adb costs, live episodes on the Pixel 8 |
+| [06-onnx-export.md](06-onnx-export.md) | ONNX export (bit-exact) + fp16/int8 + the on-device Pixel 8 gate — latency/RAM measured |
+| [07-ondevice-tokenizer.md](07-ondevice-tokenizer.md) | Tokenizing mmBERT on-device via DJL HuggingFace `tokenizers` (load tokenizer.json) |
 
 ## Quick reference: measured on our hardware (2026-10-16)
 | What | Number |

@@ -53,6 +53,7 @@ class AgentService : AccessibilityService() {
         "text" -> acted(setText(c.getString("text")))
         "open_app" -> acted(openApp(c.getString("package")))
         "global" -> acted(performGlobalAction(GLOBALS[c.getString("action")] ?: error("unknown global action")))
+        "bench" -> Bench.run(this, c) // Phase-2 gate: on-device ONNX latency/RAM
         else -> error("unknown cmd: $cmd")
     }
 

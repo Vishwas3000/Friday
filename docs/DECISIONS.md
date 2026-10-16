@@ -151,3 +151,40 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Why:** the user chose "staged, app first" and "ask before every step", and deferred monitoring.
 - **Rejected:** bundling on-device inference into V1 (its latency/accuracy are unmeasured) and monitoring (deferred by the user).
 - **Who / status:** Claude · Proposed
+
+### D-019 — Export to ONNX via the legacy TorchScript exporter, fastpath off
+- **Decision:** `scripts/export_onnx.py` exports `agent.model` with `torch.onnx.export(..., opset=17, dynamo=False)` after `torch.backends.mha.set_fastpath_enabled(False)`. Output `models/laya-android.onnx` (git-ignored, 1288 MB fp32).
+- **Why:** the head's `nn.TransformerEncoderLayer` takes a fused `aten::_transformer_encoder_layer_fwd` kernel in eval that the exporter can't lower and that bypasses laya's export-built `_DynamicMultiheadAttention`; disabling the fastpath forces the modular (exportable) path, same maths. Parity is **bit-exact** vs the torch Agent and laya's `ONNXAgent` (`max|Δprob|=0.00e+00`), so the fp32 graph is a trustworthy quantization baseline [measured, research/06].
+- **Rejected:** the new `torch.export`/dynamo ONNX path (needs `dynamic_shapes`, more churn) — the legacy path already gives bit-exact parity.
+- **Who / status:** Claude · Proposed
+
+### D-020 — On-device model = fp16, not int8 (first candidate)
+- **Decision:** ship Laya on-device as **fp16** (`scripts/quantize_onnx.py` → `models/laya-android.fp16.onnx`, 645 MB, ≤ 0.8 GB budget). int8 stays a later lever, not the default.
+- **Why:** the 256k embedding is 61% of weights and ORT dynamic-int8 leaves it fp32 (~0.9 GB, over budget) *and* quantizes activations (→ ~83% parity, D-016). fp16 halves every weight uniformly with near-exact parity (operation/target top-1 4/4 on a 3/8/14/25-candidate smoke set, `max|Δprob|=5.3e-3`), and the Pixel 8 (ARMv9) has native fp16 [measured, research/06].
+- **Gotcha:** `onnxconverter_common` fp16 breaks ModernBERT's deliberate fp32 islands (RoPE/Cast/Softmax); the script blocks those nodes. Parity so far is a smoke test, not a full eval — replay real `captures/` before trusting it on-device.
+- **Rejected:** fp32 on-device (1.28 GB, OOM risk); dynamic int8 as the default (over budget + 83% parity).
+- **Revisit:** if on-device latency/RAM needs it, go int8-of-linears + mmap-embedding.
+- **Who / status:** Claude · Proposed
+
+### D-021 — Input is typed now; voice (STT + speaker verification) is deferred; no LLM near-term
+- **Decision:** Friday takes a **typed** goal for now, routed straight into Laya + rules. STT and voice-based owner verification ("only I can command it") are a later phase. No generative LLM is added near-term.
+- **Why:** the user said "for now I will type … later we will add STT and other things (like analysing my voice, so only I can command it)" (2026-10-16). Typed goals already work; adding an LLM/voice now would blow the resource budget and scope. Keeps Phase 2 focused on getting Laya on-device.
+- **Note:** Laya is non-generative by architecture — a conversational/free-language layer, if ever wanted, is a *separate* small LLM (the brain/voice) with Laya as the hands; fine-tuning Laya cannot add language. Speaker verification is a local convenience gate, not strong auth — the real guard stays per-step approval + the risky-word gate (D-011).
+- **Rejected (for now):** adding a generative LLM; building STT/voice-auth before on-device Laya is proven.
+- **Who / status:** user · Decided (scope); Claude · Proposed (rationale)
+
+### D-022 — On-device tokenizer = DJL HuggingFace `tokenizers` (load tokenizer.json), pinned 0.33.0
+- **Decision:** tokenize on-device by loading the checkpoint's `tokenizer.json` through DJL's Rust `tokenizers` JNI binding — `ai.djl.huggingface:tokenizers:0.33.0` + `runtimeOnly("ai.djl.android:tokenizer-native:0.33.0")` — not by porting the algorithm. Staged at `phase2-staging/Tokenizer.kt`.
+- **Why:** byte-identical by construction (the Gemma-2/mmBERT BPE with `byte_fallback`, 256k vocab); 0.33.0 is the only release shipping the Android arm64 `.so` (8 MB). Id-parity vs `transformers` verified on 5 strings [measured, research/07].
+- **Gotcha:** `tokenizer.json` embeds `truncation{max_length:48}`; the Kotlin wrapper MUST build with `optTruncation(false)/optPadding(false)` or every state is cut to 48 tokens (laya's transformers path ignores it).
+- **Rejected:** laya-java tokenizer (HashMap merges → ~100–250 MB ART heap); DJL 0.38.0 (no Android native); hand-rolled JNI; sentencepiece-android (no `.model` ships).
+- **Open:** DJL-on-Android parity is confirmed by source reading, not yet a real device run — that is the integration gate.
+- **Who / status:** Claude (subagent) · Proposed
+
+### D-023 — On-device runtime config = fp16 + ORT CPU arena disabled, 4 threads (the gate result)
+- **Decision:** run the exported model on-device as **fp16** with `setCPUArenaAllocator(false)` + `setMemoryPatternOptimization(false)` and 4 intra-op threads.
+- **Why [measured, research/06]:** fp16 keeps decisions bit-close to fp32 (on-device Δlogit 0.006); disabling the arena cuts peak PSS **1354 → 688 MB** (under the 0.8 GB D-016 budget); 4 threads beats 8 (big.LITTLE). ~2.4 s/step cool. **The Phase-2 viability gate is passed.**
+- **Supersedes part of D-016:** the RAM driver is ORT's memory arena + intermediates, **not** the weights — so quantization is not the memory lever, the arena switch is.
+- **Rejected:** dynamic int8 as the default (3.5× faster at 677 ms and 389 MB, but it **breaks the operation decision** — op top-1 2/4, max |Δprob| 0.11); keeping the arena (1.35 GB, over budget); 8 threads (1201 ms).
+- **Revisit:** int8 with the operation head/scorer kept fp32 if we later need the speed; a cool, throttling-isolated latency for the winning config is still to confirm.
+- **Who / status:** Claude · Proposed

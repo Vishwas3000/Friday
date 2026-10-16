@@ -5,6 +5,9 @@ __pycache__/
 # screen dumps/screenshots from the phone contain personal data: never commit
 captures/
 *.xml.dump
+# exported/quantized models are large (fp32 ONNX ~1.3 GB); never commit
+models/
+
 # Android build output
 android/.gradle/
 android/.kotlin/
