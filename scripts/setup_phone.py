@@ -67,8 +67,18 @@ def main():
     else:
         sys.exit("could not enable the service. Turn on 'Friday' by hand: Settings > Accessibility.")
 
+    # Uninstalling wipes the app's storage: put Laya back if it's missing (a fresh install needs it).
+    have = sh("shell", *dev, "run-as", "dev.layatest.agent", "ls", "files", check=False)
+    from bench_device import MODELS, push_into_files  # sibling script; shares the shell->run-as copy
+    for name in ("laya-android.fp16.onnx", "tokenizer.json"):
+        if name not in have:
+            src = MODELS / name
+            if not src.exists():
+                sys.exit(f"{name} isn't on the phone or in models/. Build it: scripts/export_onnx.py, quantize_onnx.py.")
+            push_into_files(src, name)
+
     sh(*dev, "forward", f"tcp:{PORT}", "localabstract:layatest_agent")
-    print(f"\nready. service enabled, bridge on tcp:{PORT}.")
+    print(f"\nready. service enabled, Laya on the phone, bridge on tcp:{PORT}.")
     print('run a task:  uv run python scripts/live_adb.py --app "Open the Clock app and go to the Timer tab"')
 
 

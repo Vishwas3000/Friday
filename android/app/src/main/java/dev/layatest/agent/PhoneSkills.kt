@@ -12,6 +12,12 @@ import android.os.StatFs
 import android.provider.AlarmClock
 import android.provider.Settings
 import java.text.DateFormat
+import java.time.Instant
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.time.temporal.ChronoUnit
 import java.util.Date
 import java.util.Locale
 
@@ -51,6 +57,10 @@ object DeviceStatus : Skill {
     }
 }
 
+/** The alarm time [sec] seconds after [now], to the nearest minute (alarms are minute-granular). */
+internal fun alarmAfter(now: LocalTime, sec: Int): Pair<Int, Int> =
+    now.plusSeconds(sec + 30L).truncatedTo(ChronoUnit.MINUTES).let { it.hour to it.minute }
+
 /** "remind me to call mom in 10 minutes" -> "call mom": the label the timer/alarm shows when it rings. */
 internal fun reminderText(s: Slots): String? = s.after("remind me to", "remind me about", "remind me of", "reminder to",
     "reminder for", "reminder about", cutAt = setOf("in", "at", "after", "tomorrow", "tonight", "by", "for", "every"))
@@ -78,17 +88,36 @@ object AlarmTimer : Skill {
             }
         }
         val about = note?.let { " — \"$it\"" } ?: ""
+        // The owner's word decides: only "timer" makes a timer (Clock › Timer). "Set an alarm for 8 mins from
+        // now" is an alarm at now+8 -- the owner looks for it in the alarm list (2026-10-17 bug report).
+        val inSec = sec
+        if (inSec != null && !Regex("\\btimer\\b", RegexOption.IGNORE_CASE).containsMatchIn(ctx.request)) {
+            clock = alarmAfter(LocalTime.now(), inSec)
+            sec = null
+        }
         sec?.let {
             // Int extras only: String extras are silently ignored (research/10)
             val ok = ctx.launch(Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, it)
                 .putExtra(AlarmClock.EXTRA_SKIP_UI, true).apply { note?.let { n -> putExtra(AlarmClock.EXTRA_MESSAGE, n) } })
-            return if (ok) "${if (note != null) "Reminder" else "Timer"} set for ${human(it)}$about" else "No clock app took the timer"
+            // a timer can't be read back through a public API, so say what was asked and where to look
+            return if (ok) "Started a ${human(it)} timer$about — Clock › Timer" else "No clock app took the timer"
         }
         val (h, m) = clock!!
-        val ok = ctx.launch(Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR, h)
-            .putExtra(AlarmClock.EXTRA_MINUTES, m).putExtra(AlarmClock.EXTRA_SKIP_UI, true)
-            .apply { note?.let { n -> putExtra(AlarmClock.EXTRA_MESSAGE, n) } })
-        return if (ok) "Alarm set for %d:%02d%s".format(h, m, about) else "No clock app took the alarm"
+        val am = ctx.android.getSystemService(AlarmManager::class.java)
+        val before = am.nextAlarmClock?.triggerTime
+        if (!ctx.launch(Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR, h)
+                .putExtra(AlarmClock.EXTRA_MINUTES, m).putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+                .apply { note?.let { n -> putExtra(AlarmClock.EXTRA_MESSAGE, n) } })) return "No clock app took the alarm"
+        val time = LocalTime.of(h, m).format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
+        val inText = inSec?.let { " (in ${human(it)})" } ?: ""
+        // Verify before claiming: Android's next-alarm record must now be this alarm.
+        val confirmed = ctx.waitUntil(3000) {
+            val next = am.nextAlarmClock ?: return@waitUntil false
+            val at = Instant.ofEpochMilli(next.triggerTime).atZone(ZoneId.systemDefault()).toLocalTime()
+            next.triggerTime != before && at.hour == h && at.minute == m
+        }
+        return if (confirmed) "Alarm set for $time$inText$about — Clock › Alarms"
+        else "Asked the Clock app for a $time alarm$inText, but couldn't confirm it (an earlier alarm may be next) — check Clock › Alarms"
     }
 
     private fun human(sec: Int) = listOf(sec / 3600 to "h", sec % 3600 / 60 to "min", sec % 60 to "s")

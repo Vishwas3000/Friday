@@ -60,6 +60,10 @@ class AgentService : AccessibilityService() {
             .put("media", mediaSelfCheck()).put("people", peopleSelfCheck())
         "route" -> routeTest(c.getString("text"))
         "run" -> { runGoal(c.getString("goal")); JSONObject().put("started", true) }
+        // debugging: run a request on the bridge thread and return its answer + step trace
+        "ask" -> Assistant(this, c.getString("goal")).let { a ->
+            JSONObject().put("answer", a.run()).put("trace", JSONArray(a.trace))
+        }
         else -> error("unknown cmd: $cmd")
     }
 

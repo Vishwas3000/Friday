@@ -165,5 +165,10 @@ fun slotsSelfCheck(): String {
     check(s("remind me in half an hour").durationSec == 1800)
     check(reminderText(s("remind me to call mom in 10 minutes")) == "call mom")
     check(reminderText(s("remind me in few mins")) == null)
+    check(alarmAfter(java.time.LocalTime.of(5, 6, 50), 480) == (5 to 15))   // 05:14:50 rounds to 05:15
+    check(alarmAfter(java.time.LocalTime.of(23, 58, 0), 300) == (0 to 3))   // wraps past midnight
+    check(taskAfterOpening("open spotify", "Spotify") == null)
+    check(taskAfterOpening("open the clock app and go to the stopwatch tab", "Clock") == "and go to the stopwatch tab")
+    check(taskAfterOpening("open maps and search for MG road", "Maps") != null)
     return "ok"
 }

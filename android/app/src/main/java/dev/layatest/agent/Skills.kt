@@ -107,6 +107,14 @@ const val SLOT_Q = "Which words in the request name the song, artist, show, pers
 
 fun ruleSkill(request: String): String? = RULES.firstOrNull { it.second.containsMatchIn(request) }?.first
 
+/** What's left to do after "open <app>" ("and go to the stopwatch tab"), or null if opening is the whole request. */
+fun taskAfterOpening(request: String, appLabel: String): String? {
+    val rest = request.replace(Regex("^\\s*(please\\s+)?(open|launch|start)\\s+(the\\s+)?", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("\\b${Regex.escape(appLabel)}\\b(\\s+app)?", RegexOption.IGNORE_CASE), " ")
+        .trim(' ', ',', '.')
+    return rest.takeIf { r -> Regex("[\\w']+").findAll(r).any { it.value.lowercase() !in Slots.STOP } }
+}
+
 /** Rules first, then Laya, then the owner if Laya is unsure. Null = "something else" (Laya works from the screen). */
 fun route(request: String, laya: () -> LayaEngine, ask: (String, List<String>) -> Int?): String? {
     ruleSkill(request)?.let { return it }
@@ -129,8 +137,14 @@ class GenericSkill(override val id: String) : Skill {
             ctx.open(app)
             ctx.waitUntil(5000) { ctx.foreground() == app.pkg }
         }
-        if (id == "open_app") return if (app != null) "Opened ${app.label}" else "I couldn't find that app"
+        if (id == "open_app") {
+            if (app == null) return "I couldn't find that app"
+            // "open X" alone is done; "open X and <task>" goes on inside X -- stopping here was why Friday
+            // "only opened apps" (2026-10-17). Laya knows X is open: the trail says OPEN_APP X.
+            if (taskAfterOpening(ctx.request, app.label) == null) return "Opened ${app.label}"
+        }
         val text = ctx.slots.quoted.firstOrNull()
+            ?: ctx.slots.after("search for", "search", "look for", "find", "type", "play", "watch", "listen to")
             ?: ctx.slots.spans.takeIf { it.isNotEmpty() }?.let { sp -> ctx.choose(SLOT_Q, sp)?.let { sp[it.index] } }
         return when (ctx.runLaya(ctx.request, typeText = text)) {
             Outcome.DONE -> "Done"

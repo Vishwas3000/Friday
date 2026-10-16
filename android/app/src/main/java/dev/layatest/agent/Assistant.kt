@@ -31,16 +31,21 @@ class Assistant(private val svc: AgentService, override val request: String) : S
 
     private val skills: Map<String, Skill> = (phoneSkills() + mediaSkills() + peopleSkills()).associateBy { it.id }
 
+    /** What happened, step by step (route, apps opened, each Laya decision + verdict, outcome): for debugging. */
+    val trace = ArrayList<String>()
+
     /** Handle the request; returns what to tell the owner. */
     fun run(): String = try {
         banner.say("Understanding…")
         val skill = route(request, { laya }) { q, options -> ask(q, options) }
         Log.i(TAG, "request routed to ${skill ?: "something else"}")
+        trace += "route: ${skill ?: "something else"}"
         val result = if (stopped) null else (skill?.let { skills[it] ?: GenericSkill(it) } ?: GenericSkill("other")).run(this)
         if (stopped) "Stopped" else result ?: "Done"
-    } catch (e: Exception) {
-        Log.w(TAG, "request failed", e)
-        "Something went wrong: ${e.message}"
+    } catch (e: Throwable) {  // an Error (e.g. a failed class init) must not vanish silently either
+        Log.e(TAG, "request failed", e)
+        trace += "error: $e"
+        "Something went wrong: ${e.message ?: e}"
     } finally {
         banner.remove()
         if (usedLaya) svc.layaIdle()
@@ -85,6 +90,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
             ?: svc.packageManager.resolveActivity(intent, 0)?.activityInfo?.packageName ?: return
         val label = apps.installed.firstOrNull { it.pkg == pkg }?.label ?: return
         historyEntry("OPEN_APP", null, label).let { if (trail.lastOrNull() != it) trail += it }
+        trace += "opened: $label"
     }
 
     override fun foreground() = svc.foregroundPkg()
@@ -155,7 +161,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
             val cands = scr.candidates.filter { key(it) !in blocked }
             say("Thinking… (step $step)")
             val s = laya.step(subgoal, trail, cands)
-            if (s.op == "DONE") return Outcome.DONE
+            if (s.op == "DONE") { trace += "step $step on ${scr.pkg}: DONE (op %.2f)".format(s.opConfidence); return Outcome.DONE }
             val target = s.target?.let { cands.getOrNull(it) }
             val payload: Any? = when (s.op) {
                 "OPEN_APP" -> apps.named(subgoal)
@@ -167,6 +173,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
                     Safety.Verdict.BLOCK to "nothing to ${if (s.op == "OPEN_APP") "open" else "type"}"
                 else -> Safety.verdict(s.op, target, scr.pkg)
             }
+            trace += "step $step on ${scr.pkg}: ${s.op} \"${target?.label.orEmpty()}\" (op %.2f) -> $verdict %s".format(s.opConfidence, why)
             val skipped = when (verdict) {
                 Safety.Verdict.BLOCK -> { say(why); true }
                 Safety.Verdict.ASK -> when (confirm(describe(s.op, target, payload), why, target)) {
@@ -178,7 +185,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
             }
             if (skipped) {
                 if (target != null) blocked += key(target)
-                if (++misses >= 3) return Outcome.STUCK
+                if (++misses >= 3) { trace += "stuck: 3 skipped/blocked steps"; return Outcome.STUCK }
                 continue
             }
             misses = 0
@@ -186,9 +193,10 @@ class Assistant(private val svc: AgentService, override val request: String) : S
             banner.hide()
             if (s.op == "OPEN_APP") open(payload as AppInfo) else svc.act(s.op, target, payload, scr.candidates)
             trail += historyEntry(s.op, target?.toCandidate(), (payload as? AppInfo)?.label ?: payload as? String)
-            if (trail.size >= 3 && trail.takeLast(3).toSet().size == 1) return Outcome.STUCK
+            if (trail.size >= 3 && trail.takeLast(3).toSet().size == 1) { trace += "stuck: same action 3 times"; return Outcome.STUCK }
             Thread.sleep(300)
         }
+        trace += "out of steps ($maxSteps)"
         return Outcome.MAX_STEPS
     }
 
