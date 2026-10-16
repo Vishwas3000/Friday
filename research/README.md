@@ -20,11 +20,21 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 3. **Nobody has published this before.** No one has shown Laya, or any decision model of its kind, driving a real phone locally with a task success rate [primary, search-based; UNCERTAIN as a "first"].
    - **Closest design:** Jev-Mobile (arXiv 2609.30186). A planner model sets goals and a decision model picks the taps. It scored 0.79 on AndroidWorld vs 0.84 for a model that runs every step, with 94.5% less executor time. It is all cloud.
    - **Closest local work:** V-Droid (tree-only, AW 59.5) [primary, 03].
-4. **Android allows it, through an AccessibilityService** (the TalkBack API): read any app's screen tree, tap, swipe, type, use back/home/recents and open apps [primary, 02].
-   - The user enables it by hand.
-   - A sideloaded app may need "Allow restricted settings" first.
+4. **Android allows it, through an AccessibilityService** (the TalkBack API), without root [primary, 02]:
+   - It reads every window's tree in about 18–33 ms [secondary].
+   - Gestures go through `dispatchGesture`, with up to 20 strokes: tap, long-press, swipe, drag, pinch.
+   - Unicode typing via `ACTION_SET_TEXT` works in Compose, Chrome and WebView.
+   - Global back, home, recents, notifications, quick settings and lock are available.
+   - Apps launch with `getLaunchIntentForPackage`.
+   - **Enabling it on Android 16:** the restricted-settings check is gone from the accessibility bind path, so `adb install` plus `settings put secure enabled_accessibility_services` should enable our own service with no extra tap [primary code; **UNCERTAIN until run here**].
    - **Google Play bans autonomous accessibility agents** (2025-10-30), so this ships as a personal sideloaded app [primary, 03].
-   - **Holes:** FLAG_SECURE screens, `accessibilityDataSensitive` views, apps that detect accessibility services and refuse to run, the PIN lock, and Flutter, canvas or WebView UIs with poor trees [primary/secondary, 02, 03].
+   - **Hard limits:**
+     - It cannot get past the PIN lock.
+     - FLAG_SECURE blanks screenshots, but the tree is still readable.
+     - The system hides permission dialogs and installer buttons (`accessibilityDataSensitive`) from non-assistive services. We keep that wall on purpose (D-014).
+     - Banking and UPI apps detect accessibility services and refuse to run. That is a scope boundary, and we don't fight it.
+     - Flutter, canvas and some WebView UIs have poor trees [primary/secondary, 02, 03].
+   - `uiautomator dump` **unbinds every enabled accessibility service while it runs** [primary]. Once our app exists, the adb dump path must not run alongside it.
 5. **One native app with Laya inside is possible but slower** [04].
    - **Runtime:** ONNX Runtime Android on CPU. Laya ships the ONNX exporter and a Java SDK with a parity-tested Gemma-2 tokenizer [primary].
    - **No accelerator:** the Tensor G3 AI chip is closed to third-party apps, and NNAPI is deprecated [primary].

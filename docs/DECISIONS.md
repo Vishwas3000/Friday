@@ -18,6 +18,8 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 | D-011 | 2026-10-16 | Safety gates in every runner | Claude | Proposed |
 | D-012 | 2026-10-16 | Sideloaded personal app, not the Play Store | Claude | Proposed |
 | D-013 | 2026-10-16 | Port laya-android's candidate rules instead of vendoring the files | Claude | Proposed |
+| D-014 | 2026-10-16 | Don't declare `isAccessibilityTool`; keep the platform's sensitive-view wall | Claude | Proposed |
+| D-015 | 2026-10-16 | Skip uiautomator2 for the bench; build the app's own tree export instead | Claude | Proposed |
 
 ---
 
@@ -116,4 +118,16 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Why:** The upstream code expects AndroidControl's node schema. An XML-native port is about as small as an adapter, and it was checked line by line. The Kotlin app will need its own port anyway.
 - **Rejected:** vendoring the files unchanged plus an adapter (research agent 01's recommendation).
 - **Revisit:** if any replay shows a label mismatch.
+- **Who / status:** Claude · Proposed
+
+### D-014 — Don't declare `isAccessibilityTool`
+- **Decision:** Our service ships without `android:isAccessibilityTool="true"`.
+- **Why:** Without the flag, Android hides `accessibilityDataSensitive` views from the service and drops its gestures on them. That covers runtime-permission dialogs, PackageInstaller install buttons and the screen-record Start/Stop dialog (research/02 §4.3). This is a platform-enforced version of D-011's "never auto-accept permission dialogs". It is also the honest label: this is automation, not assistive technology.
+- **Rejected:** declaring the flag, as research agent 02 suggested. It would unlock those views, and it only matters for Android 17's opt-in Advanced Protection, which is exactly when the owner wants agents blocked.
+- **Who / status:** Claude · Proposed
+
+### D-015 — Skip uiautomator2 for the Mac bench
+- **Decision:** Don't add openatx/uiautomator2 (agent 02's POC suggestion). Make the app's AccessibilityService the fast tree source, reachable from the Mac over `adb forward` during development.
+- **Why:** uiautomator2 would cut the ~2.5 s dump, but the app's service has to be built anyway. The service gives the training-format forest (all windows, `editable`, important-views-only) that u2 cannot, and doing both is duplicate work.
+- **Rejected:** uiautomator2, which also installs two helper APKs; DroidRun Portal (HEAD is AGPL-3.0 and asks for SMS/contacts permissions).
 - **Who / status:** Claude · Proposed
