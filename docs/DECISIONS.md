@@ -252,7 +252,7 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 ### D-035 — A wake word for Friday, at very low standby power
 - **Decision:** add a wake word ("Hey Friday") so Friday can be started hands-free, with standby power kept minimal and audio never leaving the phone. Speech-to-text and owner-voice verification follow later.
 - **Why:** owner, 2026-10-17. Fine-tuning research comes first (owner: "but first research on how can we finetune laya").
-- **Who / status:** user · In progress — openWakeWord inside Friday's ONNX Runtime (research/16); phrases "hey Friday" and "hi Friday" (owner, 2026-10-17); listen while unlocked or charging, pause in calls
+- **Who / status:** user · In progress — openWakeWord inside Friday's ONNX Runtime (research/16); phrases "hey Friday" and "hi Friday" (owner, 2026-10-17); always-on listening dropped, see D-046
 
 ### D-036 — Friday operates the app it opens: the task continues inside it, and Laya is told what was done
 - **Decision:** "open X and <task>" opens X and hands the rest to Laya inside X, instead of stopping. Friday keeps a trail of what it did in a request (OPEN_APP, taps, typed text — intent launches included) and passes it to Laya as `history`.
@@ -336,3 +336,25 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - The owner's own screens and corrections are the only source for those.
   - Owner, 2026-10-17: "decide what are the data that we can collect to finetune laya".
 - **Who / status:** user (asked) · Claude (decided) · 1–2 built; 3–5 to build next (after the wake word lands); 6 usage stats optional
+
+### D-046 — No always-on mic: Friday is started without listening; the wake word only while charging, by choice
+- **Decision:**
+  - Friday doesn't keep the microphone open by default.
+  - It is started by triggers that need no Friday mic:
+    - **"Hey Google, open Friday"**: Google's own low-power hotword opens our app.
+    - **Pixel Quick Tap**: double-tap the back of the phone → Open app → Friday.
+    - The launcher icon.
+  - Every launch opens ready to type: goal box focused, keyboard up.
+  - The "Hey Friday" detector is an opt-in mode the owner turns on: listen only while charging.
+  - When it's off, the mic is fully released.
+- **Why:**
+  - Owner, 2026-10-17, after testing: "the mic is always on… i want something like hey google where the mic led is not on".
+  - That is impossible for a third-party app on a stock Pixel. "Hey Google" uses the low-power audio chip and hotword permissions that Android reserves for the preinstalled assistant (research/16, from the Android 16 source).
+  - Any other app listening in the background shows the green mic indicator, which apps can't hide.
+- **Rejected:**
+  - Listening whenever the phone is unlocked (indicator always on; the owner said no).
+  - Rooting to install Friday as a privileged app with the hotword permissions: breaks banking/UPI apps' integrity checks, and the Pixel's audio chip only carries Google's models.
+  - Making Friday the default assistant app: it would replace Gemini/"Hey Google" on long-press; owner's choice, not taken.
+  - A floating accessibility button (not asked for).
+- **Later:** research/16 notes an EU ruling (2026-07-16) requiring Google to open always-on wake words to other assistants in Android 18 by August 2027. Revisit if it reaches the owner's phone [UNCERTAIN for India].
+- **Who / status:** user · Claude · In progress (wake-word agent switching defaults)
