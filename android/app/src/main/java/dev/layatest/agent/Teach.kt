@@ -28,6 +28,8 @@ class Teacher(private val svc: AgentService, private val goal: String, private v
     private val file = File(dir(svc), SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".jsonl")
     private val io = Executors.newSingleThreadExecutor()  // screen reads and file writes, in order
     private val history = ArrayList<String>()             // touched only on [io]
+    private val route = ArrayList<RouteStep>()            // on [io]: the same path, remembered for replay (D-040)
+    private var routePkg: String? = null                  // on [io]: the app that path starts in
     @Volatile private var settled: JSONObject? = null     // the screen the owner is looking at
     @Volatile var steps = 0
         private set
@@ -137,6 +139,16 @@ class Teacher(private val svc: AgentService, private val goal: String, private v
         if (payload != null) row.put("payload", payload)
         file.appendText(row.toString() + "\n")
         banner.count(++steps)
+        val pkg = screen.optString("package").ifEmpty { null }
+        when (op) {
+            "OPEN_APP" -> { route.clear(); routePkg = null }  // the remembered path starts inside the app the owner opened
+            "DONE" -> {}
+            else -> {
+                if (routePkg == null) routePkg = pkg
+                // typed text that came from the goal ("search for <pizza>") is re-filled from each new request
+                route += RouteStep.of(op, pkg, c, payload, slot = payload != null && Routes.key(goal, payload) != Routes.key(goal, null))
+            }
+        }
     }
 
     /** The owner tapped Done: record the final screen as DONE -- where this task ends. */
@@ -144,7 +156,10 @@ class Teacher(private val svc: AgentService, private val goal: String, private v
         flushScroll.run(); flushTyping.run()
         io.execute {
             runCatching { svc.readState() }.getOrNull()?.let { write(it, "DONE") }
-            finish("Saved $steps steps for training")
+            routePkg?.takeIf { route.isNotEmpty() }?.let { pkg ->
+                Routes.save(svc, Route(goal, pkg, Routes.key(goal, route.firstOrNull { it.slot }?.payload), route.toList(), "teach"))
+            }
+            finish("Saved $steps steps — next time Friday repeats them from memory")
         }
     }
 

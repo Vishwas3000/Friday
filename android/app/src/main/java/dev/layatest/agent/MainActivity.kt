@@ -47,8 +47,11 @@ class MainActivity : Activity() {
             }
         }
         val wipe = Button(this).apply {
-            text = "Delete all teaching data"
-            setOnClickListener { toast("Deleted ${Teacher.wipe(this@MainActivity)} recordings from this phone") }
+            text = "Delete all learned data"
+            setOnClickListener {
+                val c = this@MainActivity
+                toast("Deleted ${Teacher.wipe(c)} recordings and ${Routes.wipe(c)} remembered paths from this phone")
+            }
         }
         val open = Button(this).apply {
             text = "Open Accessibility settings"

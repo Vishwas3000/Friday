@@ -23,6 +23,7 @@ data class ScreenCandidate(
     val selected: Boolean,
     val enabled: Boolean,
     val bounds: IntArray,   // [l, t, r, b], clipped to the screen
+    val rid: String = "",   // resource id without its package: finds the element again later (Routes); not shown to Laya
 )
 
 fun ScreenCandidate.toCandidate() = Candidate(
@@ -109,7 +110,7 @@ fun buildCandidates(state: JSONObject, screenW: Int, screenH: Int): List<ScreenC
     }
     return groups.values.sortedWith(compareBy({ it.box[1] }, { it.box[0] }, { it.box[3] }, { it.box[2] }, { it.label }, { it.className }))
         .map { ScreenCandidate(it.label, it.className, it.flags[0], it.flags[1], it.flags[2], it.flags[3], it.flags[4],
-            it.checked, it.selected, it.enabled, it.box) }
+            it.checked, it.selected, it.enabled, it.box, it.rid) }
 }
 
 /** A visible text and its box: what the READ step's extractors parse (amounts, dates, names). */

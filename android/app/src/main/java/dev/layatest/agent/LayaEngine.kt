@@ -11,7 +11,7 @@ import java.io.File
 class Pick(val index: Int, val key: String, val confidence: Double, val probabilities: Map<String, Double>)
 
 /** Laya's next UI action on a screen: an operation and, for CLICK/LONG_PRESS, a candidate index. */
-class Step(val op: String, val opConfidence: Double, val target: Int?, val targetConfidence: Double?)
+class Step(val op: String, val opConfidence: Double, val target: Int?, val targetConfidence: Double?, val tokens: Int = 0)
 
 /**
  * The on-device Laya model (D-023: fp16, CPU arena off, 4 threads). Created only when a request needs
@@ -69,7 +69,7 @@ class LayaEngine(ctx: Context) : AutoCloseable {
         val ans = decode(logits, act, built)
         val op = ans.getValue("operation")
         val tg = ans["target"]
-        return Step(op.choiceKey, op.answerConfidence, tg?.choiceIndex, tg?.answerConfidence)
+        return Step(op.choiceKey, op.answerConfidence, tg?.choiceIndex, tg?.answerConfidence, built.ort.inputIds.sumOf { it.size })
     }
 
     private fun forward(built: BuiltInputs): Pair<Array<FloatArray>, Array<FloatArray>> {

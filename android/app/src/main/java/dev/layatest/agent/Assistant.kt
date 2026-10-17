@@ -6,6 +6,11 @@ import android.content.Intent
 import android.os.SystemClock
 import android.util.Log
 import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * One request, end to end (D-024): ROUTE (rules -> Laya -> ask the owner) -> the skill (slots, app,
@@ -106,7 +111,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
 
     override fun screen(): Screen {
         banner.hide()
-        val state = svc.readState()
+        val state = svc.readState().also { lastState = it }
         val size = state.getJSONArray("screen")
         return Screen(state.optString("package").ifEmpty { null },
             buildCandidates(state, size.getInt(0), size.getInt(1)), screenTexts(state))
@@ -146,12 +151,38 @@ class Assistant(private val svc: AgentService, override val request: String) : S
         return true
     }
 
+    // ---- UI memory (D-040): replay remembered paths; learn the ones the owner confirms ----
+    private var lastState: JSONObject? = null   // the raw screen behind the last screen(): for training rows
+    private val path = ArrayList<RouteStep>()   // what this runLaya did, as a path it could remember
+    private val rows = ArrayList<JSONObject>()  // ...and as Teach-format rows for fine-tuning (research/14)
+    private var goal = request
+    private var typed: String? = null           // request text this run types, if any
+
+    /** A path Laya just found, for the answer card's "Remember"; null if it came from memory or didn't finish. */
+    var learned: Route? = null
+        private set
+
+    /** The owner confirmed [learned]: keep the path, and its screens as training rows. */
+    fun remember() {
+        Routes.save(svc, learned ?: return)
+        Teacher.dir(svc).mkdirs()
+        File(Teacher.dir(svc), SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + "-run.jsonl")
+            .writeText(rows.joinToString("") { "$it\n" })
+    }
+
     override fun runLaya(subgoal: String, maxSteps: Int, typeText: String?): Outcome {
+        val startPkg = foreground()
+        path.clear(); rows.clear(); goal = subgoal; typed = typeText
+        Routes.find(svc, startPkg, subgoal, typeText)?.let { route ->
+            replay(route, typeText)?.let { return it }  // DONE or STOPPED; null: the screen changed, Laya goes on from here
+        }
         val blocked = HashSet<String>()  // targets skipped or refused, so Laya doesn't pick them again
         var misses = 0
         for (step in 1..maxSteps) {
             if (stopped) return Outcome.STOPPED
+            val t0 = SystemClock.elapsedRealtime()
             val scr = screen()
+            val readMs = SystemClock.elapsedRealtime() - t0
             if (Safety.isAuthPrompt(scr.pkg, scr.texts.map { it.text })) {
                 say("Unlock with your fingerprint — I'll wait")
                 val ok = waitUntil(90_000) { screen().let { !Safety.isAuthPrompt(it.pkg, it.texts.map { t -> t.text }) } }
@@ -160,8 +191,19 @@ class Assistant(private val svc: AgentService, override val request: String) : S
             }
             val cands = scr.candidates.filter { key(it) !in blocked }
             say("Thinking… (step $step)")
+            val t1 = SystemClock.elapsedRealtime()
             val s = laya.step(subgoal, trail, cands)
-            if (s.op == "DONE") { trace += "step $step on ${scr.pkg}: DONE (op %.2f)".format(s.opConfidence); return Outcome.DONE }
+            val took = " [read $readMs ms (settle ${svc.lastSettleMs}), laya ${SystemClock.elapsedRealtime() - t1} ms: " +
+                "${cands.size} cands, ${s.tokens} tokens]"
+            if (s.op == "DONE") {
+                trace += "step $step on ${scr.pkg}: DONE (op %.2f)".format(s.opConfidence) + took
+                rows += row("DONE", scr, null, null)
+                if (path.isNotEmpty() && startPkg != null) {
+                    // keyed without the typed text only if this path typed it (see Routes.find)
+                    learned = Route(subgoal, startPkg, Routes.key(subgoal, typeText.takeIf { path.any { it.slot } }), path.toList(), "run")
+                }
+                return Outcome.DONE
+            }
             val target = s.target?.let { cands.getOrNull(it) }
             val payload: Any? = when (s.op) {
                 "OPEN_APP" -> apps.named(subgoal)
@@ -173,7 +215,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
                     Safety.Verdict.BLOCK to "nothing to ${if (s.op == "OPEN_APP") "open" else "type"}"
                 else -> Safety.verdict(s.op, target, scr.pkg)
             }
-            trace += "step $step on ${scr.pkg}: ${s.op} \"${target?.label.orEmpty()}\" (op %.2f) -> $verdict %s".format(s.opConfidence, why)
+            trace += "step $step on ${scr.pkg}: ${s.op} \"${target?.label.orEmpty()}\" (op %.2f) -> $verdict %s".format(s.opConfidence, why) + took
             val skipped = when (verdict) {
                 Safety.Verdict.BLOCK -> { say(why); true }
                 Safety.Verdict.ASK -> when (confirm(describe(s.op, target, payload), why, target)) {
@@ -189,16 +231,68 @@ class Assistant(private val svc: AgentService, override val request: String) : S
                 continue
             }
             misses = 0
-            say(describe(s.op, target, payload))
-            banner.hide()
-            if (s.op == "OPEN_APP") open(payload as AppInfo) else svc.act(s.op, target, payload, scr.candidates)
-            trail += historyEntry(s.op, target?.toCandidate(), (payload as? AppInfo)?.label ?: payload as? String)
+            perform(s.op, target, payload, scr)
             if (trail.size >= 3 && trail.takeLast(3).toSet().size == 1) { trace += "stuck: same action 3 times"; return Outcome.STUCK }
             Thread.sleep(300)
         }
         trace += "out of steps ($maxSteps)"
         return Outcome.MAX_STEPS
     }
+
+    /** Replay a remembered path. Null when a step's element isn't on screen (or policy says no): Laya takes over there. */
+    private fun replay(route: Route, typeText: String?): Outcome? {
+        trace += "memory (${route.source}): ${route.steps.size} steps for \"${route.goal}\""
+        for ((i, st) in route.steps.withIndex()) {
+            if (stopped) return Outcome.STOPPED
+            val t0 = SystemClock.elapsedRealtime()
+            val scr = screen()
+            val target = if (!st.targeted) null else st.find(scr) ?: run {
+                trace += "memory step ${i + 1}: \"${st.label}\" isn't on this screen -> Laya"
+                return null
+            }
+            val payload: Any? = when (st.op) {
+                "INPUT_TEXT" -> (if (st.slot) typeText else st.payload) ?: return null
+                "OPEN_APP" -> apps.installed.firstOrNull { it.label == st.payload } ?: return null
+                else -> null
+            }
+            val (verdict, why) = Safety.verdict(st.op, target, scr.pkg)
+            when (verdict) {
+                Safety.Verdict.BLOCK -> return null
+                Safety.Verdict.ASK -> when (confirm(describe(st.op, target, payload), why, target)) {
+                    "run" -> {}
+                    "stop" -> return Outcome.STOPPED
+                    else -> return null
+                }
+                Safety.Verdict.AUTO -> {}
+            }
+            trace += "memory step ${i + 1} on ${scr.pkg}: ${st.op} \"${target?.label.orEmpty()}\" -> $verdict " +
+                "[read ${SystemClock.elapsedRealtime() - t0} ms, no Laya]"
+            perform(st.op, target, payload, scr)
+            Thread.sleep(300)
+        }
+        return Outcome.DONE
+    }
+
+    /** Do one step (Laya's or remembered) and record it: Laya's history, the path, a training row. */
+    private fun perform(op: String, target: ScreenCandidate?, payload: Any?, scr: Screen) {
+        val text = (payload as? AppInfo)?.label ?: payload as? String
+        rows += row(op, scr, target, text)
+        say(describe(op, target, payload))
+        banner.hide()
+        if (op == "OPEN_APP") open(payload as AppInfo) else svc.act(op, target, payload, scr.candidates)
+        // open() already wrote "OPEN_APP X"; any other step is written even when repeated (the stuck check counts those)
+        historyEntry(op, target?.toCandidate(), text).let { if (op != "OPEN_APP" || trail.lastOrNull() != it) trail += it }
+        path += RouteStep.of(op, scr.pkg, target, text, slot = op == "INPUT_TEXT" && text != null && text == typed)
+    }
+
+    /** A Teach-format row (D-033) for this step, so confirmed runs become training data too. */
+    private fun row(op: String, scr: Screen, target: ScreenCandidate?, payload: String?) = JSONObject()
+        .put("goal", goal).put("history", JSONArray(trail)).put("op", op).put("package", scr.pkg)
+        .put("time", System.currentTimeMillis()).put("state", lastState).put("source", "run").apply {
+            if (target != null) put("target", scr.candidates.indexOf(target)).put("target_label", target.label)
+                .put("target_bounds", JSONArray(target.bounds.toList()))
+            if (payload != null) put("payload", payload)
+        }
 
     /** Ask the owner to approve one risky step (Run / Skip / Stop), outlining its target. */
     private fun confirm(step: String, why: String, target: ScreenCandidate?): String {

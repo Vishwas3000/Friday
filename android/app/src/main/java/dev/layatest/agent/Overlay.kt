@@ -83,13 +83,17 @@ class Overlay(private val svc: AgentService) {
         return i.takeIf { it >= 0 }
     }
 
-    /** A result card until the owner taps OK (or a minute passes). Doesn't block. */
-    fun answer(text: String) = svc.main.post {
+    /** A result card until the owner taps OK (or a minute passes); with [remember], a "Remember" button too. Doesn't block. */
+    fun answer(text: String, remember: (() -> Unit)? = null) = svc.main.post {
         val ctx = theme()
         lateinit var panel: View
         panel = card(ctx).apply {
             addView(TextView(ctx).apply { this.text = text; setTextColor(Color.WHITE); textSize = 18f })
             addView(Button(ctx).apply { this.text = "OK"; setOnClickListener { runCatching { wm.removeView(panel) } } })
+            if (remember != null) addView(Button(ctx).apply {
+                this.text = "Remember these steps"
+                setOnClickListener { runCatching { wm.removeView(panel) }; Thread(remember, "friday-remember").start() }
+            })
         }
         wm.addView(panel, params(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER, 0, 0, touchable = true))
         svc.main.postDelayed({ runCatching { wm.removeView(panel) } }, 60_000)

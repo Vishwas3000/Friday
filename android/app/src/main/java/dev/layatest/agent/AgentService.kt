@@ -59,6 +59,7 @@ class AgentService : AccessibilityService() {
         "decide_test" -> Decide.test(this, c) // Phase-2c: full on-device tokenize+build+ORT+decode on the fixture
         "selfcheck" -> JSONObject().put("candidates", candidatesSelfCheck()).put("slots", slotsSelfCheck())
             .put("media", mediaSelfCheck()).put("people", peopleSelfCheck()).put("profiler", appCatalogSelfCheck())
+            .put("routes", routesSelfCheck())
         "profiles" -> JSONObject(AppProfiler.profiles(packageManager) as Map<*, *>)  // D-031: auto app profiles, to evaluate
         "route" -> routeTest(c.getString("text"))
         "run" -> { runGoal(c.getString("goal")); JSONObject().put("started", true) }
@@ -72,9 +73,13 @@ class AgentService : AccessibilityService() {
         "teach_list" -> Teacher.list(this)
         "teach_wipe" -> JSONObject().put("deleted", Teacher.wipe(this))
         // debugging: run a request on the bridge thread and return its answer + step trace
-        "ask" -> Assistant(this, c.getString("goal")).let { a ->
+        "ask" -> Assistant(this, c.getString("goal")).also { lastAsk = it }.let { a ->
             JSONObject().put("answer", a.run()).put("trace", JSONArray(a.trace))
+                .put("learned", a.learned?.steps?.joinToString(" → ") { it.describe() } ?: JSONObject.NULL)
         }
+        // what the answer card's "Remember" does, for the last "ask" -- after checking its steps
+        "remember" -> JSONObject().put("remembered", lastAsk?.learned != null).also { lastAsk?.remember() }
+        "routes" -> Routes.all(this)  // UI memory (D-040), for debugging
         else -> error("unknown cmd: $cmd")
     }
 
@@ -185,7 +190,12 @@ class AgentService : AccessibilityService() {
         running = true
         Thread({
             try {
-                Overlay(this).answer(Assistant(this, goal.trim()).run())
+                val a = Assistant(this, goal.trim())
+                val said = a.run()
+                // the owner sees the steps before keeping them: Laya sometimes overshoots (an extra tap after the goal)
+                val steps = a.learned?.steps?.joinToString(" → ") { it.describe() }
+                Overlay(this).answer(if (steps == null) said else "$said\n\nI did: $steps",
+                    a.learned?.let { { a.remember(); toast("Remembered — next time it skips the thinking") } })
             } catch (e: Throwable) {
                 toast("error: ${e.message}")
             } finally {
@@ -230,6 +240,7 @@ class AgentService : AccessibilityService() {
 
     // ---- Teach mode (D-033): taps and typing are subscribed to only while the owner is teaching ----
     @Volatile private var teacher: Teacher? = null
+    @Volatile private var lastAsk: Assistant? = null  // the bridge's last "ask", for "remember"
 
     fun startTeaching(goal: String, rawTouches: Boolean = false): Boolean {
         if (goal.isBlank() || teacher != null || running) return false
@@ -254,9 +265,15 @@ class AgentService : AccessibilityService() {
 
     /** The screen once it settles: the forest that Laya and the extractors read. */
     internal fun readState(): JSONObject {
+        val t = SystemClock.elapsedRealtime()
         settle(300, 3000)
+        lastSettleMs = SystemClock.elapsedRealtime() - t
         return state()
     }
+
+    /** How long the last [readState] waited for the screen to go quiet (step timings in the trace). */
+    @Volatile var lastSettleMs = 0L
+        private set
 
     internal fun foregroundPkg(): String? = rootInActiveWindow?.packageName?.toString()
 
