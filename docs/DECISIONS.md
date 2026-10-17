@@ -358,3 +358,22 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - A floating accessibility button (not asked for).
 - **Later:** research/16 notes an EU ruling (2026-07-16) requiring Google to open always-on wake words to other assistants in Android 18 by August 2027. Revisit if it reaches the owner's phone [UNCERTAIN for India].
 - **Who / status:** user · Claude · In progress (wake-word agent switching defaults)
+
+### D-047 — Faster Laya steps: ask the operation first now; 8-bit MatMulNBits + a newer ONNX Runtime after a phone bench
+- **Decision:**
+  1. `LayaEngine.step` asks the operation alone, and runs the target row (every element again, as options) only for CLICK, LONG_PRESS and INPUT_TEXT. Nothing is padded to the long row.
+  2. Next, once benched on the Pixel 8 (speed and decisions): ship the 8-bit MatMulNBits model (blocks of 32, head fp32, embedding fp16; 578 MB) with onnxruntime-android 1.31, stripping the INTERNET permission newer versions add.
+  3. Keep today's fp16 file on ORT 1.20 until then.
+- **Why [measured, research/18–19]:**
+  - Operation-first is exact (max logit difference 1.7e-5). Non-tap steps take 24–38% of today's compute and taps 74–88%. At 20% taps, that averages about 0.41×.
+  - ORT 1.20 has no fp16 CPU kernels: our fp16 model is cast to fp32 on every pass.
+  - 8-bit MatMulNBits matched fp32 on 52/52 operations and 52/52 tap targets at 0.61–0.64× fp32 time (Mac, phone-like kernels). ORT 1.20 refuses it.
+- **Rejected:**
+  - Dynamic int8 in any form on ORT 1.20: 41–45/52 operations whatever stays in float; the cause is one activation scale per tensor.
+  - 4-bit MatMulNBits: runs on 1.20 but loses 3/34 tap targets.
+  - Bumping ORT while keeping the fp16 file: 2.5× slower than fp32 math on ORT 1.31 with phone-like kernels.
+  - Label cap 40→32 (4% fewer tokens, 5/52 decisions changed).
+  - Dropping duplicate scroll containers (4.8% fewer tokens, 3/52 changed).
+  - Judging int8 on the Mac's default ORT 1.31 (its SME kernels hide the error the phone would see).
+- **Side effect:** non-tap steps carry no target, so training rows and remembered paths stop storing an unused one for BACK / SCROLL, and skipped non-tap steps don't block an element.
+- **Who / status:** Claude · 1 ready to apply (waits for the phone and the wake-word work), with a `step_parity` check on live screens; 2 waits for the phone bench

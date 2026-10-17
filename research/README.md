@@ -85,11 +85,11 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 | [15-finetune-method.md](15-finetune-method.md) | Fine-tuning method: auto profiles 48% zero-shot, BM25 shortlist + one pass, joint fine-tune with replay, pilot results (D-043) |
 | [16-wake-word.md](16-wake-word.md) | Wake word: openWakeWord in Friday's ONNX Runtime, "Hey Friday", power per listening mode, platform limits (D-035) |
 | [17-operating-apps.md](17-operating-apps.md) | Why Friday "only opened apps" (fixed: trail + open-and-continue), the alarm bug, speed, operational lessons |
+| [18-speed.md](18-speed.md) | Faster Laya passes, measured on 52 real (screen, goal) pairs: dynamic int8 fails on ORT 1.20; 8-bit MatMulNBits keeps 52/52 (needs a newer ORT); operation-first is exact at ~0.41× compute; label trims not worth it |
 | [19-android-encoder-speed.md](19-android-encoder-speed.md) | How fast Laya can run on a Pixel 8: ORT 1.20 has no fp16 CPU kernels (casts every run), wasted target rows, heat/cores; target ~1 s/step (5–10×) |
 | [20-ui-memory-and-step-speed.md](20-ui-memory-and-step-speed.md) | Where a step's time goes (Laya, by tokens) and UI memory: repeat tasks 22.6 s → 2.2 s without Laya (D-040) |
 
 
-In progress (research agent, 2026-10-17): **18** making each Laya pass faster (int8 with un-quantized heads, token trimming).
 
 ## Quick reference: measured on our hardware (2026-10-16)
 | What | Number |
