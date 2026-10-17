@@ -50,6 +50,8 @@ def main():
             sys.exit("gradle build failed (need the Android SDK and JDK 17)")
     print(f"installing {APK.name}...")
     print(sh(*dev, "install", "-r", str(APK)))
+    # "Hey Friday" (D-035) listens only with the mic granted; granting here saves tapping through the dialog.
+    sh(*dev, "shell", "pm", "grant", "dev.layatest.agent", "android.permission.RECORD_AUDIO")
 
     # An app update makes Android re-check accessibility services and rewrite the list; an enable
     # that lands mid-check gets wiped (seen 2026-10-17), so wait and retry.

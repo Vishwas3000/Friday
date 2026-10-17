@@ -23,10 +23,12 @@ class AgentService : AccessibilityService() {
     val main = Handler(Looper.getMainLooper())
     @Volatile private var lastEventAt = SystemClock.uptimeMillis()
     private var bridge: Bridge? = null
+    internal var wake: WakeWord? = null  // "Hey Friday" (D-035)
 
     override fun onServiceConnected() {
         instance = this
         bridge = Bridge(this).also { it.start() }
+        wake = WakeWord(this).also { it.start() }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -38,6 +40,7 @@ class AgentService : AccessibilityService() {
 
     override fun onDestroy() {
         bridge?.stop()
+        wake?.close()
         instance = null
         super.onDestroy()
     }
@@ -59,7 +62,9 @@ class AgentService : AccessibilityService() {
         "decide_test" -> Decide.test(this, c) // Phase-2c: full on-device tokenize+build+ORT+decode on the fixture
         "selfcheck" -> JSONObject().put("candidates", candidatesSelfCheck()).put("slots", slotsSelfCheck())
             .put("media", mediaSelfCheck()).put("people", peopleSelfCheck()).put("profiler", appCatalogSelfCheck())
-            .put("routes", routesSelfCheck())
+            .put("routes", routesSelfCheck()).put("wake", wakeSelfCheck(this))
+        "wake" -> wake?.command(c) ?: error("the wake word isn't set up yet")  // {"on": bool} optional; listening stats
+        "wake_test" -> wakeTest(this, java.io.File(filesDir, c.getString("wav")))  // max score of a WAV in filesDir
         "profiles" -> JSONObject(AppProfiler.profiles(packageManager) as Map<*, *>)  // D-031: auto app profiles, to evaluate
         "route" -> routeTest(c.getString("text"))
         "run" -> { runGoal(c.getString("goal")); JSONObject().put("started", true) }
@@ -183,6 +188,9 @@ class AgentService : AccessibilityService() {
 
     // ---- Friday the assistant: a typed request runs through Assistant (route -> skill -> answer) ----
     @Volatile private var running = false
+
+    /** Running a request or being taught: the wake word must not pop the request box over either. */
+    internal val busy get() = running || teacher != null
 
     /** Handle one typed request on a background thread (one at a time) and show the answer as a card. */
     fun runGoal(goal: String) {
