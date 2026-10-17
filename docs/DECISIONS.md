@@ -306,3 +306,33 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Decision:** (1) AndroidControl "which app" rows with the app name stripped from the goal and soft labels; (2) requests written by a teacher LLM for app kinds AndroidControl lacks (UPI, ride-hailing, food delivery in India), with options rendered exactly as AppProfiler renders them; (3) the owner's Teach recordings and confirmed runs at 3–5× weight (DONE rows 5×), held out by task family plus the latest week; replay AndroidControl at least 1:1; every checkpoint gated on AndroidControl validation (within 1 point).
 - **Why [measured, research/14]:** 93.4% of AndroidControl's app-opening goals name the app: zero-shot accuracy 98.5% with the name vs 32.0% without, so un-stripped rows teach name matching, not app understanding. AndroidControl has no goals for Paytm, PhonePe, GPay, CRED, Swiggy, Ola or Rapido.
 - **Who / status:** Claude · Proposed; run-pack ready for the box
+
+### D-045 — What Friday collects on the phone to fine-tune Laya
+- **Decision:** six kinds of data, in this priority, all kept on the phone → Mac `captures/` (git-ignored) → GPU box for training → deleted after (D-033):
+  1. **Teach demos:** the owner does a task once. Each step gives the screen and the owner's action, and Done marks the end. Teaches operating the owner's own apps (operation + target) and when a task is finished. *Built* (D-033, D-039).
+  2. **Confirmed runs:** Laya's own runs the owner keeps with "Remember these steps", written as the same rows. *Built* (D-040).
+  3. **Corrections:** when Laya proposes a wrong step, the owner taps **Show me** and does that one step; Friday records it and carries on. These rows fix exactly the mistakes Laya makes (interactive imitation, DAgger-style), so they're worth the most per row. *To build.*
+  4. **Completion labels:**
+     - "Not done" on every screen of 1–3, and "done" on their final screens.
+     - A **"the last step was extra"** choice on the result card, for overshoots like the 1-minute-timer one in research/20.
+     - These teach Laya's weakest skill, stopping. *Partly built.*
+  5. **Request log (text only, no screens):**
+     - What the owner typed (later: said), and the skill and app Friday chose.
+     - The owner's answer when asked "which app?", and how the request ended (done / stopped / stuck).
+     - Teaches understanding requests and choosing apps, and shows what to teach next. *To build.*
+  6. **App profiles** (built, D-038), optionally plus **how often the owner uses each app**. Usage stats need a one-time permission and add a "used daily" signal to app choice, with nothing hand-written.
+- **Not collected:** passwords (skipped already), screen images (Laya reads the accessibility tree), notifications / SMS / call logs (owner deferred them), anything while Friday is idle.
+- **Later, only if the owner opts in:**
+  - (a) Passive capture of normal phone use, with a text LLM writing the goal each stretch of use accomplished (reverse task synthesis, as in OS-Genesis). Big volume, but privacy-heavy.
+  - (b) Friday exploring apps by itself while charging, navigation only. Needs its own safety design first.
+- **Target for the first personal fine-tune (research/15 Phase 2):**
+  - The owner's ~40–50 most frequent tasks × 3 demos each: about 150 demos, 600–900 steps, about 1–2 min per demo.
+  - Plus every confirmed run and correction.
+  - Hold out 20% of task families plus the latest week as the owner's test set.
+  - Train alongside the public data of D-044: de-named AndroidControl replay at least 1:1, and teacher-written requests for Indian app kinds.
+- **Why:**
+  - Laya's measured failures: wrong app for long-tail requests (research/12, 15), overshooting the goal and weak DONE (research/17, 20), and picking text it can't write (research/20 → the Writer).
+  - Public data doesn't cover the owner's apps: AndroidControl has none of Paytm, PhonePe, GPay, CRED, Swiggy, Ola, Rapido (research/14).
+  - The owner's own screens and corrections are the only source for those.
+  - Owner, 2026-10-17: "decide what are the data that we can collect to finetune laya".
+- **Who / status:** user (asked) · Claude (decided) · 1–2 built; 3–5 to build next (after the wake word lands); 6 usage stats optional
