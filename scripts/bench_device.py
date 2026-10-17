@@ -1,4 +1,4 @@
-"""Push the fp16 model + fixture into the app and run the on-device ORT benchmark (Phase-2 gate).
+"""Push a model + fixture into the app and run the on-device ORT benchmark (Phase-2 gate).
 
     uv run python scripts/bench_device.py                       # push + bench (4 threads, CPU)
     uv run python scripts/bench_device.py --xnnpack --threads 6 # try the XNNPACK EP
@@ -47,7 +47,7 @@ def main():
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--xnnpack", action="store_true")
     ap.add_argument("--lowmem", action="store_true")
-    ap.add_argument("--model", default="laya-android.fp16.onnx")
+    ap.add_argument("--model", default="laya-android.nb8-h-e16.onnx")  # what the app runs (LayaEngine.MODEL)
     ap.add_argument("--decide", action="store_true", help="full on-device tokenize+build+ORT+decode on the fixture")
     ap.add_argument("--no-push", action="store_true")
     a = ap.parse_args()
@@ -71,7 +71,7 @@ def main():
     except OSError:
         sys.exit("can't reach the bridge — is 'Friday' enabled in Accessibility? (run scripts/setup_phone.py)")
     with conn.makefile("rw") as f:
-        print("running bench (loading 645 MB model on the phone)...")
+        print("running bench (loading %s on the phone)..." % a.model)
         f.write(json.dumps(cmd) + "\n")
         f.flush()
         reply = json.loads(f.readline())

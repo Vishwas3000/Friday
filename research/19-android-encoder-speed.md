@@ -421,7 +421,7 @@ GPU initialisation costs 1.2–1.7 s on an S25 Ultra (EmbeddingGemma card). It i
 1. **Where the time goes.** Run `SessionOptions.enableProfiling(path)` on one ~900-token step on a cool phone. The JSON splits time per node: `InsertedPrecisionFreeCast_*`, MatMul, the L × L chain, LayerNorm.
 2. **Which cores.** Run the §4 adb line during a live step. Then run the same step with Friday's own activity on top, and with 3 threads.
 3. **Arena on vs off at L ≈ 900**, on a cool phone (§5).
-4. **ORT 1.31 with today's fp16 graph:** speed, plus parity on recorded screens. Watch for inf/NaN, and strip the INTERNET permission.
+4. **ORT 1.31 with today's fp16 graph:** speed, plus parity on recorded screens. Watch for inf/NaN, and strip the INTERNET permission. **Done 2026-10-18 (research/18 §6b):** fp16 on 1.31 is erratic and further off. 8-bit MatMulNBits on 1.31 shipped instead: 1.73–1.85 s vs 3.83–3.90 s on the fixture.
 5. **Sustained:** 10 steps back to back at ~900 tokens, logging step time and `getThermalHeadroom(10)`.
 6. **`adb shell cat /vendor/etc/public.libraries.txt`.** This confirms the OpenCL libraries on Android 16. It also shows whether `libedgetpu_litert.so` is now public on the Pixel 8; it is on Pixel 9 firmware but not in the Pixel 8 Android 15 dump [UNCERTAIN].
 7. **Only if going GPU:** run the Laya-Multilingual-LiteRT Android sample on the Pixel 8. It downloads the S256 graph plus the 393 MB embedding table. Measure S256 GPU FP32 latency and parity against the CPU.

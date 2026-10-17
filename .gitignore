@@ -13,6 +13,7 @@ android/.gradle/
 android/.kotlin/
 android/build/
 android/app/build/
+android/app/.cxx/
 android/local.properties
 *.apk
 # jniLibs/arm64-v8a/libc++_shared.so IS committed: DJL's tokenizer .so needs it and its aar

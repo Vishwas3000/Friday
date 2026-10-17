@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Skills (research/10): alarm/timer intents, the Wi-Fi Allow dialog, brightness (owner grants it once). -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
@@ -8,6 +9,9 @@
     <!-- "Hey Friday" (D-035): audio is scored in RAM and never stored; the app has no INTERNET permission. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- onnxruntime-android 1.31 merges these in; Friday stays offline (research/19). -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
 
     <!-- Package visibility: lets the agent list launchable apps by label for OPEN_APP. -->
     <queries>

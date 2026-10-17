@@ -19,7 +19,7 @@ import java.io.File
  */
 object Bench {
     fun run(ctx: Context, c: JSONObject): JSONObject {
-        val model = File(ctx.filesDir, c.optString("model", "laya-android.fp16.onnx"))
+        val model = File(ctx.filesDir, c.optString("model", LayaEngine.MODEL))
         val fixtureFile = File(ctx.filesDir, c.optString("fixture", "fixture.json"))
         require(model.exists()) { "model not in filesDir: ${model.absolutePath} (run scripts/bench_device.py)" }
         require(fixtureFile.exists()) { "fixture not in filesDir: ${fixtureFile.absolutePath}" }

@@ -26,7 +26,8 @@ android {
 
 dependencies {
     // Phase 2: run Laya's exported ONNX on-device. Full build (not -mobile) for the ModernBERT op set.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+    // 1.31: 8-bit MatMulNBits (research/18). Its AAR adds INTERNET, which the manifest removes.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")
     // On-device tokenizer: load the checkpoint's tokenizer.json byte-identically (D-022). 0.33.0 is the
     // only release shipping the Android arm64 .so; abiFilters above keeps just that one.
     implementation("ai.djl.huggingface:tokenizers:0.33.0")

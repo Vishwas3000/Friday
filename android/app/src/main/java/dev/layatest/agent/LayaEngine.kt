@@ -122,7 +122,8 @@ class LayaEngine(ctx: Context) : AutoCloseable {
     }
 
     companion object {
-        const val MODEL = "laya-android.fp16.onnx"
+        // 8-bit MatMulNBits on ORT 1.31: 2.1× faster than fp16 on the Pixel 8, same decisions (D-047, research/18 §6)
+        const val MODEL = "laya-android.nb8-h-e16.onnx"
         // INPUT_TEXT's target only outlines the field on the approval card; scrolls use the largest scrollable
         private val TARGETED = setOf("CLICK", "LONG_PRESS", "INPUT_TEXT")
     }

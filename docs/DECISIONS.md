@@ -164,7 +164,7 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Gotcha:** `onnxconverter_common` fp16 breaks ModernBERT's deliberate fp32 islands (RoPE/Cast/Softmax); the script blocks those nodes. Parity so far is a smoke test, not a full eval — replay real `captures/` before trusting it on-device.
 - **Rejected:** fp32 on-device (1.28 GB, OOM risk); dynamic int8 as the default (over budget + 83% parity).
 - **Revisit:** if on-device latency/RAM needs it, go int8-of-linears + mmap-embedding.
-- **Who / status:** Claude · Proposed
+- **Who / status:** Claude · Superseded 2026-10-18 by D-047 step 2 (8-bit MatMulNBits on ORT 1.31)
 
 ### D-021 — Input is typed now; voice (STT + speaker verification) is deferred; no LLM near-term
 - **Decision:** Friday takes a **typed** goal for now, routed straight into Laya + rules. STT and voice-based owner verification ("only I can command it") are a later phase. No generative LLM is added near-term.
@@ -376,7 +376,7 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - Dropping duplicate scroll containers (4.8% fewer tokens, 3/52 changed).
   - Judging int8 on the Mac's default ORT 1.31 (its SME kernels hide the error the phone would see).
 - **Side effect:** non-tap steps carry no target, so training rows and remembered paths stop storing an unused one for BACK / SCROLL, and skipped non-tap steps don't block an element.
-- **Who / status:** Claude · 1 validated on the Pixel 8: same answers on 5/5 live screens; non-tap steps 1.5–4.9× faster (Play Store scroll 23.1 → 4.7 s), taps 1.1–1.8×. 2 waits for the phone bench. Pinning ONNX Runtime's threads to the mid cores (live, 3 of 4 sat on little cores while Friday is in the `foreground` cpuset, which excludes the X3): experiment, off by default, waiting for an A/B
+- **Who / status:** Claude · 1 validated on the Pixel 8: same answers on 5/5 live screens; non-tap steps 1.5–4.9× faster (Play Store scroll 23.1 → 4.7 s), taps 1.1–1.8×. 2 **shipped 2026-10-18** after the phone bench (research/18 §6b): 1.73–1.85 s vs 3.83–3.90 s on the fixture (2.1×), 651 vs 753 MB, logits equal to the Mac's phone-like run (0.1816 vs 0.182). The 1.31 AAR's INTERNET and ACCESS_NETWORK_STATE permissions are removed. fp32 on 1.20 was rejected: 1.3× faster for +600 MB. Pinning ONNX Runtime's threads to the mid cores (live, 3 of 4 sat on little cores while Friday is in the `foreground` cpuset, which excludes the X3): experiment, off by default, waiting for an A/B
 
 ### D-048 — Friday learns from experience: on-phone hints now, retraining on the box; exact replay stays a shortcut
 - **Decision:** two learning loops. Laya always makes the decision; remembered paths stop being scripts.

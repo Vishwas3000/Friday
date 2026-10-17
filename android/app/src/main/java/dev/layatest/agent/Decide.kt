@@ -18,7 +18,7 @@ import java.io.File
 object Decide {
     fun test(ctx: Context, c: JSONObject): JSONObject {
         val tokFile = File(ctx.filesDir, "tokenizer.json")
-        val modelFile = File(ctx.filesDir, c.optString("model", "laya-android.fp16.onnx"))
+        val modelFile = File(ctx.filesDir, c.optString("model", LayaEngine.MODEL))
         require(tokFile.exists()) { "tokenizer.json not in filesDir (run scripts/bench_device.py --decide)" }
         require(modelFile.exists()) { "model not in filesDir: ${modelFile.name}" }
 

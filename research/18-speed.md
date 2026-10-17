@@ -1,6 +1,6 @@
 # 18 — Making each Laya pass faster without changing its decisions
 
-_2026-10-17 · Mac (Apple M5, 4 intra-op threads) on 52 (screen, goal) pairs from real Pixel 8 screens; phone numbers
+_2026-10-17, phone results 2026-10-18 (§6b) · Mac (Apple M5, 4 intra-op threads) on 52 (screen, goal) pairs from real Pixel 8 screens; phone numbers
 from research/06 and 20 · **ORT versions:** agreement on the phone's runtime is measured with **onnxruntime 1.20.0**
 (the version in `android/app/build.gradle.kts`, installed in an isolated venv). The fp32 reference, token trims, split
 rows and the 8-bit / fp16 checks use the project venv's **onnxruntime 1.31.0**; each table states whether KleidiAI was
@@ -8,6 +8,9 @@ on · Trust tags: [primary] read at source · [measured] run here · [derived] c
 [UNCERTAIN]_
 
 ## TL;DR
+- **Shipped (2026-10-18, §6b).** On the Pixel 8, `nb8-h-e16` on onnxruntime-android 1.31.0 runs the fixture in
+  **1.73–1.85 s vs 3.83–3.90 s** for today's fp16 on 1.20 (**2.1×**), at 651 MB instead of 753 MB. Its logits match the
+  Mac's phone-like run to 3 decimals, so §4's 52/52 carries over. fp32 on 1.20 was only 1.3× faster, for +600 MB.
 - **The int8 recipe we planned does not keep decisions on the phone's runtime.** Dynamic int8 with per-channel weights,
   with the decision head, the embedding table or the first/last encoder layers kept un-quantized, flips **7–11 of 52
   operations and 7–10 of 34 tap targets** under ORT 1.20.0 [measured].
@@ -201,7 +204,7 @@ the summed median time per pair with 4 threads and phone-like kernels. A model n
   - **Label cap:** `laya_android.py:129` `[:40]` and `LayaInput.kt:79` `take(40)`.
   - Not recommended now: small saving, decisions move, and the gain shrinks further once op-first lands.
 
-## 6. Phone benchmark to run (prepared, not run)
+## 6. Phone benchmark (prepared 2026-10-17, run 2026-10-18: results in §6b)
 Prerequisites (main's call):
 1. Bump `com.microsoft.onnxruntime:onnxruntime-android` from 1.20.0 to **1.31.0** (the version measured here) in
    `android/app/build.gradle.kts`. If that AAR isn't published, use the newest ≥ 1.23 (not checked: no network here).
@@ -233,7 +236,43 @@ uv run python scripts/bench_device.py --model laya-android.nb8-h-e16.onnx --deci
 - **If the upgrade is blocked:** `laya-android.nb4-h-e16.onnx` is the only quantized file that both runs on 1.20 and
   keeps operations. Bench it the same way (Mac fixture diff 1.25, BACK/0); it still costs 3/34 tap targets.
 
-## 7. What speed to expect on the phone [derived, UNCERTAIN until §6 runs]
+## 6b. Phone results [measured, Pixel 8, 2026-10-18]
+Fixture batched (2 rows × 318 tokens), 4 threads, arena off (`--lowmem`), 6 timed passes after one warm-up. Battery
+32.7–34.2 °C, screen awake, Friday's process in the `foreground` cpuset. Runs alternate between models with 45–60 s
+rests.
+
+| ORT | model | median s | min s | PSS MB | load s | op / target | max \|Δlogit\| vs fixture |
+|---|---|---|---|---|---|---|---|
+| 1.20.0 | fp16 (shipped until today) | 3.90, 3.83 | 3.50, 3.30 | 753–756 | 2.5–2.9 | BACK / 0 | 0.006 |
+| 1.20.0 | fp32 | 3.08, 2.82 | 2.83, 2.60 | 1,351–1,359 | 4.2–4.8 | BACK / 0 | 0.039 |
+| 1.31.0 | fp16 | 11.88 † | 3.07 | 686 | 11.5 † | BACK / 0 | 0.082 |
+| 1.31.0 | fp32 | 3.32 † | 2.53 | 1,300 | 5.4 | BACK / 0 | 0.039 |
+| 1.31.0 | **nb8-h-e16** | **1.73, 1.85** | **1.59, 1.69** | **651–653** | 2.3 | BACK / 0 | **0.1816** (Mac: 0.182) |
+
+- **nb8 is 2.1× faster than what shipped, with less memory.** `--decide` (on-phone tokenizer → ORT → decode) matched
+  `input_ids` and marker positions and answered BACK 0.41 / target 0 0.76.
+- **Parity carries over from §4.** The phone's nb8 logits equal the Mac's KleidiAI-off run to 3 decimals. The phone
+  runs the same block-int8 path, so §4's 52/52 operations and targets apply.
+- **fp16 on 1.31 is a dead end on the phone too:** erratic (3.1–12.4 s within one run) and further from the reference
+  (0.082 vs 0.006).
+- **fp32 isn't worth it:** 1.3× for +600 MB.
+- † **Don't time within ~10 minutes of `adb install`.** The first nb8 run after the install (6.49 s, load 9.0 s), the
+  fp16 run after it and probably the fp32 run were slowed by background work. The same nb8 file gave 2.33 s a few
+  minutes later and 1.73–1.85 s settled.
+- **research/06's 2.4 s for fp16 on this fixture** didn't reproduce: it was 3.8–3.9 s today. Conditions differ, so
+  compare only within one session.
+- **Live steps are slower per token than the bench.** fp16 in real tasks cost 8–27 ms per token against about 6 ms
+  here (request log, 2026-10-17). Examples: GPay 709 tokens 5.5 s; Meesho 2,210 tokens 36.7 s; Amazon 975 tokens
+  26.5 s. The app being driven competes for the same cores, and heat adds to it [UNCERTAIN: not separated].
+- **Shipping changes:**
+  - `onnxruntime-android` 1.20.0 → 1.31.0.
+  - The AAR merges INTERNET and ACCESS_NETWORK_STATE; both are removed with `tools:node="remove"`. `aapt2 dump
+    permissions` matches the 1.20 build.
+  - The APK grows 63.6 → 80.3 MB (`libonnxruntime.so` 34 MB).
+  - `LayaEngine.MODEL` = `laya-android.nb8-h-e16.onnx`; `setup_phone.py` pushes it.
+  - Rollback: set `MODEL` back and the ORT version to 1.20.0. The fp16 file stays on the phone.
+
+## 7. What speed to expect on the phone [derived before §6b; §6b measured nb8 at 2.1×, inside this range]
 - **Today's baseline is fp32 math.** ORT 1.20 has no fp16 CPU kernels for MatMul/Gemm/Softmax/Add/Mul/Gelu, so the
   fp16 file is cast to fp32 inside every run (research/19). On the Mac under 1.20, fp16 took 57.5 s vs 49.1 s for fp32.
 - **On the Mac,** nb8 took 0.61–0.64× the time of fp32 math (24.2 / 39.6 s split, 30.5 / 47.7 s batched; MLAS
@@ -258,7 +297,6 @@ uv run python scripts/bench_device.py --model laya-android.nb8-h-e16.onnx --deci
 - **`captures/spotify_state.json`:** an error body, not a screen.
 
 ## Open
-- Run §6 on the phone (needs the ORT bump): nb8 speed, PSS and parity, and whether fp16 regresses on 1.31.
 - Re-check nb8 on more screens once Teach/run rows exist (research/14). 52 pairs can't show a 1% flip rate.
 - The embedding is now the largest part of nb8 (393 MB as fp16). An 8-bit `GatherBlockQuantized` in a newer ORT could
   bring the file to ~380 MB [UNCERTAIN, untested].
