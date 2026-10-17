@@ -377,3 +377,26 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - Judging int8 on the Mac's default ORT 1.31 (its SME kernels hide the error the phone would see).
 - **Side effect:** non-tap steps carry no target, so training rows and remembered paths stop storing an unused one for BACK / SCROLL, and skipped non-tap steps don't block an element.
 - **Who / status:** Claude · 1 validated on the Pixel 8: same answers on 5/5 live screens; non-tap steps 1.5–4.9× faster (Play Store scroll 23.1 → 4.7 s), taps 1.1–1.8×. 2 waits for the phone bench. Pinning ONNX Runtime's threads to the mid cores (live, 3 of 4 sat on little cores while Friday is in the `foreground` cpuset, which excludes the X3): experiment, off by default, waiting for an A/B
+
+### D-048 — Friday learns from experience: on-phone hints now, retraining on the box; exact replay stays a shortcut
+- **Decision:** two learning loops. Laya always makes the decision; remembered paths stop being scripts.
+  1. **On the phone, instantly, no training.** Each finished task is an experience: the app, the goal, the steps, and what the finished screen looked like. An experience is kept when it went right:
+     - the owner taps **✓ Right**;
+     - an outcome check passes (music playing, the alarm in Android's alarm record, dated transactions on screen);
+     - or it was taught.
+
+     **✗ Wrong** keeps the run as a negative and forgets a path that led there. **Show me** starts Teach mode on the same goal.
+
+     Next time a similar goal comes up in that app (shared content words, not an exact phrase), its steps go to Laya as a hint, e.g. "last time: tapped 'See transaction history'". Laya then matches the element by meaning even if it moved or was renamed. A screen that matches the remembered finished screen counts as done.
+  2. **On the GPU box, periodically.** Laya-Android is fine-tuned on these experiences (taught, confirmed, verified; corrections; negatives) plus public replay (D-043, D-044). The new checkpoint ships only if it beats the current one on the owner's held-out tasks.
+  - **Exact replay** of a remembered path stays as the fast path (≈2 s, no Laya) when every element is on screen.
+  - When replay stops at a missing element, Laya carries on with the remaining steps as hints.
+- **Why:** owner, 2026-10-17: "we might need to think smarter, trainable and learnable approach to do things, not just noting down steps. we need to make it learnable".
+  - Literal replay broke when GPay reopened on another page (research/20): GPay resumed on the last run's page, and Laya wandered to a loans page.
+  - Hints and retraining generalise across screens, rephrasings and new tasks in the same app.
+  - The prototype survey (research/21) points the same way. LayaBrowse reports success only when the outcome is verified, and MobiMem-style memory made tasks 1.6–9× faster.
+- **Rejected:**
+  - Retraining only (owner chose both loops; improvement would take days).
+  - Letting Friday explore apps on its own now (loop 3: later, after these two).
+  - Dropping exact replay (owner kept it as a shortcut).
+- **Who / status:** user (chose loops 1+2 and the shortcut) · Claude (design) · Loop 1 in progress; loop 2 waits for the box's SSH port

@@ -88,6 +88,7 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 | [18-speed.md](18-speed.md) | Faster Laya passes, measured on 52 real (screen, goal) pairs: dynamic int8 fails on ORT 1.20; 8-bit MatMulNBits keeps 52/52 (needs a newer ORT); operation-first is exact at ~0.41× compute; label trims not worth it |
 | [19-android-encoder-speed.md](19-android-encoder-speed.md) | How fast Laya can run on a Pixel 8: ORT 1.20 has no fp16 CPU kernels (casts every run), wasted target rows, heat/cores; target ~1 s/step (5–10×) |
 | [20-ui-memory-and-step-speed.md](20-ui-memory-and-step-speed.md) | Where a step's time goes (Laya, by tokens) and UI memory: repeat tasks 22.6 s → 2.2 s without Laya (D-040) |
+| [21-prototypes.md](21-prototypes.md) | Has anyone built this? Closest fully-local phone agents (PokeClaw, MobiAgent runner, Genie) take minutes per task; none combine a non-generative step model, UI memory and teach-to-train on a stock phone |
 
 
 
