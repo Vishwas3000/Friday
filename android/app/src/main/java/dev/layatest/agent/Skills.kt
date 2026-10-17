@@ -105,7 +105,29 @@ private val RULES: List<Pair<String, Regex>> = listOf(
 const val CONFIDENT = 0.7  // research/09: routing at >= 0.7 was 93% right; below it, ask the owner
 const val SLOT_Q = "Which words in the request name the song, artist, show, person, place or item?"
 
-fun ruleSkill(request: String): String? = RULES.firstOrNull { it.second.containsMatchIn(request) }?.first
+fun ruleSkill(request: String): String? {
+    val skill = RULES.firstOrNull { it.second.containsMatchIn(request) }?.first
+    // "open X and <task>": the task picks the skill, which then uses the app named ("open youtube and play
+    // despacito" -> play_video in YouTube: straight to its results); a task no rule covers ("and go to the
+    // timers tab") stays open_app, for Laya inside X. Was: every "open X and ..." went to Laya (2026-10-17).
+    if (skill == "open_app") OPEN_AND.find(request)?.let { m -> ruleSkill(m.groupValues[1])?.takeIf { it != "open_app" }?.let { return it } }
+    return skill
+}
+
+/** The task in "open X and <task>", else the whole request: what slots and media queries are read from. */
+fun taskPart(request: String) = OPEN_AND.find(request)?.groupValues?.get(1) ?: request
+
+private val OPEN_AND = Regex("^\\s*(?:please\\s+)?(?:open|launch|start)\\s+.+?\\s+(?:and|then|to)\\s+(.+)$", RegexOption.IGNORE_CASE)
+
+/** Asserts the "open X and <task>" routing. */
+fun routingSelfCheck(): String {
+    check(ruleSkill("open youtube and play despacito") == "play_music")  // PlayMusic hands a video app to PlayVideo
+    check(ruleSkill("open the clock app and go to the timers tab") == "open_app")
+    check(ruleSkill("open the clock app and set an alarm for 7") == "alarm_timer")
+    check(ruleSkill("open settings and turn on wifi") == "device_setting")
+    check(ruleSkill("open spotify") == "open_app")
+    return "ok"
+}
 
 /** What's left to do after "open <app>" ("and go to the stopwatch tab"), or null if opening is the whole request. */
 fun taskAfterOpening(request: String, appLabel: String): String? {

@@ -19,7 +19,7 @@ import java.util.Locale
  */
 class Assistant(private val svc: AgentService, override val request: String) : SkillContext {
     override val android: Context get() = svc
-    override val slots = Slots(request)
+    override val slots = Slots(taskPart(request))
     override val apps = AppResolver(svc)
     override val stopped get() = banner.stopped
 
@@ -36,24 +36,38 @@ class Assistant(private val svc: AgentService, override val request: String) : S
 
     private val skills: Map<String, Skill> = (phoneSkills() + mediaSkills() + peopleSkills()).associateBy { it.id }
 
-    /** What happened, step by step (route, apps opened, each Laya decision + verdict, outcome): for debugging. */
-    val trace = ArrayList<String>()
+    /** What happened, step by step (route, apps opened, each Laya decision + verdict), each line stamped with the
+     *  time since the request started ("+3.2s ..."): the timeline the request log keeps. */
+    val trace = object : ArrayList<String>() {
+        private val t0 = SystemClock.elapsedRealtime()
+        override fun add(element: String) = super.add("+%.1fs %s".format((SystemClock.elapsedRealtime() - t0) / 1000.0, element))
+    }
 
-    /** Handle the request; returns what to tell the owner. */
-    fun run(): String = try {
-        banner.say("Understanding…")
-        val skill = route(request, { laya }) { q, options -> ask(q, options) }
-        Log.i(TAG, "request routed to ${skill ?: "something else"}")
-        trace += "route: ${skill ?: "something else"}"
-        val result = if (stopped) null else (skill?.let { skills[it] ?: GenericSkill(it) } ?: GenericSkill("other")).run(this)
-        if (stopped) "Stopped" else result ?: "Done"
-    } catch (e: Throwable) {  // an Error (e.g. a failed class init) must not vanish silently either
-        Log.e(TAG, "request failed", e)
-        trace += "error: $e"
-        "Something went wrong: ${e.message ?: e}"
-    } finally {
-        banner.remove()
-        if (usedLaya) svc.layaIdle()
+    /** Handle the request; returns what to tell the owner. Every request is logged with its timeline (D-045). */
+    fun run(): String {
+        val t0 = SystemClock.elapsedRealtime()
+        val said = try {
+            banner.say("Understanding…")
+            val skill = route(request, { laya }) { q, options -> ask(q, options) }
+            Log.i(TAG, "request routed to ${skill ?: "something else"}")
+            trace += "route: ${skill ?: "something else"}"
+            val result = if (stopped) null else (skill?.let { skills[it] ?: GenericSkill(it) } ?: GenericSkill("other")).run(this)
+            if (stopped) "Stopped" else result ?: "Done"
+        } catch (e: Throwable) {  // an Error (e.g. a failed class init) must not vanish silently either
+            Log.e(TAG, "request failed", e)
+            trace += "error: $e"
+            "Something went wrong: ${e.message ?: e}"
+        } finally {
+            banner.remove()
+            if (usedLaya) svc.layaIdle()
+        }
+        // the request log (D-045): what was asked and said, how long it took, and the timeline; text only, no screens
+        runCatching {
+            File(svc.filesDir, REQUEST_LOG).appendText(JSONObject().put("time", System.currentTimeMillis())
+                .put("request", request).put("answer", said).put("ms", SystemClock.elapsedRealtime() - t0)
+                .put("trace", JSONArray(trace)).toString() + "\n")
+        }
+        return said
     }
 
     override fun appFor(skill: String): AppInfo? {
@@ -321,6 +335,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
     private fun key(c: ScreenCandidate) = "${c.label}@${c.bounds.joinToString(",")}"
 
     companion object {
+        const val REQUEST_LOG = "requests.jsonl"
         private const val TAG = "FridayAssistant"
         private const val GROUP = 16
     }

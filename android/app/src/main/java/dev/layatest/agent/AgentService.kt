@@ -62,7 +62,7 @@ class AgentService : AccessibilityService() {
         "decide_test" -> Decide.test(this, c) // Phase-2c: full on-device tokenize+build+ORT+decode on the fixture
         "selfcheck" -> JSONObject().put("candidates", candidatesSelfCheck()).put("slots", slotsSelfCheck())
             .put("media", mediaSelfCheck()).put("people", peopleSelfCheck()).put("profiler", appCatalogSelfCheck())
-            .put("routes", routesSelfCheck()).put("wake", wakeSelfCheck(this))
+            .put("routes", routesSelfCheck()).put("routing", routingSelfCheck()).put("wake", wakeSelfCheck(this))
         "wake" -> wake?.command(c) ?: error("the wake word isn't set up yet")  // {"on": bool} optional; listening stats
         "wake_test" -> wakeTest(this, java.io.File(filesDir, c.getString("wav")))  // max score of a WAV in filesDir
         "profiles" -> JSONObject(AppProfiler.profiles(packageManager) as Map<*, *>)  // D-031: auto app profiles, to evaluate
@@ -86,6 +86,9 @@ class AgentService : AccessibilityService() {
         "remember" -> JSONObject().put("remembered", lastAsk?.learned != null).also { lastAsk?.remember() }
         "routes" -> Routes.all(this)  // UI memory (D-040), for debugging
         "step_parity" -> stepParity(c.getString("goal"))
+        // the request log's last entries (default 20), timelines included
+        "requests" -> JSONObject().put("requests", JSONArray(java.io.File(filesDir, Assistant.REQUEST_LOG)
+            .takeIf { it.exists() }?.readLines()?.takeLast(c.optInt("last", 20))?.map { JSONObject(it) } ?: emptyList<JSONObject>()))
         "laya_pin" -> JSONObject().put("pin", c.getBoolean("on").also { on -> laya().pinFastCores = on; layaIdle() })
             .put("fast_cores", Integer.toBinaryString(Native.fastCores))
         else -> error("unknown cmd: $cmd")

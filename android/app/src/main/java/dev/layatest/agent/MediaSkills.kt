@@ -109,7 +109,7 @@ fun mediaKey(request: String, app: String? = null): Int? {
 
 /** What to search for: the request minus its leading command/filler words and trailing fillers ("play some jazz music" -> "jazz"). */
 fun mediaQuery(request: String, app: String? = null): String {
-    val w = words(request, app)
+    val w = words(taskPart(request), app)  // "open youtube and play despacito" -> "despacito", not "open and play despacito"
     val l = w.map { it.lowercase(Locale.ROOT) }
     var a = 0
     while (a < l.size && l[a] in POLITE) a++
@@ -159,6 +159,7 @@ private val CONTROL = setOf("the", "this", "that", "it", "a", "one", "song", "tr
 /** Asserts for the media rules; the "selfcheck" bridge command runs it on the phone. */
 fun mediaSelfCheck(): String {
     check(mediaQuery("play jazz music") == "jazz")
+    check(mediaQuery("open youtube and play despacito", "YouTube") == "despacito")
     check(mediaQuery("I want to hear some Taylor Swift") == "Taylor Swift")
     check(mediaQuery("play some arijit singh songs") == "arijit singh")
     check(mediaQuery("play the latest album by Taylor Swift") == "Taylor Swift")

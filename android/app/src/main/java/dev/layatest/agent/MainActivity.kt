@@ -55,7 +55,9 @@ class MainActivity : Activity() {
             text = "Delete all learned data"
             setOnClickListener {
                 val c = this@MainActivity
-                toast("Deleted ${Teacher.wipe(c)} recordings and ${Routes.wipe(c)} remembered paths from this phone")
+                val log = java.io.File(c.filesDir, Assistant.REQUEST_LOG).let { it.exists() && it.delete() }
+                toast("Deleted ${Teacher.wipe(c)} recordings, ${Routes.wipe(c)} remembered paths" +
+                    (if (log) " and the request log" else "") + " from this phone")
             }
         }
         val open = Button(this).apply {

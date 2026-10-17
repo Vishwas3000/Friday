@@ -3,7 +3,8 @@ package dev.layatest.agent
 /**
  * Every action Friday takes goes through [verdict] (D-025, D-026):
  *  - AUTO  safe navigation (scroll, back, ordinary taps) runs on its own;
- *  - ASK   anything that could send, pay, delete, call, commit or type waits for the owner's Run;
+ *  - ASK   anything that could send, pay, delete, call or commit waits for the owner's Run. Typing runs on its
+ *          own (owner, 2026-10-17: "can the app input the texts"): it commits nothing until a Send/Pay tap, which asks;
  *  - BLOCK inside money apps Friday is read-only: no typing, no Pay/Send/Transfer, whatever the owner taps.
  * Auth prompts (fingerprint, screen lock, UPI PIN) are the owner's: Friday waits and never acts on them.
  */
@@ -37,7 +38,6 @@ object Safety {
             if (tap && label.isBlank()) return Verdict.ASK to "unlabelled button in a money app"
         }
         if (tap && foreground in COMMIT_ON_TAP) return Verdict.ASK to "a tap here can place a call"
-        if (op == "INPUT_TEXT") return Verdict.ASK to "types text"
         if (tap && RISKY.containsMatchIn(label)) return Verdict.ASK to "\"$label\" could send, pay or change something"
         return Verdict.AUTO to ""
     }
