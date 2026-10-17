@@ -231,28 +231,28 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Decision:** Friday must not depend on hand-written per-app knowledge ("GPay is for expenses", per-app recipes). What an app is for, and how to operate it, comes from (a) app profiles generated automatically on the phone from what each app declares (label, package-name words, Play category, intent-filter capabilities, launcher shortcuts / App Actions) and (b) a Laya fine-tuned to match requests to those profiles and to operate apps. Platform capabilities used through Android APIs and intents (alarm, timer, navigation, web search, battery) stay — they aren't per-app knowledge.
 - **Why:** owner, 2026-10-17: "we don't want to hardcode usecases for an app… finetune laya to understand the basic utility of all the apps". Measured (research/12): purposes lift app choice 36% → 58%, so profiles are the lever; generating them removes the hand-written list.
 - **Supersedes:** the hand-written purpose catalog planned in research/12 / D-027 (the catalog agent was redirected to an automatic profiler). The 16-skill keyword rules stay only as a fast path for common phrasings.
-- **Who / status:** user (direction) · Claude (method) · Pending — research/14 (data), research/15 (method)
+- **Who / status:** user (direction) · Claude (method) · Profiles built (D-038); method proposed (D-043), data plan proposed (D-044); training waits for the GPU box (D-034, D-042)
 
 ### D-032 — A lightweight on-device LLM writes text; Laya still decides
 - **Decision:** add a small generative model used **only** when a step needs text the owner will see before it's used (message, email and reply bodies). It loads on demand, is freed after, and is never resident together with Laya (D-016). Its output always goes through the approval card before anything is typed or sent.
 - **Why:** owner, 2026-10-17: "if I ask it to write a text it should be able to do it… use some light weight LLM to offload the works when it involves any text outputs". Laya chooses but cannot generate.
 - **Supersedes:** D-021's "no generative LLM near-term", for text output only.
-- **Who / status:** user · Pending — model and runtime from research/13
+- **Who / status:** user · Proposed — D-041 (llama.cpp + LFM2.5-1.2B, research/13), gated on a Pixel 8 comparison
 
 ### D-033 — Teach mode: the owner demonstrates, Friday records, and it can all be deleted
 - **Decision:** the owner types what they'll do and taps **Teach this**. A red banner shows while recording. For each step Friday records the settled screen (raw forest) and the owner's action (tap, long-press, scroll, typed text, opening an app), and **Done** records where the task ends. Cancel keeps nothing. **"Delete all teaching data"** wipes the phone's recordings, `scripts/pull_teach.py --wipe` also removes the Mac copy, and copies used for training on the GPU box are deleted after each run.
 - **Why:** owner chose Teach mode as the training-data source (2026-10-17). It gives the best labels for operating the owner's own apps and for DONE, Laya's weak spot (research/05, 17). Privacy: the owner said the data is "only for me and research purpose, not gonna publish". Deletability: owner, "make sure we can delete the data once we are done".
-- **Who / status:** user · In progress (recorder built; wiring and export in progress)
+- **Who / status:** user · Validated on the Pixel 8 (Clock: open → Stopwatch → Stop → Done recorded; Compose apps via D-039); Teach recordings also become remembered paths (D-040); export script pending
 
 ### D-034 — Train on the owner's remote GPU box, isolated from its other projects
 - **Decision:** fine-tuning runs on the owner's remote CUDA machine: one dedicated directory with its own environment, no global installs or system changes, a GPU-usage check before each run, nothing outside our directory touched. The owner's personal data (Teach mode) may be used there.
 - **Why:** owner offered it, 2026-10-17 ("don't delete or interfere with the existing projects"); Laya-Android's own fine-tune needed an RTX 4090-class GPU (2.7 h).
-- **Who / status:** user · Pending — the instance was unreachable (SSH port closed); waiting for the current port
+- **Who / status:** user · Rule confirmed by the owner (D-042): "for any training use the remote vast machine". Run-packs for research/14 and 15 are ready; waiting for the instance's current SSH port (<previous-port> and <previous-port> refused). Agents' own SSH attempts are blocked by the permission check, so main runs box commands.
 
 ### D-035 — A wake word for Friday, at very low standby power
 - **Decision:** add a wake word ("Hey Friday") so Friday can be started hands-free, with standby power kept minimal and audio never leaving the phone. Speech-to-text and owner-voice verification follow later.
 - **Why:** owner, 2026-10-17. Fine-tuning research comes first (owner: "but first research on how can we finetune laya").
-- **Who / status:** user · Pending — design from research/16
+- **Who / status:** user · In progress — openWakeWord inside Friday's ONNX Runtime (research/16); phrases "hey Friday" and "hi Friday" (owner, 2026-10-17); listen while unlocked or charging, pause in calls
 
 ### D-036 — Friday operates the app it opens: the task continues inside it, and Laya is told what was done
 - **Decision:** "open X and <task>" opens X and hands the rest to Laya inside X, instead of stopping. Friday keeps a trail of what it did in a request (OPEN_APP, taps, typed text — intent launches included) and passes it to Laya as `history`.
@@ -264,3 +264,45 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Decision:** the owner's word decides: "alarm", "wake me" or "remind" makes an alarm (at now + duration for "in 8 mins"); only "timer" makes a timer. After setting an alarm Friday reads Android's next-alarm record before claiming success, otherwise it says it couldn't confirm. Answers say where to find the result.
 - **Why:** owner bug report, 2026-10-17: "set an alarm for 8 mins from now" showed "timer set" and nothing appeared in the alarm list. Logs showed the timer had been set (research/17); the wrong kind, and claimed without checking.
 - **Who / status:** Claude · Validated on the Pixel 8 ("Alarm set for 5:19 AM (in 8 min) — Clock › Alarms", 0.8 s)
+
+### D-038 — App profiles are generated on the phone (AppProfiler)
+- **Decision:** each installed app's profile is built on the phone from what it declares: label, package-name words, Play category, which capability intents it handles (play-from-search, navigation, geo, dial, mailto, UPI pay, set alarm, camera, image view, web links; one `<queries>` intent per probe, `MATCH_ALL`), and its static launcher shortcuts (parsed from the app's shortcuts XML by attribute id). Whole items are cut to fit a 35-word budget.
+- **Why [measured]:** 205 apps profiled in 1 s. Zero-shot app choice: profiles 48% vs names 36% vs hand-written purposes 58% (research/15). In 22 of 26 misses a right app did declare a capability, so reading profiles, not the profiles themselves, is the gap → fine-tuning (D-043).
+- **Rejected:** a hand-written catalog (D-031); Wikidata as a profile source (research/14: covers 66 of the owner's 207 apps).
+- **Open:** extra probes listed in research/15 (Health Connect, media/telecom services, SET_TIMER, CREATE_NOTE, calendar INSERT, widgets, web domains); budget in tokens (~27 words hit the 48-token option cap), not words.
+- **Who / status:** Claude · Built; probes to extend
+
+### D-039 — Teach mode takes the owner's real touches when the phone is plugged in
+- **Decision:** `scripts/teach_touches.py --goal …` starts Teach mode in raw-touch mode and forwards every tap, long-press and edge swipe (BACK / HOME) read from the touchscreen with `adb shell getevent`; the phone matches each point against the screen it was showing, exactly like a click event, and ignores click events for that session. Touches on Friday's own banner are dropped. The screen behind a step is re-read at most 1.5 s after it starts changing, so screens that never settle (a running stopwatch) are still read. Only taps on app icons count as OPEN_APP on the launcher.
+- **Why [measured]:** Compose apps send no click event for a finger tap (Play Store tabs: none), nor do buttons that hide themselves (Clock's Reset). With raw touches: Play Store → Books recorded as OPEN_APP, CLICK Books (target 24), BACK, DONE.
+- **Rejected:** `AccessibilityServiceInfo.setMotionEventSources(SOURCE_TOUCHSCREEN)` (the service would take the touches over; an observe-only variant isn't public API); an overlay that intercepts and re-injects touches (breaks gestures); `sendevent` (blocked on a user build, and only useful for tests). On-phone-only raw touches would need Shizuku (later, if teaching away from the Mac matters).
+- **Open:** the getevent reader is self-checked but not yet tried with a real finger.
+- **Who / status:** Claude · Phone side validated
+
+### D-040 — UI memory: remembered paths replay without Laya
+- **Decision:** a path that finished a goal is stored per app as element signatures (package, resource id, class, label) and replayed by finding each element on the live screen; the first element that isn't there hands the rest to Laya. Paths come only from Teach demonstrations and runs the owner confirms on the answer card ("I did: tap “Timers”" → Remember these steps); confirmed runs also write Teach-format training rows. Replayed steps still pass `Safety.verdict`. "Delete all learned data" wipes paths and recordings.
+- **Why [measured, research/20]:** Laya is the step cost (390 tokens 2.9 s … 1868 tokens 24–39 s); the screen read is 0.2–1 s. Clock "go to timers": 22.6 s with Laya → 2.2 s from memory; a taught path replayed in 2.0 s. Owner: "can laya learn the UI coz apps dont change their ui a lot".
+- **Rejected:** saving every run that ends in DONE (Laya overshot and started a real 1-minute timer — that path would have been memorised); exact-string goal keys (rephrasings miss); keying on the goal minus a guessed slot (made "open clock and …" match every Clock path).
+- **Who / status:** user (idea) · Claude · Validated on the Pixel 8 (1-step paths)
+
+### D-041 — Writer = llama.cpp + LFM2.5-1.2B-Instruct (QAD-Q4_0); runner-up Qwen3.5-0.8B (Q8_0)
+- **Decision:** text outputs (message and email bodies, reminder titles, search-query cleanup, one-line answers from screen text) come from llama.cpp (tag b11701, JNI + CMake, armv8.6-a+dotprod+i8mm+fp16, no SVE2 build) running LFM2.5-1.2B-Instruct QAD-Q4_0 (696 MB). Output is grammar-constrained JSON. Loaded on the first text step after Laya is freed, unloaded after 3 idle minutes; never resident with Laya (D-016); every draft goes through the approval card (D-025).
+- **Why:** best instruction-following that fits ~1 GB (IFEval 86.2 vs 59.9 for Qwen3.5-0.8B, vendor-run); ~134 tok/s prefill / 22 tok/s decode reported on Pixel 8a-class phones [secondary]; llama.cpp shares no native library with ONNX Runtime. Settings showed the need: Laya picked "settings and go" to type where "about phone" was meant (research/20).
+- **Gate:** compare both models on the Pixel 8 with research/13's prompts; ship LFM2.5 if it gives at least as many sendable drafts (Qwen3.5-0.8B: 3 of 7 on the Mac) and handles the Hinglish one. LFM2.5 doesn't support Hindi script: such requests skip the Writer until tested.
+- **Rejected:** LiteRT-LM (bigger APK and RAM, community-converted models), ONNX Runtime GenAI (would touch Laya's validated runtime; needs ORT 1.26 / opset 22), ExecuTorch, MediaPipe, GPU paths on Mali, gated Gemma 3 / Llama 3.2 1B, models over 1 GB.
+- **Who / status:** Claude · Proposed (research/13)
+
+### D-042 — Compute rule: all training on the GPU box; the Mac runs one model job at a time
+- **Decision:** every training or fine-tuning run happens on the owner's Vast GPU box (D-034), never on the Mac. On the 16 GB Mac at most one model process runs at a time across all agents (check `pgrep` first); phone models are benchmarked on the phone; large dataset downloads go to the box. Every agent prompt carries this rule.
+- **Why:** 2026-10-17 two research agents' fine-tune pilots (9 GB and 3.2 GB of GPU memory) ran alongside an eval (3 GB) and the build daemons (2.5 GB): 17 GB of swap. Owner: "what made the mac very slow… check and fix it", then "for any training use the remote vast machine… send it to all the agents". Stopping them took free memory from 13% to 65%.
+- **Who / status:** user · Rule
+
+### D-043 — App choice: automatic profile → BM25 shortlist → one Laya pass, then a joint fine-tune
+- **Decision:** per request, BM25 cuts ~200 profiled apps to 16–32 (plus the owner's remembered pick); one Laya pass answers skill and app together; per-question calibrated thresholds decide act vs ask (top 3) and the answer is remembered. Training (on the box): one joint fine-tune of laya-android with a new `app` question, a new `done` yes/no question and some `skill` rows, AndroidControl replay ~40% per epoch, embeddings frozen, encoder lr 1e-5, head lr 5e-5–1e-4, 2 epochs, shuffled options. Each new checkpoint ships with re-fitted per-question temperatures (today `LayaInput.kt` hard-codes one set).
+- **Why [measured, research/15]:** on rich purposes, BM25-16 + one pass 66% vs a full tournament 58%, at one sequence instead of 14; a 4-minute pilot fine-tune lifted it to 74% (not yet significant, p ≈ 0.3) but flipped 1 of 5 tap targets without replay. Laya's own encoder as the shortlister: 36–48% recall@16, below BM25 (dead end).
+- **Who / status:** Claude · Proposed; waits for the box
+
+### D-044 — Fine-tuning data: de-named public episodes + teacher-written requests + the owner's own runs
+- **Decision:** (1) AndroidControl "which app" rows with the app name stripped from the goal and soft labels; (2) requests written by a teacher LLM for app kinds AndroidControl lacks (UPI, ride-hailing, food delivery in India), with options rendered exactly as AppProfiler renders them; (3) the owner's Teach recordings and confirmed runs at 3–5× weight (DONE rows 5×), held out by task family plus the latest week; replay AndroidControl at least 1:1; every checkpoint gated on AndroidControl validation (within 1 point).
+- **Why [measured, research/14]:** 93.4% of AndroidControl's app-opening goals name the app: zero-shot accuracy 98.5% with the name vs 32.0% without, so un-stripped rows teach name matching, not app understanding. AndroidControl has no goals for Paytm, PhonePe, GPay, CRED, Swiggy, Ola or Rapido.
+- **Who / status:** Claude · Proposed; run-pack ready for the box

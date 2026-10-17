@@ -1,6 +1,6 @@
 # Research: can Laya run an Android phone, fully locally?
 
-_Last updated: 2026-10-16 · Trust tags: [primary] read at source · [secondary] search/blog/forum · [measured] run here · [UNCERTAIN] unconfirmed or conflicting_
+_Last updated: 2026-10-17 · Trust tags: [primary] read at source · [secondary] search/blog/forum · [measured] run here · [UNCERTAIN] unconfirmed or conflicting_
 
 Distilled from the topic files below. Decisions that follow from it are in [../docs/DECISIONS.md](../docs/DECISIONS.md).
 
@@ -80,10 +80,15 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 | [10-skills-intents.md](10-skills-intents.md) | Android intents/APIs per skill (alarm, timer, maps, search, music…), what completes without UI |
 | [11-upi-apps-feasibility.md](11-upi-apps-feasibility.md) | Can an accessibility assistant read UPI/bank apps? Per-app behaviour, exports, statement-file option |
 | [12-app-knowledge.md](12-app-knowledge.md) | Picking the right app: names 36% → purposes 58% → rules + purposes 91% (measured) |
+| [13-text-llm.md](13-text-llm.md) | The text "Writer": llama.cpp + LFM2.5-1.2B (runner-up Qwen3.5-0.8B), JSON grammars, Pixel 8 numbers to confirm (D-041) |
+| [14-finetune-data.md](14-finetune-data.md) | Fine-tuning data: AndroidControl's app-name leak (98.5% → 32.0% de-named), Indian-app gap, Friday's own Teach/run rows (D-044) |
+| [15-finetune-method.md](15-finetune-method.md) | Fine-tuning method: auto profiles 48% zero-shot, BM25 shortlist + one pass, joint fine-tune with replay, pilot results (D-043) |
+| [16-wake-word.md](16-wake-word.md) | Wake word: openWakeWord in Friday's ONNX Runtime, "Hey Friday", power per listening mode, platform limits (D-035) |
 | [17-operating-apps.md](17-operating-apps.md) | Why Friday "only opened apps" (fixed: trail + open-and-continue), the alarm bug, speed, operational lessons |
+| [20-ui-memory-and-step-speed.md](20-ui-memory-and-step-speed.md) | Where a step's time goes (Laya, by tokens) and UI memory: repeat tasks 22.6 s → 2.2 s without Laya (D-040) |
 
-In progress (being written by research agents, 2026-10-17): **13** text-writing LLM (model + runtime, D-032),
-**14** fine-tuning data (D-031), **15** fine-tuning method (D-031), **16** wake word (D-035).
+In progress (research agents, 2026-10-17): **18** making each Laya pass faster (int8 with un-quantized heads, token trimming),
+**19** how fast an encoder like Laya can run on Tensor G3-class phones (published benchmarks, best runtime).
 
 ## Quick reference: measured on our hardware (2026-10-16)
 | What | Number |
@@ -96,3 +101,6 @@ In progress (being written by research agents, 2026-10-17): **13** text-writing 
 | `screencap` | 0.65–0.8 s |
 | Candidates per screen | launcher 31; Settings pages 11–21 |
 | Pixel 8 RAM "Free" (`dumpsys meminfo`) | 4.5 GB, of which 3.5 GB is cached apps |
+| Laya pass on the Pixel 8 by input size (2026-10-17) | 390 tokens 2.9 s · 924 tokens 6–12 s · 1320 tokens 17 s · 1868 tokens 24–39 s (thermal) |
+| Screen read + settle on the Pixel 8 | 0.2–1.0 s |
+| Repeat task from UI memory (no Laya) | 2.0–2.2 s end to end, vs 22.6 s with Laya |
