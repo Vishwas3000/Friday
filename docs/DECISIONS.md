@@ -399,4 +399,4 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - Retraining only (owner chose both loops; improvement would take days).
   - Letting Friday explore apps on its own now (loop 3: later, after these two).
   - Dropping exact replay (owner kept it as a shortcut).
-- **Who / status:** user (chose loops 1+2 and the shortcut) · Claude (design) · Loop 1 in progress; loop 2 waits for the box's SSH port
+- **Who / status:** user (chose loops 1+2 and the shortcut) · Claude (design) · Loop 1 built and measured on the Pixel 8: a reworded Clock task got its hint and stopped at the goal (13 s, was 35 s with a Start overshoot); already-there in 6 s. Learned on the way: a finished screen is fingerprinted by what changed since the start (tab bars matched every Clock tab), selected tabs are read from the whole screen (they aren't candidates), and "done when the tap names what the goal is about" stops overshoots. Loop 2 waits for the box's SSH port
