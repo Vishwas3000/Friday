@@ -376,4 +376,4 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - Dropping duplicate scroll containers (4.8% fewer tokens, 3/52 changed).
   - Judging int8 on the Mac's default ORT 1.31 (its SME kernels hide the error the phone would see).
 - **Side effect:** non-tap steps carry no target, so training rows and remembered paths stop storing an unused one for BACK / SCROLL, and skipped non-tap steps don't block an element.
-- **Who / status:** Claude · 1 ready to apply (waits for the phone and the wake-word work), with a `step_parity` check on live screens; 2 waits for the phone bench
+- **Who / status:** Claude · 1 validated on the Pixel 8: same answers on 5/5 live screens; non-tap steps 1.5–4.9× faster (Play Store scroll 23.1 → 4.7 s), taps 1.1–1.8×. 2 waits for the phone bench. Pinning ONNX Runtime's threads to the mid cores (live, 3 of 4 sat on little cores while Friday is in the `foreground` cpuset, which excludes the X3): experiment, off by default, waiting for an A/B
