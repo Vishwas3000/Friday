@@ -97,6 +97,45 @@ class Overlay(private val svc: AgentService) {
 
     fun banner() = Banner()
 
+    fun teachBanner(goal: String, onDone: () -> Unit, onCancel: () -> Unit) = TeachBanner(goal, onDone, onCancel)
+
+    /** Teach mode's red "recording" pill (D-033): what's being taught, steps so far, Done and Cancel. */
+    inner class TeachBanner(goal: String, onDone: () -> Unit, onCancel: () -> Unit) {
+        private var view: View? = null
+        private var label: TextView? = null
+
+        init {
+            svc.main.post {
+                val ctx = theme()
+                val l = TextView(ctx).apply { text = "● Teaching: $goal"; setTextColor(Color.WHITE); textSize = 13f; maxLines = 1 }
+                label = l
+                val pill = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(32, 4, 4, 4)
+                    background = GradientDrawable().apply { setColor(0xEEB3261E.toInt()); cornerRadius = 60f }
+                    addView(l)
+                    addView(Button(ctx).apply { text = "Done"; setOnClickListener { onDone() } })
+                    addView(Button(ctx).apply { text = "Cancel"; setOnClickListener { onCancel() } })
+                }
+                view = pill
+                wm.addView(pill, params(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP or Gravity.CENTER_HORIZONTAL, 0, 110, touchable = true))
+            }
+        }
+
+        fun count(steps: Int) = svc.main.post { label?.text = "● Teaching · $steps steps" }
+
+        fun remove() = svc.main.post { view?.let { runCatching { wm.removeView(it) } }; view = null }
+
+        /** Is the screen point (x, y) on this banner? Read from the bridge thread: a benign race with layout. */
+        fun contains(x: Int, y: Int): Boolean {
+            val v = view ?: return false
+            val at = IntArray(2).also { v.getLocationOnScreen(it) }
+            return x in at[0]..at[0] + v.width && y in at[1]..at[1] + v.height
+        }
+    }
+
     /**
      * A small status pill with Stop while Friday works. [hide] removes it and waits until it's gone,
      * before every screen read and tap: some apps ignore touches while another window covers them.

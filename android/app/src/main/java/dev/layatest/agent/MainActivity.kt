@@ -33,13 +33,30 @@ class MainActivity : Activity() {
                 }
             }
         }
+        val teach = Button(this).apply {
+            text = "Teach this (record me doing it)"
+            setOnClickListener {
+                val svc = AgentService.instance
+                val g = goal.text.toString().trim()
+                when {
+                    svc == null -> toast("Turn on Friday in Accessibility first")
+                    g.isEmpty() -> toast("First type what you'll do")
+                    svc.startTeaching(g) -> toast("Recording — do the task, then tap Done on the red banner")
+                    else -> toast("Friday is busy — try again in a moment")
+                }
+            }
+        }
+        val wipe = Button(this).apply {
+            text = "Delete all teaching data"
+            setOnClickListener { toast("Deleted ${Teacher.wipe(this@MainActivity)} recordings from this phone") }
+        }
         val open = Button(this).apply {
             text = "Open Accessibility settings"
             setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(status); addView(goal); addView(run); addView(open)
+            addView(status); addView(goal); addView(run); addView(teach); addView(wipe); addView(open)
         })
     }
 

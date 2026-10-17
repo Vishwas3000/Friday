@@ -6,6 +6,8 @@ The owner's 207 installed apps, three setups, each a laya.predict_tournament "wh
   A  names only ("iMobile")                      -- the 6-26% baseline of research/09
   B  name + purpose ("iMobile - ICICI bank account and balance")
   C  rules first: the routed skill keeps only its kinds of app, then B among those
+  D  name + the phone's automatic profile, nothing hand-written (D-031; captures/app_profiles_auto.json,
+     from the bridge's "profiles" command) -- skipped if that file is missing
 Cases include long-tail requests no skill covers ("how many steps did I walk today").
 captures/app_purposes.json maps each label to (purpose, kind); it stays git-ignored (the owner's app list).
 """
@@ -73,6 +75,10 @@ def main():
     labels = list(dict.fromkeys(a["label"] for a in apps))  # unique labels, launcher order
     kind = {l: purpose[l][1] for l in labels}
     text_b = {l: ("%s - %s" % (l, purpose[l][0])) if purpose[l][0] else l for l in labels}
+    auto = ROOT / "captures" / "app_profiles_auto.json"
+    pkg = {a["label"]: a["package"] for a in reversed(apps)}  # first package per label
+    text_d = {l: json.loads(auto.read_text())[pkg[l]] for l in labels} if auto.exists() else None
+    setups = "ABCD" if text_d else "ABC"
 
     def ok(label, accept):
         return ("=" + label) in accept or kind[label] in accept
@@ -94,26 +100,26 @@ def main():
             **KW)["answers"]["skill"]["choice"]
         short = [l for l in labels if kind[l] in SKILL_KINDS.get(skill, set())] or labels
         r = {"req": req, "tail": n >= LONG_TAIL, "skill": skill}
-        for name, pool, render in (("A", labels, lambda l: l), ("B", labels, text_b.get), ("C", short, text_b.get)):
+        for name, pool, render in (("A", labels, lambda l: l), ("B", labels, text_b.get), ("C", short, text_b.get),
+                                   ("D", labels, text_d and text_d.get))[:len(setups)]:
             r[name], r[name + "_conf"] = pick(req, pool, render) if len(pool) > 1 else (pool[0], 1.0)
             r[name + "_ok"] = ok(r[name], accept)
         times.append(time.perf_counter() - t)
         rows.append(r)
-        print("%-38s %-14s A=%-15s%s B=%-15s%s C=%-15s%s" % (req[:38], skill[:14],
-              r["A"][:15], "+" if r["A_ok"] else "-", r["B"][:15], "+" if r["B_ok"] else "-",
-              r["C"][:15], "+" if r["C_ok"] else "-"))
+        print("%-38s %-14s " % (req[:38], skill[:14]) + " ".join(
+            "%s=%-15s%s" % (k, r[k][:15], "+" if r[k + "_ok"] else "-") for k in setups))
     (ROOT / "captures" / "eval_apps.json").write_text(json.dumps(rows, indent=1))
 
     print("\n== right app (accuracy) ==")
     for part, rs in (("covered by a skill", [r for r in rows if not r["tail"]]),
                      ("long tail", [r for r in rows if r["tail"]]), ("all", rows)):
-        print("  %-19s n=%2d  A names %3.0f%%   B +purpose %3.0f%%   C rules+purpose %3.0f%%" % (
-            part, len(rs), *(100 * sum(r[k + "_ok"] for r in rs) / len(rs) for k in "ABC")))
+        print("  %-19s n=%2d  " % (part, len(rs)) + "   ".join("%s %3.0f%%" % (name, 100 * sum(r[k + "_ok"] for r in rs) / len(rs))
+              for k, name in zip(setups, ("A names", "B +purpose", "C rules+purpose", "D auto profile"))))
     print("\n== calibration (coverage / accuracy at confidence >= tau) ==")
-    for k in "BC":
+    for k in setups[1:]:
         print("  %s  " % k + "  ".join("tau %.1f: %3.0f%% cov %3.0f%% acc" % (t, 100 * c, 100 * a)
                                       for t, c, a in calib([(r[k + "_ok"], r[k + "_conf"]) for r in rows])))
-    print("\nper request (route + 3 tournaments) on the Mac: median %.1f s" % statistics.median(times))
+    print("\nper request (route + %d tournaments) on the Mac: median %.1f s" % (len(setups), statistics.median(times)))
 
 
 if __name__ == "__main__":

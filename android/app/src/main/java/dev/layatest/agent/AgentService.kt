@@ -31,6 +31,7 @@ class AgentService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (event.packageName != packageName) lastEventAt = SystemClock.uptimeMillis()
+        teacher?.onEvent(event)
     }
 
     override fun onInterrupt() {}
@@ -57,9 +58,19 @@ class AgentService : AccessibilityService() {
         "bench" -> Bench.run(this, c) // Phase-2 gate: on-device ONNX latency/RAM
         "decide_test" -> Decide.test(this, c) // Phase-2c: full on-device tokenize+build+ORT+decode on the fixture
         "selfcheck" -> JSONObject().put("candidates", candidatesSelfCheck()).put("slots", slotsSelfCheck())
-            .put("media", mediaSelfCheck()).put("people", peopleSelfCheck())
+            .put("media", mediaSelfCheck()).put("people", peopleSelfCheck()).put("profiler", appCatalogSelfCheck())
+        "profiles" -> JSONObject(AppProfiler.profiles(packageManager) as Map<*, *>)  // D-031: auto app profiles, to evaluate
         "route" -> routeTest(c.getString("text"))
         "run" -> { runGoal(c.getString("goal")); JSONObject().put("started", true) }
+        "teach" -> JSONObject().put("started", startTeaching(c.getString("goal"), c.optBoolean("raw")))
+        // a real touch from scripts/teach_touches.py: {x, y, long} or {op: BACK|HOME}; says whether still teaching
+        "teach_input" -> JSONObject().put("teaching", teacher?.let { t ->
+            if (c.has("op")) t.pressed(c.getString("op")) else t.touched(c.getInt("x"), c.getInt("y"), c.optBoolean("long"))
+            true
+        } ?: false)
+        "teach_done" -> { finishTeaching(c.optBoolean("keep", true)); JSONObject().put("ok", true) }
+        "teach_list" -> Teacher.list(this)
+        "teach_wipe" -> JSONObject().put("deleted", Teacher.wipe(this))
         // debugging: run a request on the bridge thread and return its answer + step trace
         "ask" -> Assistant(this, c.getString("goal")).let { a ->
             JSONObject().put("answer", a.run()).put("trace", JSONArray(a.trace))
@@ -170,7 +181,7 @@ class AgentService : AccessibilityService() {
 
     /** Handle one typed request on a background thread (one at a time) and show the answer as a card. */
     fun runGoal(goal: String) {
-        if (goal.isBlank() || running) return
+        if (goal.isBlank() || running || teacher != null) return  // while teaching, Friday's own taps would be recorded as the owner's
         running = true
         Thread({
             try {
@@ -215,6 +226,30 @@ class AgentService : AccessibilityService() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) idleRelease.run()
+    }
+
+    // ---- Teach mode (D-033): taps and typing are subscribed to only while the owner is teaching ----
+    @Volatile private var teacher: Teacher? = null
+
+    fun startTeaching(goal: String, rawTouches: Boolean = false): Boolean {
+        if (goal.isBlank() || teacher != null || running) return false
+        listenForTeaching(true)
+        teacher = Teacher(this, goal.trim(), rawTouches)
+        return true
+    }
+
+    internal fun finishTeaching(keep: Boolean) {
+        teacher?.let { if (keep) it.done() else it.cancel() }
+    }
+
+    internal fun teachingEnded(message: String) {
+        teacher = null
+        listenForTeaching(false)
+        toast(message)
+    }
+
+    private fun listenForTeaching(on: Boolean) {
+        serviceInfo = serviceInfo.apply { eventTypes = if (on) eventTypes or TEACH_EVENTS else eventTypes and TEACH_EVENTS.inv() }
     }
 
     /** The screen once it settles: the forest that Laya and the extractors read. */
@@ -279,6 +314,8 @@ class AgentService : AccessibilityService() {
         @Volatile var instance: AgentService? = null
         private const val IDLE_MS = 3 * 60_000L  // ~700 MB stays resident this long after a request (D-016)
         private val SEARCH_BOX = Regex("search|query|find|look ?up", RegexOption.IGNORE_CASE)
+        private val TEACH_EVENTS = AccessibilityEvent.TYPE_VIEW_CLICKED or AccessibilityEvent.TYPE_VIEW_LONG_CLICKED or
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
         private val GLOBALS = mapOf(
             "back" to GLOBAL_ACTION_BACK, "home" to GLOBAL_ACTION_HOME, "recents" to GLOBAL_ACTION_RECENTS,
             "notifications" to GLOBAL_ACTION_NOTIFICATIONS, "quick_settings" to GLOBAL_ACTION_QUICK_SETTINGS,
