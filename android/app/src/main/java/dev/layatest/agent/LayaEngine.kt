@@ -63,16 +63,41 @@ class LayaEngine(ctx: Context) : AutoCloseable {
         return Pick(a.choiceIndex, a.choiceKey, a.answerConfidence, a.probabilities)
     }
 
+    /**
+     * The operation first; the target row -- every element again as an option, most of the tokens -- only for
+     * steps that use a target. The rows are independent passes, so the answers match asking both at once, but
+     * a scroll / back / done step skips the long row and nothing is padded to it (research/19: ~1.5-4x).
+     */
     fun step(goal: String, history: List<String>, cands: List<ScreenCandidate>): Step {
+        val c = cands.map { it.toCandidate() }
+        val opIn = buildInputs(tok::encode, goal, history, c, ask = setOf("operation"))
+        val op = answers(opIn).getValue("operation")
+        var tokens = opIn.ort.inputIds.sumOf { it.size }
+        if (op.choiceKey !in TARGETED || c.isEmpty()) return Step(op.choiceKey, op.answerConfidence, null, null, tokens)
+        val tIn = buildInputs(tok::encode, goal, history, c, ask = setOf("target"))
+        val tg = answers(tIn).getValue("target")
+        tokens += tIn.ort.inputIds.sumOf { it.size }
+        return Step(op.choiceKey, op.answerConfidence, tg.choiceIndex, tg.answerConfidence, tokens)
+    }
+
+    private fun answers(built: BuiltInputs) = forward(built).let { (logits, act) -> decode(logits, act, built) }
+
+    /** Both questions in one padded batch, as before [step] split them; kept so "step_parity" can check the split. */
+    internal fun stepBatched(goal: String, history: List<String>, cands: List<ScreenCandidate>): Step {
         val built = buildInputs(tok::encode, goal, history, cands.map { it.toCandidate() })
-        val (logits, act) = forward(built)
-        val ans = decode(logits, act, built)
+        val ans = answers(built)
         val op = ans.getValue("operation")
         val tg = ans["target"]
         return Step(op.choiceKey, op.answerConfidence, tg?.choiceIndex, tg?.answerConfidence, built.ort.inputIds.sumOf { it.size })
     }
 
+    // Experiment (research/19 lever 3), off until an A/B on a cool phone shows a gain: live, 3 of 4 pool threads
+    // sat on the little cores, but the one pinned run was slower (43.8 s; two threads shared a mid core while the
+    // app's own threads also want those cores). Flip with the "laya_pin" bridge command.
+    @Volatile var pinFastCores = false
+
     private fun forward(built: BuiltInputs): Pair<Array<FloatArray>, Array<FloatArray>> {
+        if (pinFastCores) Native.pinAllThreads(Native.fastCores)
         val t = linkedMapOf(
             "input_ids" to OnnxTensor.createTensor(env, built.ort.inputIds),
             "attention_mask" to OnnxTensor.createTensor(env, built.ort.attentionMask),
@@ -98,5 +123,7 @@ class LayaEngine(ctx: Context) : AutoCloseable {
 
     companion object {
         const val MODEL = "laya-android.fp16.onnx"
+        // INPUT_TEXT's target only outlines the field on the approval card; scrolls use the largest scrollable
+        private val TARGETED = setOf("CLICK", "LONG_PRESS", "INPUT_TEXT")
     }
 }

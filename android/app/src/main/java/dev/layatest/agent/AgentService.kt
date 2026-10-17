@@ -85,6 +85,9 @@ class AgentService : AccessibilityService() {
         // what the answer card's "Remember" does, for the last "ask" -- after checking its steps
         "remember" -> JSONObject().put("remembered", lastAsk?.learned != null).also { lastAsk?.remember() }
         "routes" -> Routes.all(this)  // UI memory (D-040), for debugging
+        "step_parity" -> stepParity(c.getString("goal"))
+        "laya_pin" -> JSONObject().put("pin", c.getBoolean("on").also { on -> laya().pinFastCores = on; layaIdle() })
+            .put("fast_cores", Integer.toBinaryString(Native.fastCores))
         else -> error("unknown cmd: $cmd")
     }
 
@@ -284,6 +287,26 @@ class AgentService : AccessibilityService() {
         private set
 
     internal fun foregroundPkg(): String? = rootInActiveWindow?.packageName?.toString()
+
+    /** Bridge check (research/19): on this screen, the split step() must answer like the one-batch step, faster. */
+    private fun stepParity(goal: String): JSONObject {
+        val st = readState()
+        val sz = st.getJSONArray("screen")
+        val cands = buildCandidates(st, sz.getInt(0), sz.getInt(1))
+        val e = laya()
+        fun Step.text() = "$op %.4f target=$target %.4f".format(opConfidence, targetConfidence ?: 0.0)
+        val t0 = SystemClock.elapsedRealtime()
+        val split = e.step(goal, emptyList(), cands)
+        val t1 = SystemClock.elapsedRealtime()
+        val both = e.stepBatched(goal, emptyList(), cands)
+        val t2 = SystemClock.elapsedRealtime()
+        layaIdle()
+        val same = split.op == both.op && (split.target == null || split.target == both.target) &&
+            kotlin.math.abs(split.opConfidence - both.opConfidence) < 1e-3
+        return JSONObject().put("same", same).put("candidates", cands.size)
+            .put("split", split.text()).put("split_ms", t1 - t0).put("split_tokens", split.tokens)
+            .put("batched", both.text()).put("batched_ms", t2 - t1).put("batched_tokens", both.tokens)
+    }
 
     /** Bridge test: how a request routes on the phone (rule hit, or Laya's pick + confidence); compare research/09. */
     private fun routeTest(text: String): JSONObject {

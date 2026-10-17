@@ -152,13 +152,14 @@ fun buildInputs(
     candidates: List<Candidate>,
     maxLen: Int = 3072,
     headMaxLen: Int = 1536,
+    ask: Set<String> = setOf("operation", "target"),  // each question is its own row; LayaEngine.step asks one at a time
 ): BuiltInputs {
     val labels = candidates.map { optionLabel(it) }
     val questions = ArrayList<Question>(2)
     // criteria render as "<key>: <value>"; every value here is non-empty so render_options' str(k) branch never fires.
-    questions.add(Question("operation", QTYPE_CHOICE, OP_DESC.keys.toList(),
+    if ("operation" in ask) questions.add(Question("operation", QTYPE_CHOICE, OP_DESC.keys.toList(),
         OP_DESC.map { (k, v) -> "$k: $v" }))
-    if (candidates.isNotEmpty()) {
+    if ("target" in ask && candidates.isNotEmpty()) {
         questions.add(Question("target", QTYPE_CHOICE, labels.indices.map { it.toString() },
             labels.mapIndexed { i, l -> "$i: $l" }))
     }
