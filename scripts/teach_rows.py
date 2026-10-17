@@ -64,7 +64,8 @@ def main():
 
     for path in a.teach:
         recs = [json.loads(l) for l in open(path, encoding="utf8") if l.strip()]
-        if not recs:
+        if not recs or recs[0].get("outcome") == "rejected":  # the owner said this run went wrong (D-048): not a demo
+            stats["rejected"] = stats.get("rejected", 0) + bool(recs)
             continue
         stats["recordings"] += 1
         goal, fam = recs[0]["goal"], family(recs[0]["goal"])

@@ -39,7 +39,11 @@ interface SkillContext {
     fun waitUntil(timeoutMs: Long, cond: () -> Boolean): Boolean
     fun screen(): Screen
     /** Let Laya drive the UI toward [subgoal]; [typeText] is what INPUT_TEXT types. */
-    fun runLaya(subgoal: String, maxSteps: Int = 12, typeText: String? = null): Outcome
+    /** [pickText]: finds the text to type only when a step types (choosing it from the request costs a Laya pass). */
+    fun runLaya(subgoal: String, maxSteps: Int = 12, typeText: String? = null, pickText: (() -> String?)? = null): Outcome
+
+    /** The skill checked the outcome (playing, transactions on screen): keep what this request learned (D-048). */
+    fun succeeded()
     /** Laya picks one of [options] for this request (a tournament above 16); null if empty. */
     fun choose(instructions: String, options: List<String>): Pick?
     fun tap(target: ScreenCandidate): Boolean
@@ -198,10 +202,11 @@ class GenericSkill(override val id: String) : Skill {
         }
         val text = ctx.slots.quoted.firstOrNull()
             ?: ctx.slots.after("search for", "search", "look for", "find", "type", "play", "watch", "listen to")
-            ?: ctx.slots.spans.takeIf { it.isNotEmpty() }?.let { sp -> ctx.choose(SLOT_Q, sp)?.let { sp[it.index] } }
-        return when (ctx.runLaya(ctx.request, typeText = text)) {
+        // picking a span is a Laya pass (~2-4 s): only if a step types -- most tasks don't (Clock, 2026-10-17)
+        val pick = { ctx.slots.spans.takeIf { it.isNotEmpty() }?.let { sp -> ctx.choose(SLOT_Q, sp)?.let { sp[it.index] } } }
+        return when (ctx.runLaya(ctx.request, typeText = text, pickText = pick)) {
             Outcome.DONE -> if (id !in READ_SKILLS) "Done" else
-                readAmounts(ctx.screen().texts, onlyDated = id == "spend_query")?.let { "Here's what I see:\n$it" }
+                readAmounts(ctx.screen().texts, onlyDated = id == "spend_query")?.let { ctx.succeeded(); "Here's what I see:\n$it" }
                     ?: if (id == "spend_query") "I didn't find any dated payments on this screen" else "Done"
             Outcome.STOPPED -> "Stopped"
             Outcome.STUCK -> "I got stuck — the screen is where I stopped"

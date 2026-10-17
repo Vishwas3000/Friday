@@ -83,16 +83,24 @@ class Overlay(private val svc: AgentService) {
         return i.takeIf { it >= 0 }
     }
 
-    /** A result card until the owner taps OK (or a minute passes); with [remember], a "Remember" button too. Doesn't block. */
-    fun answer(text: String, remember: (() -> Unit)? = null) = svc.main.post {
+    /**
+     * A result card until the owner taps a button (or a minute passes). The feedback buttons teach Friday (D-048):
+     * [right] keeps what it did, [wrong] marks it wrong, [showMe] starts Teach mode on the same goal. Doesn't block.
+     */
+    fun answer(text: String, right: (() -> Unit)? = null, wrong: (() -> Unit)? = null, showMe: (() -> Unit)? = null) = svc.main.post {
         val ctx = theme()
         lateinit var panel: View
+        fun button(label: String, then: (() -> Unit)?) = Button(ctx).apply {
+            this.text = label
+            setOnClickListener { runCatching { wm.removeView(panel) }; then?.let { Thread(it, "friday-feedback").start() } }
+        }
         panel = card(ctx).apply {
             addView(TextView(ctx).apply { this.text = text; setTextColor(Color.WHITE); textSize = 18f })
-            addView(Button(ctx).apply { this.text = "OK"; setOnClickListener { runCatching { wm.removeView(panel) } } })
-            if (remember != null) addView(Button(ctx).apply {
-                this.text = "Remember these steps"
-                setOnClickListener { runCatching { wm.removeView(panel) }; Thread(remember, "friday-remember").start() }
+            addView(LinearLayout(ctx).apply {
+                addView(button("OK", null))
+                right?.let { addView(button("✓ Right", it)) }
+                wrong?.let { addView(button("✗ Wrong", it)) }
+                showMe?.let { addView(button("Show me", it)) }
             })
         }
         wm.addView(panel, params(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER, 0, 0, touchable = true))

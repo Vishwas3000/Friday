@@ -97,7 +97,7 @@ private fun control(ctx: SkillContext, key: Int): String {
 
 /** Laya's DONE is weak (research/05), so the audio system says whether it worked. */
 private fun started(ctx: SkillContext, what: String, app: AppInfo) =
-    if (ctx.waitUntil(3000) { playing(ctx) }) "Playing $what on ${app.label}"
+    if (ctx.waitUntil(3000) { playing(ctx) }) { ctx.succeeded(); "Playing $what on ${app.label}" }
     else "I couldn't start $what on ${app.label} — the screen is where I stopped"
 
 /** A transport request ("pause the music", "skip this song") -> its media key; null if it names something to play. */

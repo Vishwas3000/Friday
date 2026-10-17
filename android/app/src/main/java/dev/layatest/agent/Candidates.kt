@@ -113,6 +113,10 @@ fun buildCandidates(state: JSONObject, screenW: Int, screenH: Int): List<ScreenC
             it.checked, it.selected, it.enabled, it.box, it.rid) }
 }
 
+/** Labels of the visible selected nodes (the current tab, a chosen item) -- often not actionable, so not candidates. */
+fun selectedLabels(state: JSONObject): List<String> = flatten(state)
+    .filter { !it.ime && it.j.getBoolean("visible") && it.j.getBoolean("selected") }.map { label(it.j) }.filter { it.isNotEmpty() }
+
 /** A visible text and its box: what the READ step's extractors parse (amounts, dates, names). */
 class ScreenText(val text: String, val bounds: IntArray)
 

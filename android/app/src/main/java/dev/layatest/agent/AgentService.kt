@@ -79,11 +79,12 @@ class AgentService : AccessibilityService() {
         "teach_wipe" -> JSONObject().put("deleted", Teacher.wipe(this))
         // debugging: run a request on the bridge thread and return its answer + step trace
         "ask" -> Assistant(this, c.getString("goal")).also { lastAsk = it }.let { a ->
-            JSONObject().put("answer", a.run()).put("trace", JSONArray(a.trace))
+            JSONObject().put("answer", a.run()).put("trace", JSONArray(a.trace)).put("kept", a.kept)
                 .put("learned", a.learned?.steps?.joinToString(" → ") { it.describe() } ?: JSONObject.NULL)
         }
-        // what the answer card's "Remember" does, for the last "ask" -- after checking its steps
-        "remember" -> JSONObject().put("remembered", lastAsk?.learned != null).also { lastAsk?.remember() }
+        // the answer card's ✓ Right / ✗ Wrong, for the last "ask" -- after checking its steps
+        "remember" -> JSONObject().put("remembered", lastAsk?.learned != null).also { lastAsk?.keep("confirmed") }
+        "reject" -> JSONObject().put("rejected", lastAsk != null).also { lastAsk?.reject() }
         "routes" -> Routes.all(this)  // UI memory (D-040), for debugging
         "step_parity" -> stepParity(c.getString("goal"))
         // the request log's last entries (default 20), timelines included
@@ -206,10 +207,17 @@ class AgentService : AccessibilityService() {
             try {
                 val a = Assistant(this, goal.trim())
                 val said = a.run()
-                // the owner sees the steps before keeping them: Laya sometimes overshoots (an extra tap after the goal)
-                val steps = a.learned?.steps?.joinToString(" → ") { it.describe() }
-                Overlay(this).answer(if (steps == null) said else "$said\n\nI did: $steps",
-                    a.learned?.let { { a.remember(); toast("Remembered — next time it skips the thinking") } })
+                // the owner sees the steps and says right or wrong: Laya sometimes overshoots (D-048 feedback)
+                val did = (a.learned ?: a.replayed)?.steps?.joinToString(" → ") { it.describe() }
+                val text = buildString {
+                    append(said)
+                    if (did != null) append("\n\nI did: $did")
+                    if (a.kept) append("\n(It checked out, so I'll remember how)")
+                }
+                Overlay(this).answer(text,
+                    right = a.learned?.takeIf { !a.kept }?.let { { a.keep("confirmed"); toast("Got it — I'll do it this way next time") } },
+                    wrong = if (did != null) { { a.reject(); toast("Noted — I won't do it that way again") } } else null,
+                    showMe = if (did != null) { { startTeaching(goal.trim()) } } else null)
             } catch (e: Throwable) {
                 toast("error: ${e.message}")
             } finally {
@@ -280,7 +288,7 @@ class AgentService : AccessibilityService() {
     /** The screen once it settles: the forest that Laya and the extractors read. */
     internal fun readState(): JSONObject {
         val t = SystemClock.elapsedRealtime()
-        settle(300, 3000)
+        settle(300, 1500)  // a screen that never goes quiet (a running stopwatch, a video) cost 3 s a read
         lastSettleMs = SystemClock.elapsedRealtime() - t
         return state()
     }

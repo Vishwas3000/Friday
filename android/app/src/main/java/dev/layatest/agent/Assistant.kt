@@ -172,27 +172,60 @@ class Assistant(private val svc: AgentService, override val request: String) : S
     private var goal = request
     private var typed: String? = null           // request text this run types, if any
 
-    /** A path Laya just found, for the answer card's "Remember"; null if it came from memory or didn't finish. */
+    /** What Laya just did that finished the task, until it's kept or rejected; null if it came from memory or failed. */
     var learned: Route? = null
         private set
 
-    /** The owner confirmed [learned]: keep the path, and its screens as training rows. */
-    fun remember() {
-        Routes.save(svc, learned ?: return)
-        Teacher.dir(svc).mkdirs()
-        File(Teacher.dir(svc), SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + "-run.jsonl")
-            .writeText(rows.joinToString("") { "$it\n" })
+    /** The exact path replayed in this request, if any: forgotten if the owner says the result was wrong. */
+    var replayed: Route? = null
+        private set
+
+    /** Whether this request's experience was kept (its outcome checked out, or the owner confirmed it). */
+    var kept = false
+        private set
+
+    /** Keep this request's experience (D-048): its path for hints and replay, its screens as training rows. */
+    fun keep(source: String) {
+        val r = learned ?: return
+        if (kept) return
+        kept = true
+        Routes.save(svc, Route(r.goal, r.pkg, r.key, r.steps, source, r.end))
+        writeRows(source)
     }
 
-    override fun runLaya(subgoal: String, maxSteps: Int, typeText: String?): Outcome {
+    /** The owner said the result was wrong: its screens become negative rows, and a path that led here is forgotten. */
+    fun reject() {
+        replayed?.let { Routes.forget(svc, it) }
+        if (kept) learned?.let { Routes.forget(svc, it) }
+        writeRows("rejected")
+    }
+
+    override fun succeeded() = keep("verified")
+
+    private fun writeRows(outcome: String) {
+        if (rows.isEmpty()) return
+        Teacher.dir(svc).mkdirs()
+        File(Teacher.dir(svc), SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + "-$outcome.jsonl")
+            .writeText(rows.joinToString("") { it.put("outcome", outcome).toString() + "\n" })
+    }
+
+    override fun runLaya(subgoal: String, maxSteps: Int, typeText: String?, pickText: (() -> String?)?): Outcome {
         val startPkg = foreground()
         path.clear(); rows.clear(); goal = subgoal; typed = typeText
         Routes.find(svc, startPkg, subgoal, typeText)?.let { route ->
+            replayed = route
             replay(route, typeText)?.let { return it }  // DONE or STOPPED; null: the screen changed, Laya goes on from here
         }
+        // a past success with a similar goal in this app (D-048): its steps are a hint for Laya, which still decides
+        // (so a renamed or moved element still works), and its finished screen means this task is done
+        val hint = Routes.similar(svc, startPkg, subgoal, apps.installed.firstOrNull { it.pkg == startPkg }?.label)
+        val lead = hint?.let { h -> "$subgoal (last time: ${h.steps.joinToString(", then ") { it.describe() }})" } ?: subgoal
+        hint?.let { trace += "hint (${it.source}): \"${it.goal}\" -> ${it.steps.joinToString(" → ") { s -> s.describe() }}" }
         val blocked = HashSet<String>()  // targets skipped or refused, so Laya doesn't pick them again
         var misses = 0
         var skimmed = false
+        var startWords: Set<String>? = null  // the first screen's fingerprint: the finished screen is told apart by what changed
+        val about = Routes.aboutWords(subgoal, apps.installed.firstOrNull { it.pkg == startPkg }?.label)
         for (step in 1..maxSteps) {
             if (stopped) return Outcome.STOPPED
             val t0 = SystemClock.elapsedRealtime()
@@ -203,29 +236,40 @@ class Assistant(private val svc: AgentService, override val request: String) : S
                 if (!ok) return Outcome.STOPPED
                 continue
             }
-            if (!skimmed) { skimmed = true; skim(subgoal, scr)?.let { scr = it } }
+            if (hint != null && looksFinished(scr, hint)) {
+                trace += "step $step on ${scr.pkg}: DONE — looks like where \"${hint.goal}\" finished"
+                return finish(scr, startPkg, subgoal, typeText, startWords)
+            }
+            if (startWords == null) startWords = Routes.screenWords(scr.candidates)
+            // the selected tab or item already names what the goal is about: there (Clock reopened on Stopwatch;
+            // its selected tab isn't clickable, so it isn't a candidate -- read it from the whole screen)
+            scr.state?.let(::selectedLabels)?.firstOrNull { about.isNotEmpty() && Routes.contentWords(it).containsAll(about) }?.let {
+                trace += "step $step on ${scr.pkg}: DONE — “$it” is already selected"
+                return finish(scr, startPkg, subgoal, typeText, startWords)
+            }
+            if (!skimmed) {
+                skimmed = true
+                // no need to look further down when an element the hint names is right here
+                val hinted = hint?.steps?.any { st -> st.label.isNotEmpty() && scr.candidates.any { it.label == st.label } } == true
+                if (!hinted) skim(about, scr)?.let { scr = it }
+            }
             val readMs = SystemClock.elapsedRealtime() - t0
             // what policy would block (Pay/Send in a money app) never reaches Laya: picking it only wastes a pass
             // (GPay "check my last payment", 2026-10-17: three 15 s passes on "Pay anyone", all blocked)
             val cands = scr.candidates.filter { key(it) !in blocked && Safety.verdict("CLICK", it, scr.pkg).first != Safety.Verdict.BLOCK }
             say("Thinking… (step $step)")
             val t1 = SystemClock.elapsedRealtime()
-            val s = laya.step(subgoal, trail, cands)
+            val s = laya.step(lead, trail, cands)
             val took = " [read $readMs ms (settle ${svc.lastSettleMs}), laya ${SystemClock.elapsedRealtime() - t1} ms: " +
                 "${cands.size} cands, ${s.tokens} tokens]"
             if (s.op == "DONE") {
                 trace += "step $step on ${scr.pkg}: DONE (op %.2f)".format(s.opConfidence) + took
-                rows += row("DONE", scr, null, null)
-                if (path.isNotEmpty() && startPkg != null) {
-                    // keyed without the typed text only if this path typed it (see Routes.find)
-                    learned = Route(subgoal, startPkg, Routes.key(subgoal, typeText.takeIf { path.any { it.slot } }), path.toList(), "run")
-                }
-                return Outcome.DONE
+                return finish(scr, startPkg, subgoal, typeText, startWords)
             }
             val target = s.target?.let { cands.getOrNull(it) }
             val payload: Any? = when (s.op) {
                 "OPEN_APP" -> apps.named(subgoal)
-                "INPUT_TEXT" -> typeText ?: slots.quoted.firstOrNull()
+                "INPUT_TEXT" -> typeText ?: pickText?.invoke()?.also { typed = it } ?: slots.quoted.firstOrNull()
                 else -> null
             }
             val (verdict, why) = when {
@@ -250,11 +294,41 @@ class Assistant(private val svc: AgentService, override val request: String) : S
             }
             misses = 0
             perform(s.op, target, payload, scr)
+            // the tap named everything the goal is about ("show the stopwatch" -> "Stopwatch"): reached. Laya isn't
+            // asked again -- it went on and pressed Start on a real stopwatch, twice (2026-10-17)
+            if (s.op == "CLICK" && target != null && about.isNotEmpty() && Routes.contentWords(target.label).containsAll(about)) {
+                trace += "done: tapped “${target.label}”, what the goal is about"
+                Thread.sleep(300)
+                return finish(screen(), startPkg, subgoal, typeText, startWords)
+            }
             if (trail.size >= 3 && trail.takeLast(3).toSet().size == 1) { trace += "stuck: same action 3 times"; return Outcome.STUCK }
             Thread.sleep(300)
         }
         trace += "out of steps ($maxSteps)"
         return Outcome.MAX_STEPS
+    }
+
+    /**
+     * The task is done on [scr]: its DONE row, and what Laya did becomes [learned] (until kept or rejected). The
+     * finished screen is remembered by what changed since [startWords]: in tab apps the tab bar is on every screen.
+     */
+    private fun finish(scr: Screen, startPkg: String?, subgoal: String, typeText: String?, startWords: Set<String>?): Outcome {
+        rows += row("DONE", scr, null, null)
+        if (path.isNotEmpty() && startPkg != null) {
+            // keyed without the typed text only if this path typed it (see Routes.find)
+            learned = Route(subgoal, startPkg, Routes.key(subgoal, typeText.takeIf { path.any { it.slot } }), path.toList(),
+                "run", Routes.screenWords(scr.candidates) - startWords.orEmpty())
+        }
+        return Outcome.DONE
+    }
+
+    /**
+     * [scr] shows most (70%, and at least 2) of the words [hint]'s finished screen gained: "I'm already there"
+     * (D-048). The whole screen's words were too weak: Clock's Alarms tab looked 70% like its Stopwatch tab.
+     */
+    private fun looksFinished(scr: Screen, hint: Route): Boolean {
+        val hit = (Routes.screenWords(scr.candidates) intersect hint.end).size
+        return hint.end.size >= 2 && hit >= maxOf(2.0, 0.7 * hint.end.size)
     }
 
     /** Replay a remembered path. Null when a step's element isn't on screen (or policy says no): Laya takes over there. */
@@ -314,16 +388,16 @@ class Assistant(private val svc: AgentService, override val request: String) : S
 
     /**
      * Skim the page before asking Laya (owner, 2026-10-17: "search for a UI where it needs to scroll down"): if no
-     * element on screen shares two words with the goal, scroll down up to [SKIM_PAGES] pages looking for one that
-     * does ("payment history" -> "Show transaction history"), only reading -- about 1 s a page, vs 10-15 s for a
+     * element on screen matches what the goal is about ([want]: two words, or the one word it has), scroll down up to
+     * [SKIM_PAGES] pages looking for one that does ("payment history" -> "Show transaction history"), only reading -- about 1 s a page, vs 10-15 s for a
      * Laya pass that would guess ("More"). Found: those scrolls become steps (history, path, rows) and Laya decides
      * on that page. Not found: back to the top, as if nothing happened (null).
      */
-    private fun skim(goal: String, first: Screen): Screen? {
-        val want = Routes.contentWords(goal) - Routes.contentWords(apps.installed.firstOrNull { it.pkg == first.pkg }?.label.orEmpty())
+    private fun skim(want: Set<String>, first: Screen): Screen? {
         fun match(c: ScreenCandidate) = (Routes.contentWords(c.label) intersect want).size
         fun best(s: Screen) = s.candidates.maxOfOrNull(::match) ?: 0
-        if (want.size < 2 || best(first) >= 2 || first.candidates.none { it.scrollable }) return null
+        val enough = minOf(2, want.size)  // "stopwatch" alone: one word is the whole goal
+        if (want.isEmpty() || best(first) >= enough || first.candidates.none { it.scrollable }) return null
         val pages = mutableListOf(first)
         while (pages.size <= SKIM_PAGES && !stopped) {
             say("Looking further down…")
@@ -332,7 +406,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
             val next = screen()
             if (next.candidates.map { it.label } == pages.last().candidates.map { it.label }) break  // the page ended
             pages += next
-            if (best(next) >= 2) {
+            if (best(next) >= enough) {
                 trace += "skim: \"${next.candidates.maxBy(::match).label}\" ${pages.size - 1} page(s) down"
                 pages.dropLast(1).forEach { record("SCROLL_DOWN", null, null, it) }
                 return next

@@ -44,8 +44,12 @@ class RouteStep(val op: String, val pkg: String?, val rid: String, val label: St
     }
 }
 
-/** A path that finished [goal], starting in app [pkg]; [source] is "teach" (the owner showed it) or "run" (confirmed). */
-class Route(val goal: String, val pkg: String, val key: String, val steps: List<RouteStep>, val source: String)
+/**
+ * An experience (D-048): a path that finished [goal], starting in app [pkg]. [source]: "teach" (the owner showed
+ * it), "confirmed" (the owner tapped ✓), "verified" (the outcome checked out). [end]: the finished screen's words.
+ */
+class Route(val goal: String, val pkg: String, val key: String, val steps: List<RouteStep>, val source: String,
+            val end: Set<String> = emptySet())
 
 /**
  * UI memory (D-040): apps rarely change their screens, so a path that finished a goal once is replayed
@@ -63,6 +67,16 @@ object Routes {
 
     /** The words that say what a task or an element is about: lower-case, plurals folded, filler dropped. */
     fun contentWords(s: String) = words(s).filter { it !in STOP }.toSet()
+
+    // how to get somewhere, not what the goal is about ("show the stopwatch" is about the stopwatch)
+    private val NAV = setOf("open", "go", "show", "display", "check", "see", "view", "find", "look", "get", "take",
+        "bring", "switch", "visit", "launch", "navigate", "tap", "click", "page", "screen", "section")
+
+    /** What a goal is about: its content words without the app's name or navigation verbs. */
+    fun aboutWords(goal: String, appLabel: String?) = contentWords(goal) - contentWords(appLabel.orEmpty()) - NAV
+
+    /** A screen's fingerprint: its elements' words, minus anything with a digit (amounts, dates, times change). */
+    fun screenWords(cands: List<ScreenCandidate>) = cands.flatMap { contentWords(it.label) }.filter { w -> w.none(Char::isDigit) }.toSet()
 
     /** What identifies a task: its content words, order-free, minus the words of the text it types (that varies). */
     fun key(goal: String, text: String?): String {
@@ -86,13 +100,38 @@ object Routes {
         return text?.let { routes.optJSONObject("$pkg|${key(goal, it)}") }?.let(::route)?.takeIf { r -> r.steps.any { it.slot } }
     }
 
+    /**
+     * The experience in app [pkg] whose goal is most like [goal] -- at least half of what they're about shared
+     * (no app name, no navigation verbs) -- to hint Laya with (D-048), unlike [find]'s exact replay. Ties go to one
+     * that knows its finished screen, then the newest: a tie once picked an old taught path without one, and Laya
+     * pressed Start on the stopwatch it had reached.
+     */
+    fun similar(c: Context, pkg: String?, goal: String, appLabel: String?): Route? {
+        val want = aboutWords(goal, appLabel)
+        val routes = all(c)
+        return routes.keys().asSequence().map { routes.getJSONObject(it) }.filter { it.getString("pkg") == pkg }
+            .map { j -> Triple(route(j), jaccard(want, aboutWords(j.getString("goal"), appLabel)), j.optLong("time")) }
+            .filter { it.second >= 0.5 }
+            .maxWithOrNull(compareBy({ it.second }, { it.first.end.isNotEmpty() }, { it.third }))?.first
+    }
+
+    fun jaccard(a: Set<String>, b: Set<String>) = if (a.isEmpty() || b.isEmpty()) 0.0 else (a intersect b).size.toDouble() / (a union b).size
+
     private fun route(j: JSONObject) = Route(j.getString("goal"), j.getString("pkg"), j.getString("key"),
-        j.getJSONArray("steps").let { a -> List(a.length()) { RouteStep.from(a.getJSONObject(it)) } }, j.getString("source"))
+        j.getJSONArray("steps").let { a -> List(a.length()) { RouteStep.from(a.getJSONObject(it)) } }, j.getString("source"),
+        j.optJSONArray("end")?.let { a -> List(a.length()) { a.getString(it) }.toSet() }.orEmpty())
+
+    /** The owner said a run that used [r] went wrong: forget it. */
+    @Synchronized fun forget(c: Context, r: Route) {
+        val routes = all(c)
+        routes.remove("${r.pkg}|${r.key}")
+        file(c).writeText(routes.toString())
+    }
 
     @Synchronized fun save(c: Context, r: Route) {
         val routes = all(c)
         routes.put("${r.pkg}|${r.key}", JSONObject().put("goal", r.goal).put("pkg", r.pkg).put("key", r.key)
-            .put("source", r.source).put("time", System.currentTimeMillis())
+            .put("source", r.source).put("time", System.currentTimeMillis()).put("end", JSONArray(r.end.toList()))
             .put("steps", JSONArray().also { a -> r.steps.forEach { a.put(it.json()) } }))
         file(c).writeText(routes.toString())
     }
@@ -118,5 +157,12 @@ fun routesSelfCheck(): String {
     val want = Routes.contentWords("show me the payment history in gpay") - Routes.contentWords("GPay")
     check((Routes.contentWords("Show transaction history") intersect want).size == 2)
     check((Routes.contentWords("Pay anyone") intersect want).isEmpty())
+    // similar goals (D-048): "check my payment history" ~ "show me the payment history", app name left out
+    check(Routes.jaccard(Routes.contentWords("check my payment history in gpay") - Routes.contentWords("GPay"), want) >= 0.5)
+    check(Routes.jaccard(Routes.contentWords("set an alarm") , want) == 0.0)
+    check(Routes.screenWords(listOf(c("₹250 debited", ""), c("Transaction history", ""))) == setOf("debited", "transaction", "history"))
+    check(Routes.aboutWords("open clock and show the stopwatch", "Clock") == setOf("stopwatch"))
+    check(Routes.aboutWords("open the clock app and go to the timers tab", "Clock") == setOf("timer"))
+    check(Routes.aboutWords("show me the payment history in gpay", "GPay") == setOf("payment", "history"))
     return "ok"
 }

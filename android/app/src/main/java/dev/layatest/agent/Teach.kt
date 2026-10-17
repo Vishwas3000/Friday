@@ -30,6 +30,7 @@ class Teacher(private val svc: AgentService, private val goal: String, private v
     private val history = ArrayList<String>()             // touched only on [io]
     private val route = ArrayList<RouteStep>()            // on [io]: the same path, remembered for replay (D-040)
     private var routePkg: String? = null                  // on [io]: the app that path starts in
+    private var startWords: Set<String> = emptySet()      // on [io]: that first screen's words (Routes.screenWords)
     @Volatile private var settled: JSONObject? = null     // the screen the owner is looking at
     @Volatile var steps = 0
         private set
@@ -144,7 +145,10 @@ class Teacher(private val svc: AgentService, private val goal: String, private v
             "OPEN_APP" -> { route.clear(); routePkg = null }  // the remembered path starts inside the app the owner opened
             "DONE" -> {}
             else -> {
-                if (routePkg == null) routePkg = pkg
+                if (routePkg == null) {
+                    routePkg = pkg
+                    startWords = screen.getJSONArray("screen").let { Routes.screenWords(buildCandidates(screen, it.getInt(0), it.getInt(1))) }
+                }
                 // typed text that came from the goal ("search for <pizza>") is re-filled from each new request
                 route += RouteStep.of(op, pkg, c, payload, slot = payload != null && Routes.key(goal, payload) != Routes.key(goal, null))
             }
@@ -155,11 +159,14 @@ class Teacher(private val svc: AgentService, private val goal: String, private v
     fun done() = svc.main.post {
         flushScroll.run(); flushTyping.run()
         io.execute {
-            runCatching { svc.readState() }.getOrNull()?.let { write(it, "DONE") }
+            val last = runCatching { svc.readState() }.getOrNull()?.also { write(it, "DONE") }
+            // the finished screen's fingerprint lets a later run see it's already there (D-048)
+            val end = last?.let { st -> st.getJSONArray("screen").let { Routes.screenWords(buildCandidates(st, it.getInt(0), it.getInt(1))) } }
             routePkg?.takeIf { route.isNotEmpty() }?.let { pkg ->
-                Routes.save(svc, Route(goal, pkg, Routes.key(goal, route.firstOrNull { it.slot }?.payload), route.toList(), "teach"))
+                Routes.save(svc, Route(goal, pkg, Routes.key(goal, route.firstOrNull { it.slot }?.payload), route.toList(), "teach",
+                    end.orEmpty() - startWords))
             }
-            finish("Saved $steps steps — next time Friday repeats them from memory")
+            finish("Saved $steps steps — Friday learned how to do this")
         }
     }
 
