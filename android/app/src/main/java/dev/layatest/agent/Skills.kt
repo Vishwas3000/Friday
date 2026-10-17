@@ -116,12 +116,28 @@ fun ruleSkill(request: String): String? {
     // "open X and <task>": the task picks the skill, which then uses the app named ("open youtube and play
     // despacito" -> play_video in YouTube: straight to its results); a task no rule covers ("and go to the
     // timers tab") stays open_app, for Laya inside X. Was: every "open X and ..." went to Laya (2026-10-17).
-    if (skill == "open_app") OPEN_AND.find(request)?.let { m -> ruleSkill(m.groupValues[1])?.takeIf { it != "open_app" }?.let { return it } }
+    // A search stays inside the app opened: "open youtube and search for lofi" had Chrome google the whole sentence.
+    if (skill == "open_app") OPEN_AND.find(request)?.let { m ->
+        ruleSkill(m.groupValues[1])?.takeIf { it != "open_app" && it != "web_search" }?.let { return it }
+    }
     return skill
 }
 
 /** Money questions: when Laya reaches the screen, Friday reads the amounts out instead of saying "Done". */
 private val READ_SKILLS = setOf("spend_query", "balance_query", "bill_query")
+/** "last 10 transactions", "5 payments": how many to read. */
+private val COUNT = Regex("\\b(?:last|latest|recent|past|top)\\s+(\\d{1,2})\\b|\\b(\\d{1,2})\\s+(?:transactions?|payments?)\\b",
+    RegexOption.IGNORE_CASE)
+
+/** Up to the count the request asks for (else 3), scrolling down up to 3 pages when the screen shows fewer. */
+private fun readAll(ctx: SkillContext, dated: Boolean): String {
+    val n = COUNT.find(ctx.request)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }?.toInt()?.coerceIn(1, 20) ?: 3
+    var texts = ctx.screen().texts
+    var pages = 0
+    while (pages++ < 3 && (readAmounts(texts, n, dated)?.lines()?.size ?: 0) < n && ctx.scroll("down")) texts = texts + ctx.screen().texts
+    return readAmounts(texts, n, dated)?.let { ctx.succeeded(); "Here's what I see:\n$it" }
+        ?: if (dated) "I didn't find any dated payments on this screen" else "Done"
+}
 private val AMOUNT = Regex("(₹|rs\\.?|inr)\\s?[\\d,]+(\\.\\d{1,2})?", RegexOption.IGNORE_CASE)
 
 private val DATE = Regex("\\b(\\d{1,2}\\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*|" +
@@ -153,12 +169,16 @@ fun routingSelfCheck(): String {
     check(ruleSkill("open the clock app and set an alarm for 7") == "alarm_timer")
     check(ruleSkill("open settings and turn on wifi") == "device_setting")
     check(ruleSkill("open spotify") == "open_app")
+    check(ruleSkill("open youtube and search for lofi music") == "open_app" && ruleSkill("search the web for weather") == "web_search")
     val t = listOf("Paid to", "Ravi Kumar", "₹250", "16 Oct").map { ScreenText(it, intArrayOf(0, 0, 1, 1)) }
     check(readAmounts(t) == "Ravi Kumar · ₹250 · 16 Oct")
     val promo = listOf("Personal loan", "Up to ₹40 lakh", "Check details", "Ravi Kumar", "₹250 debited", "16 October")
         .mapIndexed { i, x -> ScreenText(x, intArrayOf(0, i, 1, i + 1)) }
     check(readAmounts(promo + promo.drop(3)) == "Ravi Kumar · ₹250 debited · 16 October")  // the offer and the repeat drop out
     check(ruleSkill("check my last payment in gpay") == "spend_query")
+    check(ruleSkill("Just a last 10 transaction from Gpay") == "spend_query")
+    check(COUNT.find("Just a last 10 transaction from Gpay")?.groupValues?.get(1) == "10")
+    check(COUNT.find("show me 5 payments")?.groupValues?.get(2) == "5" && COUNT.find("show the payment history") == null)
     return "ok"
 }
 
@@ -204,10 +224,12 @@ class GenericSkill(override val id: String) : Skill {
             ?: ctx.slots.after("search for", "search", "look for", "find", "type", "play", "watch", "listen to")
         // picking a span is a Laya pass (~2-4 s): only if a step types -- most tasks don't (Clock, 2026-10-17)
         val pick = { ctx.slots.spans.takeIf { it.isNotEmpty() }?.let { sp -> ctx.choose(SLOT_Q, sp)?.let { sp[it.index] } } }
-        return when (ctx.runLaya(ctx.request, typeText = text, pickText = pick)) {
-            Outcome.DONE -> if (id !in READ_SKILLS) "Done" else
-                readAmounts(ctx.screen().texts, onlyDated = id == "spend_query")?.let { ctx.succeeded(); "Here's what I see:\n$it" }
-                    ?: if (id == "spend_query") "I didn't find any dated payments on this screen" else "Done"
+        // a payments question is one task however it's asked, so what worked last time applies to every phrasing:
+        // "Just a last 10 transaction from Gpay" shared no words with "payment history", got no hint and wandered
+        // into the You tab (2026-10-18)
+        val goal = if (id == "spend_query") "show the transaction history" else ctx.request
+        return when (ctx.runLaya(goal, typeText = text, pickText = pick)) {
+            Outcome.DONE -> if (id !in READ_SKILLS) "Done" else readAll(ctx, dated = id == "spend_query")
             Outcome.STOPPED -> "Stopped"
             Outcome.STUCK -> "I got stuck — the screen is where I stopped"
             Outcome.MAX_STEPS -> "I ran out of steps before finishing"

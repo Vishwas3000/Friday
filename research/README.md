@@ -90,6 +90,7 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 | [20-ui-memory-and-step-speed.md](20-ui-memory-and-step-speed.md) | Where a step's time goes (Laya, by tokens) and UI memory: repeat tasks 22.6 s → 2.2 s without Laya (D-040) |
 | [21-prototypes.md](21-prototypes.md) | Has anyone built this? Closest fully-local phone agents (PokeClaw, MobiAgent runner, Genie) take minutes per task; none combine a non-generative step model, UI memory and teach-to-train on a stock phone |
 | [22-training-plan.md](22-training-plan.md) | **How to train Laya for Friday:** a data flywheel (corrections > demos > verified runs > replay), joint multi-task fine-tune on the box, gated by an on-phone task suite; what else to look into (teacher labelling, hints, icons, smaller student, emulators) |
+| [23-task-card.md](23-task-card.md) | The task card: one structured reading of each request (skill, app, slots, read/act, risk, done-check), made once and read by every stage; ten parsing bugs found in today's code; four-step migration |
 
 
 

@@ -117,6 +117,35 @@ fun buildCandidates(state: JSONObject, screenW: Int, screenH: Int): List<ScreenC
 fun selectedLabels(state: JSONObject): List<String> = flatten(state)
     .filter { !it.ime && it.j.getBoolean("visible") && it.j.getBoolean("selected") }.map { label(it.j) }.filter { it.isNotEmpty() }
 
+/**
+ * The elements the target question shows when a screen has more than [k] (D-049). That row lists every element twice
+ * (as an option and in the screen list), and Laya picks right 84% of the time from 1-5 elements but 54% from 21-50
+ * (research/01 §2.6). Kept: elements whose words (label or resource id) meet [want], best first; text fields; then the
+ * screen's top and bottom alternately (toolbars, tab bars). Indices into [cands], in screen order.
+ */
+fun shortlist(cands: List<ScreenCandidate>, want: Set<String>, k: Int): List<Int> {
+    if (k <= 0 || cands.size <= k) return cands.indices.toList()
+    fun hits(c: ScreenCandidate) = ((Routes.contentWords(c.label) + Routes.contentWords(c.rid)) intersect want).size
+    val keep = LinkedHashSet<Int>()
+    cands.indices.filter { hits(cands[it]) > 0 }.sortedByDescending { hits(cands[it]) }.take(k).forEach { keep += it }
+    cands.indices.filter { cands[it].editable }.forEach { if (keep.size < k) keep += it }
+    var top = 0
+    var bottom = cands.size - 1
+    while (keep.size < k) { keep += top++; if (keep.size < k) keep += bottom-- }
+    return keep.sorted()
+}
+
+fun shortlistSelfCheck(): String {
+    fun c(label: String, rid: String = "", edit: Boolean = false) =
+        ScreenCandidate(label, "TextView", true, false, edit, false, false, false, false, true, IntArray(4), rid)
+    val cands = listOf(c("Back"), c("Search", edit = true)) + (1..20).map { c("Item $it") } + listOf(c("", "action_orders"), c("Home"))
+    val want = Routes.aboutWords("open my orders on meesho", "Meesho")
+    // the orders tab (by its resource id), the text field, then the top and bottom of the screen
+    check(shortlist(cands, want, 6) == listOf(0, 1, 2, 21, 22, 23)) { "shortlist: ${shortlist(cands, want, 6)}" }
+    check(shortlist(cands.take(5), want, 6) == listOf(0, 1, 2, 3, 4) && shortlist(cands, want, 0) == cands.indices.toList())
+    return "ok"
+}
+
 /** A visible text and its box: what the READ step's extractors parse (amounts, dates, names). */
 class ScreenText(val text: String, val bounds: IntArray)
 

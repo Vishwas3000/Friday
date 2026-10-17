@@ -14,10 +14,11 @@ import re
 import socket
 import subprocess
 
-STEP = re.compile(r"\[read (\d+) ms \(settle (\d+)\), laya (\d+) ms: (\d+) cands, (\d+) tokens\]")
+STEP = re.compile(r"\[read (\d+) ms \(settle (\d+)\), laya (\d+) ms: (\d+) cands, (\d+) tokens[^\]]*\]")
 MEMORY = re.compile(r"\[read (\d+) ms, no Laya\]")
 assert STEP.search("+9.8s step 1 on x: CLICK \"Timers\" (op 0.89) -> AUTO  [read 806 ms (settle 246), laya 8484 ms: "
                    "19 cands, 1118 tokens]")[3] == "8484"
+assert STEP.search("[read 9 ms (settle 1), laya 70 ms: 41 cands, 1300 tokens, target from 16]")[5] == "1300"
 
 
 def call(**cmd):

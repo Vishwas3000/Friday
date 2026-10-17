@@ -63,6 +63,7 @@ class AgentService : AccessibilityService() {
         "selfcheck" -> JSONObject().put("candidates", candidatesSelfCheck()).put("slots", slotsSelfCheck())
             .put("media", mediaSelfCheck()).put("people", peopleSelfCheck()).put("profiler", appCatalogSelfCheck())
             .put("routes", routesSelfCheck()).put("routing", routingSelfCheck()).put("wake", wakeSelfCheck(this))
+            .put("shortlist", shortlistSelfCheck())
         "wake" -> wake?.command(c) ?: error("the wake word isn't set up yet")  // {"on": bool} optional; listening stats
         "wake_test" -> wakeTest(this, java.io.File(filesDir, c.getString("wav")))  // max score of a WAV in filesDir
         "profiles" -> JSONObject(AppProfiler.profiles(packageManager) as Map<*, *>)  // D-031: auto app profiles, to evaluate
@@ -78,7 +79,9 @@ class AgentService : AccessibilityService() {
         "teach_list" -> Teacher.list(this)
         "teach_wipe" -> JSONObject().put("deleted", Teacher.wipe(this))
         // debugging: run a request on the bridge thread and return its answer + step trace
-        "ask" -> Assistant(this, c.getString("goal")).also { lastAsk = it }.let { a ->
+        // the task suite's options (D-049): memory on/read/off, unattended (never wait for a tap), shortlist size
+        "ask" -> Assistant(this, c.getString("goal"), c.optString("memory", "on"), c.optBoolean("unattended"),
+            c.optInt("shortlist", Assistant.SHORTLIST)).also { lastAsk = it }.let { a ->
             JSONObject().put("answer", a.run()).put("trace", JSONArray(a.trace)).put("kept", a.kept)
                 .put("learned", a.learned?.steps?.joinToString(" → ") { it.describe() } ?: JSONObject.NULL)
         }
@@ -87,6 +90,7 @@ class AgentService : AccessibilityService() {
         "reject" -> JSONObject().put("rejected", lastAsk != null).also { lastAsk?.reject() }
         "routes" -> Routes.all(this)  // UI memory (D-040), for debugging
         "step_parity" -> stepParity(c.getString("goal"))
+        "shortlist_eval" -> shortlistEval(c)
         // the request log's last entries (default 20), timelines included
         "requests" -> JSONObject().put("requests", JSONArray(java.io.File(filesDir, Assistant.REQUEST_LOG)
             .takeIf { it.exists() }?.readLines()?.takeLast(c.optInt("last", 20))?.map { JSONObject(it) } ?: emptyList<JSONObject>()))
@@ -317,6 +321,37 @@ class AgentService : AccessibilityService() {
         return JSONObject().put("same", same).put("candidates", cands.size)
             .put("split", split.text()).put("split_ms", t1 - t0).put("split_tokens", split.tokens)
             .put("batched", both.text()).put("batched_ms", t2 - t1).put("batched_tokens", both.tokens)
+    }
+
+    /**
+     * Bridge test (D-049): Laya's step on a recorded screen ([c] "cands": option fields as scripts/speed_eval.py
+     * rebuilds them) with every element as a target option, then with the shortlist of each size in "ks".
+     */
+    private fun shortlistEval(c: JSONObject): JSONObject {
+        val arr = c.getJSONArray("cands")
+        val cands = (0 until arr.length()).map { i -> arr.getJSONObject(i).let { j ->
+            ScreenCandidate(j.getString("label"), j.getString("class"), j.optBoolean("clickable"), j.optBoolean("long_clickable"),
+                j.optBoolean("editable"), j.optBoolean("scrollable"), false, j.optBoolean("checked"), j.optBoolean("selected"),
+                j.optBoolean("enabled", true), IntArray(4), j.optString("rid"))
+        } }
+        val goal = c.getString("goal")
+        val history = c.optJSONArray("history")?.let { h -> (0 until h.length()).map(h::getString) }.orEmpty()
+        val want = Routes.aboutWords(goal, null)
+        val e = laya()
+        fun run(s: List<Int>): JSONObject {
+            val t = SystemClock.elapsedRealtime()
+            val st = e.step(goal, history, cands, s)
+            return JSONObject().put("op", st.op).put("target", st.target ?: -1).put("conf", st.targetConfidence ?: 0.0)
+                .put("ms", SystemClock.elapsedRealtime() - t).put("tokens", st.tokens).put("shown", JSONArray(s))
+        }
+        val out = JSONObject().put("full", run(cands.indices.toList()))
+        // a step without a target (scroll, back, done) is the same either way
+        if (out.getJSONObject("full").getInt("target") >= 0) {
+            val ks = c.getJSONArray("ks")
+            for (i in 0 until ks.length()) out.put("k${ks.getInt(i)}", run(shortlist(cands, want, ks.getInt(i))))
+        }
+        layaIdle()
+        return out
     }
 
     /** Bridge test: how a request routes on the phone (rule hit, or Laya's pick + confidence); compare research/09. */

@@ -67,17 +67,18 @@ class LayaEngine(ctx: Context) : AutoCloseable {
      * The operation first; the target row -- every element again as an option, most of the tokens -- only for
      * steps that use a target. The rows are independent passes, so the answers match asking both at once, but
      * a scroll / back / done step skips the long row and nothing is padded to it (research/19: ~1.5-4x).
+     * The target row shows only [shown] (indices into [cands], see [shortlist]); the operation row always sees all.
      */
-    fun step(goal: String, history: List<String>, cands: List<ScreenCandidate>): Step {
+    fun step(goal: String, history: List<String>, cands: List<ScreenCandidate>, shown: List<Int> = cands.indices.toList()): Step {
         val c = cands.map { it.toCandidate() }
         val opIn = buildInputs(tok::encode, goal, history, c, ask = setOf("operation"))
         val op = answers(opIn).getValue("operation")
         var tokens = opIn.ort.inputIds.sumOf { it.size }
         if (op.choiceKey !in TARGETED || c.isEmpty()) return Step(op.choiceKey, op.answerConfidence, null, null, tokens)
-        val tIn = buildInputs(tok::encode, goal, history, c, ask = setOf("target"))
+        val tIn = buildInputs(tok::encode, goal, history, shown.map { c[it] }, ask = setOf("target"))
         val tg = answers(tIn).getValue("target")
         tokens += tIn.ort.inputIds.sumOf { it.size }
-        return Step(op.choiceKey, op.answerConfidence, tg.choiceIndex, tg.answerConfidence, tokens)
+        return Step(op.choiceKey, op.answerConfidence, shown[tg.choiceIndex], tg.answerConfidence, tokens)
     }
 
     private fun answers(built: BuiltInputs) = forward(built).let { (logits, act) -> decode(logits, act, built) }

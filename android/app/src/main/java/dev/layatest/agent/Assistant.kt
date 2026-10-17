@@ -16,8 +16,12 @@ import java.util.Locale
  * One request, end to end (D-024): ROUTE (rules -> Laya -> ask the owner) -> the skill (slots, app,
  * do, read) -> the answer. Runs on its own thread. Laya loads only when a step needs it and is freed
  * when the request ends (D-016). Every UI action passes [Safety.verdict] here, under the skills (D-025/D-026).
+ *
+ * For the task suite (D-049): [memory] "on" uses and keeps experiences, "read" only uses them, "off" neither;
+ * [unattended] skips every step that would wait for the owner; [shortlistK] is the target row's size (0: all).
  */
-class Assistant(private val svc: AgentService, override val request: String) : SkillContext {
+class Assistant(private val svc: AgentService, override val request: String, private val memory: String = "on",
+                private val unattended: Boolean = false, private val shortlistK: Int = SHORTLIST) : SkillContext {
     override val android: Context get() = svc
     override val slots = Slots(taskPart(request))
     override val apps = AppResolver(svc)
@@ -72,7 +76,12 @@ class Assistant(private val svc: AgentService, override val request: String) : S
 
     override fun appFor(skill: String): AppInfo? {
         val c = apps.candidates(skill)
-        apps.named(request)?.let { named -> if (c.any { it.pkg == named.pkg }) return named }
+        // an app the request names counts if it's one for this skill, or the request opens it by name: "Open bistro
+        // and order a dessert" went to Swiggy, Bistro not being on the shopping list (2026-10-18)
+        apps.named(request)?.let { named ->
+            if (c.any { it.pkg == named.pkg } || Regex("^\\s*(please\\s+)?(open|launch|start)\\s+(the\\s+)?${Regex.escape(named.label)}\\b",
+                    RegexOption.IGNORE_CASE).containsMatchIn(request)) return named
+        }
         return when (c.size) {
             0 -> null
             1 -> c[0]
@@ -151,6 +160,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
     override fun say(text: String) = banner.say(text)
 
     override fun ask(question: String, options: List<String>): Int? {
+        if (unattended) { trace += "unattended: not asked \"$question\""; return null }
         banner.hide()
         return overlay.choose(question, options)
     }
@@ -187,7 +197,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
     /** Keep this request's experience (D-048): its path for hints and replay, its screens as training rows. */
     fun keep(source: String) {
         val r = learned ?: return
-        if (kept) return
+        if (kept || memory != "on") return
         kept = true
         Routes.save(svc, Route(r.goal, r.pkg, r.key, r.steps, source, r.end))
         writeRows(source)
@@ -212,13 +222,14 @@ class Assistant(private val svc: AgentService, override val request: String) : S
     override fun runLaya(subgoal: String, maxSteps: Int, typeText: String?, pickText: (() -> String?)?): Outcome {
         val startPkg = foreground()
         path.clear(); rows.clear(); goal = subgoal; typed = typeText
-        Routes.find(svc, startPkg, subgoal, typeText)?.let { route ->
+        Routes.find(svc, startPkg, subgoal, typeText)?.takeIf { memory != "off" }?.let { route ->
             replayed = route
             replay(route, typeText)?.let { return it }  // DONE or STOPPED; null: the screen changed, Laya goes on from here
         }
         // a past success with a similar goal in this app (D-048): its steps are a hint for Laya, which still decides
         // (so a renamed or moved element still works), and its finished screen means this task is done
         val hint = Routes.similar(svc, startPkg, subgoal, apps.installed.firstOrNull { it.pkg == startPkg }?.label)
+            ?.takeIf { memory != "off" }
         val lead = hint?.let { h -> "$subgoal (last time: ${h.steps.joinToString(", then ") { it.describe() }})" } ?: subgoal
         hint?.let { trace += "hint (${it.source}): \"${it.goal}\" -> ${it.steps.joinToString(" → ") { s -> s.describe() }}" }
         val blocked = HashSet<String>()  // targets skipped or refused, so Laya doesn't pick them again
@@ -226,6 +237,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
         var skimmed = false
         var startWords: Set<String>? = null  // the first screen's fingerprint: the finished screen is told apart by what changed
         val about = Routes.aboutWords(subgoal, apps.installed.firstOrNull { it.pkg == startPkg }?.label)
+        val want = about + hint?.steps.orEmpty().flatMap { Routes.contentWords(it.label) }  // what the shortlist looks for
         for (step in 1..maxSteps) {
             if (stopped) return Outcome.STOPPED
             val t0 = SystemClock.elapsedRealtime()
@@ -247,7 +259,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
                 trace += "step $step on ${scr.pkg}: DONE — “$it” is already selected"
                 return finish(scr, startPkg, subgoal, typeText, startWords)
             }
-            if (!skimmed) {
+            if (!skimmed && scr.candidates.isNotEmpty()) {  // not on a loading screen (GPay, 2026-10-18)
                 skimmed = true
                 // no need to look further down when an element the hint names is right here
                 val hinted = hint?.steps?.any { st -> st.label.isNotEmpty() && scr.candidates.any { it.label == st.label } } == true
@@ -259,9 +271,10 @@ class Assistant(private val svc: AgentService, override val request: String) : S
             val cands = scr.candidates.filter { key(it) !in blocked && Safety.verdict("CLICK", it, scr.pkg).first != Safety.Verdict.BLOCK }
             say("Thinking… (step $step)")
             val t1 = SystemClock.elapsedRealtime()
-            val s = laya.step(lead, trail, cands)
+            val shown = shortlist(cands, want, shortlistK)
+            val s = laya.step(lead, trail, cands, shown)
             val took = " [read $readMs ms (settle ${svc.lastSettleMs}), laya ${SystemClock.elapsedRealtime() - t1} ms: " +
-                "${cands.size} cands, ${s.tokens} tokens]"
+                "${cands.size} cands, ${s.tokens} tokens${if (shown.size < cands.size) ", target from ${shown.size}" else ""}]"
             if (s.op == "DONE") {
                 trace += "step $step on ${scr.pkg}: DONE (op %.2f)".format(s.opConfidence) + took
                 return finish(scr, startPkg, subgoal, typeText, startWords)
@@ -428,6 +441,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
 
     /** Ask the owner to approve one risky step (Run / Skip / Stop), outlining its target. */
     private fun confirm(step: String, why: String, target: ScreenCandidate?): String {
+        if (unattended) { trace += "unattended: skipped \"$step\" ($why)"; return "skip" }
         banner.hide()
         val c = overlay.ask("$step\n($why)\nGoal: $request", target?.let { JSONArray(it.bounds.toList()) })
         if (c == "stop") banner.stop()
@@ -455,6 +469,8 @@ class Assistant(private val svc: AgentService, override val request: String) : S
     companion object {
         const val REQUEST_LOG = "requests.jsonl"
         private const val SKIM_PAGES = 4
+        /** The target row's size on crowded screens (D-049, research/18 §9: no worse pick at 16, 0.63× the time); 0: all. */
+        const val SHORTLIST = 16
         private const val TAG = "FridayAssistant"
         private const val GROUP = 16
     }

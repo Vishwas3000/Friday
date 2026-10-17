@@ -11,6 +11,9 @@ on · Trust tags: [primary] read at source · [measured] run here · [derived] c
 - **Shipped (2026-10-18, §6b).** On the Pixel 8, `nb8-h-e16` on onnxruntime-android 1.31.0 runs the fixture in
   **1.73–1.85 s vs 3.83–3.90 s** for today's fp16 on 1.20 (**2.1×**), at 651 MB instead of 753 MB. Its logits match the
   Mac's phone-like run to 3 decimals, so §4's 52/52 carries over. fp32 on 1.20 was only 1.3× faster, for +600 MB.
+- **Target shortlist (D-049, §9).** On crowded screens Laya picks the target from the 16 elements most related to the
+  goal. On the phone, over the 52 pairs, nothing got worse: 30/34 same targets, 1 better, 2 equivalent, 1 debatable.
+  Tap steps on crowded screens took 0.63× the time; the 35-element store screen went from about 19 s to about 8 s.
 - **The int8 recipe we planned does not keep decisions on the phone's runtime.** Dynamic int8 with per-channel weights,
   with the decision head, the embedding table or the first/last encoder layers kept un-quantized, flips **7–11 of 52
   operations and 7–10 of 34 tap targets** under ORT 1.20.0 [measured].
@@ -295,6 +298,53 @@ rests.
   check, §6).
 - **Label caps below 40 and the `_label` 60 → 40 change** (§5).
 - **`captures/spotify_state.json`:** an error body, not a screen.
+
+## 9. Target shortlist (D-049) [measured, Pixel 8, nb8 on ORT 1.31, 2026-10-18]
+**The lever.**
+- The target row lists every element twice: once as an option, once in the screen list. On a crowded screen it is most
+  of a tap step's tokens (§2).
+- Laya also picks worse from many elements: 0.84 top-1 with 1–5 candidates, 0.54 with 21–50 (research/01 §2.6).
+- So on screens with more than k elements, the target row shows only k of them; the operation row still sees all.
+  Operations can't change, and the chosen index maps back to the full list.
+
+**Which k elements** (`shortlist()` in `Candidates.kt`):
+1. Elements whose words (label, or resource-id words) meet the goal's about-words, plus the labels of a "last time"
+   hint; the most overlap first.
+2. Text fields.
+3. The screen's top and bottom, alternately (toolbars, tab bars).
+The result keeps screen order.
+
+**Test.**
+- The "shortlist_eval" bridge command runs the app's own Kotlin on the phone (`scripts/shortlist_eval.py 12 16 20`):
+  each pair once with all elements, then with each k.
+- The 52 pairs are §1's. Only the store screen has resource ids; the run-file screens are option strings, so matching
+  there was by label only.
+- The eval's about-words keep the app's name. In live use the hint labels are added too.
+- The owner used the phone during part of the run, so absolute times are inflated. Each ratio compares back-to-back
+  calls on the same screen.
+
+| k | same target (of 34) | full pick inside the shortlist | changed picks | tap steps on screens with more than k elements |
+|---|---|---|---|---|
+| 12 | 31 | 33 | 2 equivalent, **1 worse** | 24 steps: 252.7 → 139.4 s (median ratio 0.59) |
+| **16** | 30 | 33 | 1 better, 2 equivalent, 1 debatable | 15 steps: 192.4 → 108.9 s (median 0.63) |
+| 20 | 31 | 34 | 1 better, 1 equivalent, 1 debatable | 11 steps: 148.5 → 89.9 s (median 0.75) |
+
+**Changed picks:**
+- "Set the screen timeout to 5 minutes": the full list picked the unlabeled radio button, the shortlist its "5 minutes"
+  row. Equivalent; this is the full pick that isn't shown at k = 12 and 16.
+- "Turn off adaptive timeout": the switch became its row. Equivalent, as in §5.
+- "Browse audiobooks": "Search" became "Audiobooks". Better; §5's container trim fixed the same pick.
+- "Search the Play Store for a weather app": "Search Google Play" became the search bar's container at k = 16 and 20
+  (debatable), and the Apps tab at k = 12 (worse).
+
+**Speed.** On the 35-element store screen a tap step took 18.8–19.7 s with all elements and 7.8–9.2 s with 16.
+
+**Chosen: k = 16** (`Assistant.SHORTLIST`), the smallest k with no worse pick.
+
+**Not covered:**
+- The operation row still reads every element, so non-tap steps on crowded screens keep their cost: 2.4–6.6 s on these
+  21–31-element screens here. Shortening it risks DONE and SCROLL decisions and needs its own test.
+- 34 taps can't show a 1-in-30 regression; the task suite (D-049) checks whole tasks.
 
 ## Open
 - Re-check nb8 on more screens once Teach/run rows exist (research/14). 52 pairs can't show a 1% flip rate.

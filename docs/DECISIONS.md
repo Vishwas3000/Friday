@@ -400,3 +400,45 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - Letting Friday explore apps on its own now (loop 3: later, after these two).
   - Dropping exact replay (owner kept it as a shortcut).
 - **Who / status:** user (chose loops 1+2 and the shortcut) · Claude (design) · Loop 1 built and measured on the Pixel 8: a reworded Clock task got its hint and stopped at the goal (13 s, was 35 s with a Start overshoot); already-there in 6 s. Learned on the way: a finished screen is fingerprinted by what changed since the start (tab bars matched every Clock tab), selected tabs are read from the whole screen (they aren't candidates), and "done when the tap names what the goal is about" stops overshoots. Loop 2 waits for the box's SSH port
+
+### D-049 — A task suite to judge every change; Laya picks targets from a 16-element shortlist
+- **Decision:**
+  1. **Task suite** (`scripts/task_suite.py`). It runs real tasks on the phone, each with automatic checks: the app in front, words on screen, the selected tab, the answer, media playing, or a system setting. It reports pass/fail, total time, Laya time and steps, saves each run to `captures/suite/`, and `--compare` diffs two runs.
+     - Generic tasks live in `scripts/suite_tasks.json`; the owner's own go in `captures/suite_tasks.json` (git-ignored).
+     - Runs are unattended (a step that would wait for the owner is skipped) and muted.
+     - Memory is off by default, or read-only with `--memory`: the suite never teaches Friday.
+  2. The bridge's `ask` takes `memory` (on / read / off), `unattended` and `shortlist`.
+  3. **Target shortlist.** On screens with more than 16 elements, the target row shows the 16 most related to the goal (`shortlist()` in `Candidates.kt`): elements matching the goal's words or hint, then text fields, then the screen's top and bottom. The operation row still sees every element, so operations can't change.
+- **Why:**
+  - The owner: "what are the things we need to work on for making Friday really a fast assistant that does the task properly"; approved this plan ("yea do it", 2026-10-18).
+  - Until now changes were judged from a handful of runs (research/22 §5.2).
+  - Shortlist, on the phone, 52 pairs (research/18 §9): 30/34 same targets; the 4 changes were 1 better, 2 equivalent, 1 debatable, none worse. Tap steps on crowded screens took 0.63× the time (35 elements: about 19 s → 8 s).
+- **Rejected:**
+  - k = 12: one worse pick (store search → the Apps tab).
+  - k = 20: less gain.
+  - Shortening the operation row too: it would risk DONE and SCROLL decisions; untested.
+  - Label trims (research/18 §5).
+- **Who / status:** owner (asked, approved) · Claude · Shortlist measured and on (k = 16). Suite built; first baseline run pending.
+
+### D-050 — Fixes from the owner's failed requests (2026-10-18), ahead of the task card
+- **Decision:**
+  1. **Payments questions get one goal.** spend_query runs Laya on "show the transaction history" whatever the wording, so the remembered path, the skim and done-on-tap work for every phrasing.
+  2. **"last 10" reads 10.** It scrolls down up to 3 pages when one screen shows fewer.
+  3. **The skim waits for a screen with elements.** It was being used up on GPay's empty loading screen.
+  4. **An app opened by name wins.** "open bistro and …" now opens Bistro even though it isn't on the shopping list.
+  5. **"open X and search for Y" searches inside X**, not Google in Chrome.
+- **Why:**
+  - "Just a last 10 transaction from Gpay" took 54 s: it tapped the Money tab, then the You tab, and read nothing. It shared no words with the remembered "payment history" path and its skim was spent on the loading screen.
+  - "Open bistro and order a desert for me" opened Swiggy and got stuck.
+  - The design review (research/23 §1.1 and §1.5) found 4 and 5 in the code.
+- **Who / status:** Claude · Built (self-checks extended). The owner's retest is pending.
+
+### D-051 — The task card: understand each request once (research/23)
+- **Decision (proposed):** one `TaskCard` is filled once per request by `understand()`, from today's own rules (skill, app, about, query and slots, read or act, risk, done-check), and read by every later stage. Ship in four steps, behaviour unchanged first:
+  - (a) log the card;
+  - (b) skills read it instead of re-parsing;
+  - (c) checks run on it (stop the moment the task is done);
+  - (d) the Writer fills it when rules can't.
+- **Why:** about a dozen places re-read the raw request with different word lists, and several wrong actions come straight from that (research/23 §1: ten found, two fixed in D-050).
+- **Rejected:** a framework or plugin system; letting the Writer decide mode, risk, done or the app's package.
+- **Who / status:** owner approved building it (2026-10-18) · design by a Claude sub-agent, reviewed by Claude · Step (a) next. Open question for the owner: should "open X and …" always show X? ("open settings and check the storage" answers without opening Settings.)
