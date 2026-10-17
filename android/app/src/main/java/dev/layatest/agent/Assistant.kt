@@ -81,7 +81,8 @@ class Assistant(private val svc: AgentService, override val request: String) : S
         }
     }
 
-    override fun open(app: AppInfo) = launch(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+    override fun open(app: AppInfo, fresh: Boolean) = launch(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        .apply { if (fresh) addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK) }
         .setClassName(app.pkg, app.activity))
 
     /**
@@ -125,10 +126,10 @@ class Assistant(private val svc: AgentService, override val request: String) : S
 
     override fun screen(): Screen {
         banner.hide()
-        val state = svc.readState().also { lastState = it }
+        val state = svc.readState()
         val size = state.getJSONArray("screen")
         return Screen(state.optString("package").ifEmpty { null },
-            buildCandidates(state, size.getInt(0), size.getInt(1)), screenTexts(state))
+            buildCandidates(state, size.getInt(0), size.getInt(1)), screenTexts(state), state)
     }
 
     override fun choose(instructions: String, options: List<String>): Pick? {
@@ -166,7 +167,6 @@ class Assistant(private val svc: AgentService, override val request: String) : S
     }
 
     // ---- UI memory (D-040): replay remembered paths; learn the ones the owner confirms ----
-    private var lastState: JSONObject? = null   // the raw screen behind the last screen(): for training rows
     private val path = ArrayList<RouteStep>()   // what this runLaya did, as a path it could remember
     private val rows = ArrayList<JSONObject>()  // ...and as Teach-format rows for fine-tuning (research/14)
     private var goal = request
@@ -192,18 +192,22 @@ class Assistant(private val svc: AgentService, override val request: String) : S
         }
         val blocked = HashSet<String>()  // targets skipped or refused, so Laya doesn't pick them again
         var misses = 0
+        var skimmed = false
         for (step in 1..maxSteps) {
             if (stopped) return Outcome.STOPPED
             val t0 = SystemClock.elapsedRealtime()
-            val scr = screen()
-            val readMs = SystemClock.elapsedRealtime() - t0
+            var scr = screen()
             if (Safety.isAuthPrompt(scr.pkg, scr.texts.map { it.text })) {
                 say("Unlock with your fingerprint — I'll wait")
                 val ok = waitUntil(90_000) { screen().let { !Safety.isAuthPrompt(it.pkg, it.texts.map { t -> t.text }) } }
                 if (!ok) return Outcome.STOPPED
                 continue
             }
-            val cands = scr.candidates.filter { key(it) !in blocked }
+            if (!skimmed) { skimmed = true; skim(subgoal, scr)?.let { scr = it } }
+            val readMs = SystemClock.elapsedRealtime() - t0
+            // what policy would block (Pay/Send in a money app) never reaches Laya: picking it only wastes a pass
+            // (GPay "check my last payment", 2026-10-17: three 15 s passes on "Pay anyone", all blocked)
+            val cands = scr.candidates.filter { key(it) !in blocked && Safety.verdict("CLICK", it, scr.pkg).first != Safety.Verdict.BLOCK }
             say("Thinking… (step $step)")
             val t1 = SystemClock.elapsedRealtime()
             val s = laya.step(subgoal, trail, cands)
@@ -289,20 +293,60 @@ class Assistant(private val svc: AgentService, override val request: String) : S
 
     /** Do one step (Laya's or remembered) and record it: Laya's history, the path, a training row. */
     private fun perform(op: String, target: ScreenCandidate?, payload: Any?, scr: Screen) {
-        val text = (payload as? AppInfo)?.label ?: payload as? String
-        rows += row(op, scr, target, text)
+        val before = row(op, scr, target, text(payload))  // open() writes "OPEN_APP X" to the history itself
         say(describe(op, target, payload))
         banner.hide()
         if (op == "OPEN_APP") open(payload as AppInfo) else svc.act(op, target, payload, scr.candidates)
+        record(op, target, payload, scr, before)
+    }
+
+    /** The book-keeping for a step that was done: a training row, Laya's history, the path. */
+    private fun record(op: String, target: ScreenCandidate?, payload: Any?, scr: Screen,
+                       row: JSONObject = row(op, scr, target, text(payload))) {
+        val text = text(payload)
+        rows += row
         // open() already wrote "OPEN_APP X"; any other step is written even when repeated (the stuck check counts those)
         historyEntry(op, target?.toCandidate(), text).let { if (op != "OPEN_APP" || trail.lastOrNull() != it) trail += it }
         path += RouteStep.of(op, scr.pkg, target, text, slot = op == "INPUT_TEXT" && text != null && text == typed)
     }
 
+    private fun text(payload: Any?) = (payload as? AppInfo)?.label ?: payload as? String
+
+    /**
+     * Skim the page before asking Laya (owner, 2026-10-17: "search for a UI where it needs to scroll down"): if no
+     * element on screen shares two words with the goal, scroll down up to [SKIM_PAGES] pages looking for one that
+     * does ("payment history" -> "Show transaction history"), only reading -- about 1 s a page, vs 10-15 s for a
+     * Laya pass that would guess ("More"). Found: those scrolls become steps (history, path, rows) and Laya decides
+     * on that page. Not found: back to the top, as if nothing happened (null).
+     */
+    private fun skim(goal: String, first: Screen): Screen? {
+        val want = Routes.contentWords(goal) - Routes.contentWords(apps.installed.firstOrNull { it.pkg == first.pkg }?.label.orEmpty())
+        fun match(c: ScreenCandidate) = (Routes.contentWords(c.label) intersect want).size
+        fun best(s: Screen) = s.candidates.maxOfOrNull(::match) ?: 0
+        if (want.size < 2 || best(first) >= 2 || first.candidates.none { it.scrollable }) return null
+        val pages = mutableListOf(first)
+        while (pages.size <= SKIM_PAGES && !stopped) {
+            say("Looking further down…")
+            svc.act("SCROLL_DOWN", null, null, pages.last().candidates)
+            Thread.sleep(400)
+            val next = screen()
+            if (next.candidates.map { it.label } == pages.last().candidates.map { it.label }) break  // the page ended
+            pages += next
+            if (best(next) >= 2) {
+                trace += "skim: \"${next.candidates.maxBy(::match).label}\" ${pages.size - 1} page(s) down"
+                pages.dropLast(1).forEach { record("SCROLL_DOWN", null, null, it) }
+                return next
+            }
+        }
+        repeat(pages.size - 1) { svc.act("SCROLL_UP", null, null, pages.last().candidates); Thread.sleep(400) }
+        trace += "skim: nothing matching in ${pages.size - 1} page(s) below"
+        return null
+    }
+
     /** A Teach-format row (D-033) for this step, so confirmed runs become training data too. */
     private fun row(op: String, scr: Screen, target: ScreenCandidate?, payload: String?) = JSONObject()
         .put("goal", goal).put("history", JSONArray(trail)).put("op", op).put("package", scr.pkg)
-        .put("time", System.currentTimeMillis()).put("state", lastState).put("source", "run").apply {
+        .put("time", System.currentTimeMillis()).put("state", scr.state).put("source", "run").apply {
             if (target != null) put("target", scr.candidates.indexOf(target)).put("target_label", target.label)
                 .put("target_bounds", JSONArray(target.bounds.toList()))
             if (payload != null) put("payload", payload)
@@ -336,6 +380,7 @@ class Assistant(private val svc: AgentService, override val request: String) : S
 
     companion object {
         const val REQUEST_LOG = "requests.jsonl"
+        private const val SKIM_PAGES = 4
         private const val TAG = "FridayAssistant"
         private const val GROUP = 16
     }

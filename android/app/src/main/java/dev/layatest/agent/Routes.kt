@@ -61,6 +61,9 @@ object Routes {
     private fun words(s: String) = s.lowercase(Locale.ROOT).split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
         .map { if (it.length > 3 && it.endsWith("s")) it.dropLast(1) else it }  // "timers" == "timer"
 
+    /** The words that say what a task or an element is about: lower-case, plurals folded, filler dropped. */
+    fun contentWords(s: String) = words(s).filter { it !in STOP }.toSet()
+
     /** What identifies a task: its content words, order-free, minus the words of the text it types (that varies). */
     fun key(goal: String, text: String?): String {
         val typed = words(text.orEmpty()).toSet()
@@ -111,5 +114,9 @@ fun routesSelfCheck(): String {
     check(RouteStep("CLICK", "p", "fab", "Stop", "Button", null, false).find(scr)?.label == "Start")  // same id, new text
     check(RouteStep("CLICK", "p", "", "Lap", "Button", null, false).find(scr) == null)              // two look-alikes
     check(RouteStep("CLICK", "q", "reset", "Reset", "Button", null, false).find(scr) == null)       // another app
+    // the skim's match (Assistant.skim): two shared content words, the app's own name left out
+    val want = Routes.contentWords("show me the payment history in gpay") - Routes.contentWords("GPay")
+    check((Routes.contentWords("Show transaction history") intersect want).size == 2)
+    check((Routes.contentWords("Pay anyone") intersect want).isEmpty())
     return "ok"
 }

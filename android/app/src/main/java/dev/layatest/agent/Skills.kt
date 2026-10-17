@@ -7,7 +7,8 @@ import android.content.Intent
 enum class Outcome { DONE, STOPPED, STUCK, MAX_STEPS }
 
 /** The current screen: actionable candidates (what Laya scores) and every visible text (what extractors read). */
-class Screen(val pkg: String?, val candidates: List<ScreenCandidate>, val texts: List<ScreenText>)
+class Screen(val pkg: String?, val candidates: List<ScreenCandidate>, val texts: List<ScreenText>,
+             val state: org.json.JSONObject? = null)  // the raw forest, for training rows
 
 /** A skill turns one kind of request into actions and an answer, using only [SkillContext]. */
 interface Skill {
@@ -29,7 +30,8 @@ interface SkillContext {
 
     /** App for [skill]: one named in the request, the only candidate, the owner's remembered pick, or asked once. */
     fun appFor(skill: String): AppInfo?
-    fun open(app: AppInfo): Boolean
+    /** [fresh]: start the app from its home screen (clear its task) rather than resuming where it was left. */
+    fun open(app: AppInfo, fresh: Boolean = false): Boolean
     /** startActivity with NEW_TASK; false if nothing handles the intent. */
     fun launch(intent: Intent): Boolean
     fun foreground(): String?
@@ -114,6 +116,27 @@ fun ruleSkill(request: String): String? {
     return skill
 }
 
+/** Money questions: when Laya reaches the screen, Friday reads the amounts out instead of saying "Done". */
+private val READ_SKILLS = setOf("spend_query", "balance_query", "bill_query")
+private val AMOUNT = Regex("(₹|rs\\.?|inr)\\s?[\\d,]+(\\.\\d{1,2})?", RegexOption.IGNORE_CASE)
+
+private val DATE = Regex("\\b(\\d{1,2}\\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*|" +
+    "(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\s+\\d{1,2}|today|yesterday)\\b", RegexOption.IGNORE_CASE)
+
+/**
+ * The first [max] transactions on screen: each amount with the text before (payee, account) and after (date).
+ * Amounts with a date beside them come first -- offers ("Up to ₹40 lakh") carry none; GPay also exposes each
+ * row twice, so a text repeated at the same place counts once (GPay history, 2026-10-17).
+ */
+fun readAmounts(texts: List<ScreenText>, max: Int = 3, onlyDated: Boolean = false): String? {
+    val lines = texts.distinctBy { it.text.trim() to it.bounds.toList() }.map { it.text.trim() }.filter { it.isNotEmpty() }
+    fun around(i: Int) = listOfNotNull(lines.getOrNull(i - 1), lines[i], lines.getOrNull(i + 1)).distinct()
+    val hits = lines.indices.filter { AMOUNT.containsMatchIn(lines[it]) }
+    val dated = hits.filter { i -> around(i).any { DATE.containsMatchIn(it) } }
+    return (if (onlyDated) dated else dated.ifEmpty { hits }).map { around(it).joinToString(" · ") }.distinct().take(max)
+        .takeIf { it.isNotEmpty() }?.joinToString("\n")
+}
+
 /** The task in "open X and <task>", else the whole request: what slots and media queries are read from. */
 fun taskPart(request: String) = OPEN_AND.find(request)?.groupValues?.get(1) ?: request
 
@@ -126,6 +149,12 @@ fun routingSelfCheck(): String {
     check(ruleSkill("open the clock app and set an alarm for 7") == "alarm_timer")
     check(ruleSkill("open settings and turn on wifi") == "device_setting")
     check(ruleSkill("open spotify") == "open_app")
+    val t = listOf("Paid to", "Ravi Kumar", "₹250", "16 Oct").map { ScreenText(it, intArrayOf(0, 0, 1, 1)) }
+    check(readAmounts(t) == "Ravi Kumar · ₹250 · 16 Oct")
+    val promo = listOf("Personal loan", "Up to ₹40 lakh", "Check details", "Ravi Kumar", "₹250 debited", "16 October")
+        .mapIndexed { i, x -> ScreenText(x, intArrayOf(0, i, 1, i + 1)) }
+    check(readAmounts(promo + promo.drop(3)) == "Ravi Kumar · ₹250 debited · 16 October")  // the offer and the repeat drop out
+    check(ruleSkill("check my last payment in gpay") == "spend_query")
     return "ok"
 }
 
@@ -156,7 +185,9 @@ class GenericSkill(override val id: String) : Skill {
         val app = if (id == "open_app") ctx.apps.named(ctx.request) else ctx.appFor(id)
         if (app != null) {
             ctx.say("Opening ${app.label}…")
-            ctx.open(app)
+            // a task in the app starts from its home screen: GPay reopened on the page the last run left, so the
+            // remembered step wasn't there and Laya wandered into a loans page (2026-10-17); "open X" alone resumes
+            ctx.open(app, fresh = id != "open_app" || taskAfterOpening(ctx.request, app.label) != null)
             ctx.waitUntil(5000) { ctx.foreground() == app.pkg }
         }
         if (id == "open_app") {
@@ -169,7 +200,9 @@ class GenericSkill(override val id: String) : Skill {
             ?: ctx.slots.after("search for", "search", "look for", "find", "type", "play", "watch", "listen to")
             ?: ctx.slots.spans.takeIf { it.isNotEmpty() }?.let { sp -> ctx.choose(SLOT_Q, sp)?.let { sp[it.index] } }
         return when (ctx.runLaya(ctx.request, typeText = text)) {
-            Outcome.DONE -> "Done"
+            Outcome.DONE -> if (id !in READ_SKILLS) "Done" else
+                readAmounts(ctx.screen().texts, onlyDated = id == "spend_query")?.let { "Here's what I see:\n$it" }
+                    ?: if (id == "spend_query") "I didn't find any dated payments on this screen" else "Done"
             Outcome.STOPPED -> "Stopped"
             Outcome.STUCK -> "I got stuck — the screen is where I stopped"
             Outcome.MAX_STEPS -> "I ran out of steps before finishing"
