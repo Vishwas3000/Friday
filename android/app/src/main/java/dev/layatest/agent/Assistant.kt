@@ -290,7 +290,7 @@ class Assistant(private val svc: AgentService, override val request: String, pri
             val shown = shortlist(cands, want, shortlistK)
             val s = laya.step(lead, trail, cands, shown)
             val took = " [read $readMs ms (settle ${svc.lastSettleMs}), laya ${SystemClock.elapsedRealtime() - t1} ms: " +
-                "${cands.size} cands, ${s.tokens} tokens${if (shown.size < cands.size) ", target from ${shown.size}" else ""}]"
+                "${cands.size} cands, ${s.tokens} tokens${if (shown.size < cands.size) ", target from ${shown.size}" else ""}, heat ${heat(svc)}]"
             if (s.op == "DONE") {
                 trace += "step $step on ${scr.pkg}: DONE (op ${"%.2f".format(s.opConfidence)})" + took
                 return finish(scr, startPkg, subgoal, typeText, startWords)

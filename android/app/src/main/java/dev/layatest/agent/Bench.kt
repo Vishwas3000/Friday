@@ -52,9 +52,14 @@ object Bench {
         )
 
         var logits: Array<FloatArray>? = null
+        // "pin": ORT's threads on the fast cores (research/19 lever 3), re-applied each run as LayaEngine does
+        val pin = c.optBoolean("pin", false)
+        val heatBefore = heat(ctx)
+        if (pin) Native.pinAllThreads(Native.fastCores)
         session.run(tensors).use { } // warm-up (not timed)
         val ns = LongArray(iters)
         for (i in 0 until iters) {
+            if (pin) Native.pinAllThreads(Native.fastCores)
             val s = SystemClock.elapsedRealtimeNanos()
             session.run(tensors).use { res ->
                 @Suppress("UNCHECKED_CAST")
@@ -79,6 +84,9 @@ object Bench {
             .put("min_ms", ns[0] / 1e6)
             .put("iters", iters)
             .put("threads", threads)
+            .put("pin", pin)
+            .put("heat_before", heatBefore)
+            .put("heat_after", heat(ctx))
             .put("xnnpack", c.optBoolean("xnnpack", false))
             .put("lowmem", c.optBoolean("lowmem", false))
             .put("peak_pss_mb", mi.totalPss / 1024.0)
@@ -93,4 +101,13 @@ object Bench {
     private fun long1d(a: JSONArray) = LongArray(a.length()) { a.getLong(it) }
     private fun float2d(a: JSONArray) = Array(a.length()) { i -> a.getJSONArray(i).let { r -> FloatArray(r.length()) { r.getDouble(it).toFloat() } } }
     private fun argmax(a: FloatArray): Int { var m = 0; for (i in a.indices) if (a[i] > a[m]) m = i; return m }
+}
+
+/**
+ * The phone's own heat report: thermal status (0 none, 1 light, 2 moderate, 3 severe, ...) and the headroom
+ * forecast for the next 10 s (1.0 = severe throttling), so a slow Laya step can be told from a hot phone.
+ */
+fun heat(ctx: Context): String {
+    val pm = ctx.getSystemService(android.os.PowerManager::class.java)
+    return "status ${pm.currentThermalStatus}, headroom ${"%.2f".format(pm.getThermalHeadroom(10))}"
 }

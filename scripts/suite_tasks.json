@@ -48,8 +48,6 @@
    "check": {"pkg": "com.meesho.supply", "screen": ["My Orders"]}},
   {"id": "swiggy-search", "request": "open swiggy and search for biryani",
    "check": {"pkg": "in.swiggy.android", "screen": ["biryani"]}},
-  {"id": "zepto-search", "request": "open zepto and search for milk",
-   "check": {"pkg": "com.zeptoconsumerapp", "screen": ["milk"]}},
   {"id": "spotify-play", "request": "play some lofi music on spotify",
    "check": {"media": "com.spotify.music"}},
   {"id": "gpay-history", "request": "show me the payment history in gpay", "owner": true,

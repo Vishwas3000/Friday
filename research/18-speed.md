@@ -346,6 +346,36 @@ The result keeps screen order.
   21–31-element screens here. Shortening it risks DONE and SCROLL decisions and needs its own test.
 - 34 taps can't show a 1-in-30 regression; the task suite (D-049) checks whole tasks.
 
+## 10. Run conditions: threads, pinning, background load, heat [measured, Pixel 8, nb8 on ORT 1.31, 2026-10-18]
+**Setup.**
+- The fixture: 2 rows × 318 tokens, 6 timed passes, arena off.
+- Launched 9 minutes after an install. Runs 20 s apart, from 23:15 to 23:26.
+- Battery 37.4–38.5 °C, charging. Android's thermal status was 1 (light) throughout, headroom 0.79–0.85 (1.0 = severe).
+- `scripts/bench_device.py --threads N [--pin]`; "busy" = 2 `yes` busy-loops started over adb.
+
+| threads | pinned to the fast cores | background | median s | min s |
+|---|---|---|---|---|
+| 4 (Friday's setting), first run | no | idle | **2.68** | 2.36 |
+| 1 / 2 / 3 | no | idle | 9.94 / 6.24 / 4.27 | 9.88 / 6.06 / 3.53 |
+| 6 | no | idle | 3.66 | 3.44 |
+| 3 / 4 | yes | idle | 4.35 / 3.99 | 4.26 / 2.95 |
+| 4 | no | 2 busy loops | 4.36 | 4.10 |
+| 4 | yes | 2 busy loops | 5.57 | 5.48 |
+| 2 | no | 2 busy loops | 5.76 | 5.68 |
+| 4, last run | no | idle | **3.17** | 2.88 |
+
+- **4 threads, unpinned, stays best.** Fewer threads are slower. 6 spill onto the little cores.
+- **Pinning is slower every time** (+25–50%). That closes research/19 lever 3, matching the slow pinned live run of D-047.
+- **Where the threads run.** Mid-run `ps -T` put ORT's 3 pool threads on the mid cores (CPU 5, 6, 7, ~30% each), cpuset `/foreground`. The X3 is kept for the app on top. research/19's "3 of 4 on little cores" didn't reproduce here.
+- **Heat:**
+  - the same pass took 1.73–1.85 s cool (34 °C, §6b) and 2.7–3.2 s here: **~1.5–1.8×**;
+  - 10 minutes of back-to-back benching added 18% (2.68 → 3.17 s).
+- **Background load:** two busy loops cost **~1.4–1.6×**. In real use that is the app being driven, which loads and draws while Laya runs.
+- **Live steps also carry 800–1,500 tokens** against the fixture's 636. Heat × load × tokens explains the 4–10 s live steps seen in the suite.
+- **What follows:**
+  - no setting makes a step faster; only less work does: a shorter operation row, skipping Laya via memory/Teach/the map, a smaller student;
+  - every Laya step's trace now logs `heat status S, headroom H` from `PowerManager`.
+
 ## Open
 - Re-check nb8 on more screens once Teach/run rows exist (research/14). 52 pairs can't show a 1% flip rate.
 - The embedding is now the largest part of nb8 (393 MB as fp16). An 8-bit `GatherBlockQuantized` in a newer ORT could

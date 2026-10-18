@@ -47,6 +47,7 @@ def main():
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--xnnpack", action="store_true")
     ap.add_argument("--lowmem", action="store_true")
+    ap.add_argument("--pin", action="store_true", help="pin ORT's threads to the fast cores")
     ap.add_argument("--model", default="laya-android.nb8-h-e16.onnx")  # what the app runs (LayaEngine.MODEL)
     ap.add_argument("--decide", action="store_true", help="full on-device tokenize+build+ORT+decode on the fixture")
     ap.add_argument("--no-push", action="store_true")
@@ -65,7 +66,7 @@ def main():
     sh("forward", "tcp:%d" % PORT, "localabstract:layatest_agent")
     cmd = ({"cmd": "decide_test", "model": a.model} if a.decide else
            {"cmd": "bench", "iters": a.iters, "threads": a.threads, "xnnpack": a.xnnpack,
-            "lowmem": a.lowmem, "model": a.model})
+            "lowmem": a.lowmem, "model": a.model, "pin": a.pin})
     try:
         conn = socket.create_connection(("127.0.0.1", PORT), timeout=900)
     except OSError:
