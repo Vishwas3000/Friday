@@ -107,6 +107,8 @@ Research/14 §2 covered AndroidControl, AITW, AndroidLab, FingerTip 20K and Mobi
 - **No licence stated:** Screen2Words, CLAY, MoTIF, LlamaTouch, MUD and GUI-World [primary]. Our advice: use them for evaluation, not for shipped weights.
 
 ## 4. Small models: a ranker, icons, a smaller Laya
+
+> **Correction (2026-10-18, research/25):** the UIST'18 semantic-icon-classifier below is not ≤ 50 MB. Its weights are a 294 MB Keras file, 38.5M parameters (~37 MB even in int8), so it is not usable on the phone. Rico's terms are not "research-only": they grant no licence to the screenshots and bind the downloader's employer. See research/25.
 | Model | Size | Task | Result | Phone latency | Weights | Tag |
 |---|---|---|---|---|---|---|
 | **UINav** (Google, 2023) | 320k-parameter scorer (1.3 MB) + SmallBERT text encoder (17.6 MB) | scores every element of an accessibility tree | MoTIF unseen apps: task 59.6%, step 81.9% (Seq2Act 32.4% task); 90.6% on 43 in-house tasks; ~70% with 10 demos | Pixel 6 Pro: scorer 1.98 ms, encoder 263 ms; Pixel 3a: 437 ms in total | not released | [primary] |

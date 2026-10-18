@@ -92,6 +92,7 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 | [22-training-plan.md](22-training-plan.md) | **How to train Laya for Friday:** a data flywheel (corrections > demos > verified runs > replay), joint multi-task fine-tune on the box, gated by an on-phone task suite; what else to look into (teacher labelling, hints, icons, smaller student, emulators) |
 | [23-task-card.md](23-task-card.md) | The task card: one structured reading of each request (skill, app, slots, read/act, risk, done-check), made once and read by every stage; ten parsing bugs found in today's code; four-step migration |
 | [24-ui-exploration-prior-art.md](24-ui-exploration-prior-art.md) | Prior art for app maps and exploration: maps help small models most; screen identity by activity + (class, id, action flags), no model; watching can't rely on click events; no safe exploration of a logged-in phone exists yet; datasets (MobileViews, AMEX); tiny rankers; vocabulary trimming could roughly halve Laya's file |
+| [25-icon-classifier.md](25-icon-classifier.md) | A tiny icon classifier for unlabelled icons: no released model fits (the UIST'18 one is 294 MB / 38.5M params); train MobileNetV3-Small (~6.5 MB fp32, a few ms per icon) on the box from UIST'18 crops plus rendered icon sets; cropping from takeScreenshot; Rico licence risk |
 
 
 

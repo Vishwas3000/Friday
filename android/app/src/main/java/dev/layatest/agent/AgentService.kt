@@ -400,7 +400,7 @@ class AgentService : AccessibilityService() {
             }
 
             override fun onFailure(code: Int) {
-                out.put("error_code", code)  // 3: too soon after the last one; 5 (API 34+): a secure window
+                out.put("error_code", code)  // 3: too soon after the last one; 6: a secure window (5 is a bad window id)
                 done.countDown()
             }
         })
