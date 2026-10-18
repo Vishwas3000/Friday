@@ -51,9 +51,12 @@ class Assistant(private val svc: AgentService, override val request: String, pri
     fun run(): String {
         val t0 = SystemClock.elapsedRealtime()
         svc.bubble?.hide()
+        var card = understand(request, apps::named)  // the task card (D-051 step a): logged, not yet read by the skills
         val said = try {
             banner.say("Understanding…")
             val skill = route(request, { laya }) { q, options -> ask(q, options) }
+            if (card.skill == null) card = card.copy(skill = skill)
+            trace += "card: ${card.json()}"
             Log.i(TAG, "request routed to ${skill ?: "something else"}")
             trace += "route: ${skill ?: "something else"}"
             val result = if (stopped) null else (skill?.let { skills[it] ?: GenericSkill(it) } ?: GenericSkill("other")).run(this)
@@ -70,7 +73,7 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         // the request log (D-045): what was asked and said, how long it took, and the timeline; text only, no screens
         runCatching {
             File(svc.filesDir, REQUEST_LOG).appendText(JSONObject().put("time", System.currentTimeMillis())
-                .put("request", request).put("answer", said).put("ms", SystemClock.elapsedRealtime() - t0)
+                .put("request", request).put("answer", said).put("ms", SystemClock.elapsedRealtime() - t0).put("card", card.json())
                 .put("trace", JSONArray(trace)).toString() + "\n")
         }
         return said

@@ -137,14 +137,18 @@ fun deepLink(pkg: String, request: String): Intent? =
     DEEP_LINKS.firstOrNull { (p, re, _) -> p == pkg && re.containsMatchIn(request) }?.let { Intent(it.third).setPackage(pkg) }
 
 /** Money questions: when Laya reaches the screen, Friday reads the amounts out instead of saying "Done". */
-private val READ_SKILLS = setOf("spend_query", "balance_query", "bill_query")
+internal val READ_SKILLS = setOf("spend_query", "balance_query", "bill_query")
 /** "last 10 transactions", "5 payments": how many to read. */
 private val COUNT = Regex("\\b(?:last|latest|recent|past|top)\\s+(\\d{1,2})\\b|\\b(\\d{1,2})\\s+(?:transactions?|payments?)\\b",
     RegexOption.IGNORE_CASE)
 
+/** "last 10 transactions" -> 10 (1..20); null when no count is asked for. */
+internal fun countAsked(request: String) =
+    COUNT.find(request)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }?.toInt()?.coerceIn(1, 20)
+
 /** Up to the count the request asks for (else 3), scrolling down up to 3 pages when the screen shows fewer. */
 private fun readAll(ctx: SkillContext, dated: Boolean): String {
-    val n = COUNT.find(ctx.request)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }?.toInt()?.coerceIn(1, 20) ?: 3
+    val n = countAsked(ctx.request) ?: 3
     ctx.waitUntil(5000) { readAmounts(ctx.screen().texts, 1, dated) != null }  // the list loads after the tap
     var texts = ctx.screen().texts
     var pages = 0

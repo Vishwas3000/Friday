@@ -166,16 +166,16 @@ private val TRACK = Regex("\\b(track\\w*|my orders?|where('s| is)|arriv\\w*|ship
 private fun dropFillers(s: String?) = s?.split(' ')?.dropWhile { it.lowercase() in FILLERS }?.joinToString(" ")?.ifEmpty { null }
 
 /** "navigate to MG road" -> "MG road", "I want to go to X" -> "X", "take me home" -> "home". */
-private fun destination(request: String): String? =
+internal fun destination(request: String): String? =
     Slots(request).after("to", cutAt = Slots.CUT + setOf("from", "for", "by"))
         ?.split(' ')?.dropWhile { it.lowercase() in DEST_LEAD }?.joinToString(" ")?.ifEmpty { null }
         ?: Regex("\\b(home|work)\\b", RegexOption.IGNORE_CASE).find(request)?.value?.lowercase()
 
 /** "search for best pizza near me" -> "best pizza near me"; a question is searched as asked. */
-private fun searchQuery(request: String) = request.trim().replace(SEARCH_CMD, "").ifEmpty { null }
+internal fun searchQuery(request: String) = request.trim().replace(SEARCH_CMD, "").ifEmpty { null }
 
 /** "call my mom" -> "mom", "dial 98765 43210" -> "98765 43210". */
-private fun callee(request: String) = dropFillers(Slots(request).after("call", "dial", "phone", "ring"))
+internal fun callee(request: String) = dropFillers(Slots(request).after("call", "dial", "phone", "ring"))
 
 /** A slot that is a number or code, as the dialer takes it: "+91 98765-43210" -> "+919876543210". */
 private fun dialable(slot: String) = slot.replace(Regex("[\\s()-]"), "").takeIf { it.matches(Regex("\\+?[\\d*#]{3,}")) }
@@ -192,7 +192,7 @@ private fun emailSubject(request: String) = Slots(request).after("about", cutAt 
  * shortcut: a name ends at the first filler, greeting, pronoun or comma, so "text rahul lunch at 1" reads
  * "rahul lunch" as the name; upgrade: match the names in the app's chat list on screen.
  */
-private fun messageParts(request: String): Pair<String?, String?> {
+internal fun messageParts(request: String): Pair<String?, String?> {
     val s = Slots(request)
     val words = Slots(request.substringBefore('"').substringBefore('“')) // a quoted message ends the name
         .after("message", "text", "tell", "whatsapp", "let", "email", "e-mail", "mail", cutAt = emptySet())
@@ -206,14 +206,14 @@ private fun messageParts(request: String): Pair<String?, String?> {
 }
 
 /** "order some milk from blinkit" -> "milk". */
-private fun shoppingItem(request: String) =
+internal fun shoppingItem(request: String) =
     dropFillers(Slots(request).after("order", "buy", "purchase", cutAt = Slots.CUT + setOf("from", "for")))
 
 /** "track my amazon order", "where is my order" -- the orders page, not a search. */
-private fun isTracking(request: String) = TRACK.containsMatchIn(request)
+internal fun isTracking(request: String) = TRACK.containsMatchIn(request)
 
 /** "show me photos of my dog" -> "dog"; "photos I took yesterday" -> "yesterday". */
-private fun photoQuery(request: String): String? {
+internal fun photoQuery(request: String): String? {
     val s = Slots(request)
     return dropFillers(s.after("of", "from", "with", "in", "at")) ?: s.timeRange?.label
 }

@@ -441,7 +441,7 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - (d) the Writer fills it when rules can't.
 - **Why:** about a dozen places re-read the raw request with different word lists, and several wrong actions come straight from that (research/23 §1: ten found, two fixed in D-050).
 - **Rejected:** a framework or plugin system; letting the Writer decide mode, risk, done or the app's package.
-- **Who / status:** owner approved building it (2026-10-18) · design by a Claude sub-agent, reviewed by Claude · Step (a) next. Open question for the owner: should "open X and …" always show X? ("open settings and check the storage" answers without opening Settings.)
+- **Who / status:** owner approved building it (2026-10-18) · design by a Claude sub-agent, reviewed by Claude · **Step (a) built 2026-10-18:** `Card.kt` `understand()` fills the card from today's rules; every request's trace and log entry carries it, and `cardSelfCheck()` covers five examples. Nothing reads it yet. Seen on the first live card: the about-words keep question words ("what is battery level"); to change in its own measured commit. Step (b) next. Open question for the owner: should "open X and …" always show X? ("open settings and check the storage" answers without opening Settings.)
 
 ### D-052 — Fixes from the task suite (14 → 20 of 24); icon labels steps 1–3
 - **Decision:**

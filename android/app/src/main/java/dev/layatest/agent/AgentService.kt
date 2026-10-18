@@ -66,7 +66,7 @@ class AgentService : AccessibilityService() {
         "selfcheck" -> JSONObject().put("candidates", candidatesSelfCheck()).put("slots", slotsSelfCheck())
             .put("media", mediaSelfCheck()).put("people", peopleSelfCheck()).put("profiler", appCatalogSelfCheck())
             .put("routes", routesSelfCheck()).put("routing", routingSelfCheck()).put("wake", wakeSelfCheck(this))
-            .put("shortlist", shortlistSelfCheck())
+            .put("shortlist", shortlistSelfCheck()).put("card", cardSelfCheck())
         "wake" -> wake?.command(c) ?: error("the wake word isn't set up yet")  // {"on": bool} optional; listening stats
         "wake_test" -> wakeTest(this, java.io.File(filesDir, c.getString("wav")))  // max score of a WAV in filesDir
         "profiles" -> JSONObject(AppProfiler.profiles(packageManager) as Map<*, *>)  // D-031: auto app profiles, to evaluate
