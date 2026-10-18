@@ -137,8 +137,12 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         banner.hide()
         val state = svc.readState()
         val size = state.getJSONArray("screen")
-        return Screen(state.optString("package").ifEmpty { null },
-            buildCandidates(state, size.getInt(0), size.getInt(1)), screenTexts(state), state)
+        val pkg = state.optString("package").ifEmpty { null }
+        val known = Meanings.all(svc)  // unnamed elements Friday has tapped before are named by where they led
+        val cands = buildCandidates(state, size.getInt(0), size.getInt(1)).map { e ->
+            if (e.label.isNotEmpty()) e else known.optString(Meanings.key(pkg, e)).ifEmpty { null }?.let { e.copy(label = it) } ?: e
+        }
+        return Screen(pkg, cands, screenTexts(state), state)
     }
 
     override fun choose(instructions: String, options: List<String>): Pick? {
@@ -236,8 +240,14 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         var misses = 0
         var skimmed = false
         var startWords: Set<String>? = null  // the first screen's fingerprint: the finished screen is told apart by what changed
-        val about = Routes.aboutWords(subgoal, apps.installed.firstOrNull { it.pkg == startPkg }?.label)
-        val want = about + hint?.steps.orEmpty().flatMap { Routes.contentWords(it.label) }  // what the shortlist looks for
+        // what the goal is about, without the words it will type: "search for screenshots" is about the search box
+        // (the skim scrolled Photos 4 pages for "screenshots", 2026-10-18); the shortlist still looks for those words
+        val query = Routes.contentWords(typeText.orEmpty())
+        val about = Routes.aboutWords(subgoal, apps.installed.firstOrNull { it.pkg == startPkg }?.label) - query
+        val want = about + query + hint?.steps.orEmpty().flatMap { Routes.contentWords(it.label) }
+        val toggle = wantOn(subgoal)
+        var didType = false
+        var tapped: Triple<String?, ScreenCandidate, Set<String>>? = null  // an unnamed element just tapped: app, it, words before
         for (step in 1..maxSteps) {
             if (stopped) return Outcome.STOPPED
             val t0 = SystemClock.elapsedRealtime()
@@ -248,18 +258,24 @@ class Assistant(private val svc: AgentService, override val request: String, pri
                 if (!ok) return Outcome.STOPPED
                 continue
             }
-            if (hint != null && looksFinished(scr, hint)) {
+            tapped?.let { (pkg, e, before) -> if (scr.pkg == pkg) Meanings.learn(svc, pkg, e, Meanings.gained(before, scr.candidates)) }
+            tapped = null
+            if (hint != null && (query.isEmpty() || didType) && looksFinished(scr, hint)) {
                 trace += "step $step on ${scr.pkg}: DONE — looks like where \"${hint.goal}\" finished"
                 return finish(scr, startPkg, subgoal, typeText, startWords)
             }
             if (startWords == null) startWords = Routes.screenWords(scr.candidates)
             // the selected tab or item already names what the goal is about: there (Clock reopened on Stopwatch;
             // its selected tab isn't clickable, so it isn't a candidate -- read it from the whole screen)
-            scr.state?.let(::selectedLabels)?.firstOrNull { about.isNotEmpty() && Routes.contentWords(it).containsAll(about) }?.let {
+            // (a search isn't there before it has typed: the Play Store's Search tab ended "search for whatsapp", 2026-10-18)
+            scr.state?.let(::selectedLabels)?.takeIf { query.isEmpty() || didType }
+                ?.firstOrNull { about.isNotEmpty() && Routes.contentWords(it).containsAll(about) }?.let {
                 trace += "step $step on ${scr.pkg}: DONE — “$it” is already selected"
                 return finish(scr, startPkg, subgoal, typeText, startWords)
             }
-            if (!skimmed && scr.candidates.isNotEmpty()) {  // not on a loading screen (GPay, 2026-10-18)
+            // not on a loading screen (GPay), nor for a search: its box is on screen, and looking down Photos for
+            // one cost 16 s before Laya tapped a photo anyway (2026-10-18)
+            if (!skimmed && scr.candidates.isNotEmpty() && query.isEmpty()) {
                 skimmed = true
                 // no need to look further down when an element the hint names is right here
                 val hinted = hint?.steps?.any { st -> st.label.isNotEmpty() && scr.candidates.any { it.label == st.label } } == true
@@ -276,7 +292,7 @@ class Assistant(private val svc: AgentService, override val request: String, pri
             val took = " [read $readMs ms (settle ${svc.lastSettleMs}), laya ${SystemClock.elapsedRealtime() - t1} ms: " +
                 "${cands.size} cands, ${s.tokens} tokens${if (shown.size < cands.size) ", target from ${shown.size}" else ""}]"
             if (s.op == "DONE") {
-                trace += "step $step on ${scr.pkg}: DONE (op %.2f)".format(s.opConfidence) + took
+                trace += "step $step on ${scr.pkg}: DONE (op ${"%.2f".format(s.opConfidence)})" + took
                 return finish(scr, startPkg, subgoal, typeText, startWords)
             }
             val target = s.target?.let { cands.getOrNull(it) }
@@ -290,7 +306,8 @@ class Assistant(private val svc: AgentService, override val request: String, pri
                     Safety.Verdict.BLOCK to "nothing to ${if (s.op == "OPEN_APP") "open" else "type"}"
                 else -> Safety.verdict(s.op, target, scr.pkg)
             }
-            trace += "step $step on ${scr.pkg}: ${s.op} \"${target?.label.orEmpty()}\" (op %.2f) -> $verdict %s".format(s.opConfidence, why) + took
+            // the label goes in as text, not into a format string: "49% used" threw (Settings > Storage, 2026-10-18)
+            trace += "step $step on ${scr.pkg}: ${s.op} \"${target?.label.orEmpty()}\" (op ${"%.2f".format(s.opConfidence)}) -> $verdict $why" + took
             val skipped = when (verdict) {
                 Safety.Verdict.BLOCK -> { say(why); true }
                 Safety.Verdict.ASK -> when (confirm(describe(s.op, target, payload), why, target)) {
@@ -307,9 +324,22 @@ class Assistant(private val svc: AgentService, override val request: String, pri
             }
             misses = 0
             perform(s.op, target, payload, scr)
+            if (s.op == "INPUT_TEXT") didType = true
+            if (s.op == "CLICK" && target != null && target.label.isEmpty()) tapped = Triple(scr.pkg, target, Routes.screenWords(scr.candidates))
+            // a switch for "turn on/off X": its new state settles it -- a second tap undid the first (dark mode, 2026-10-18)
+            if (s.op == "CLICK" && target != null && toggle != null) {
+                Thread.sleep(300)
+                val now = screen()
+                now.candidates.firstOrNull { it.checkable && it.checked == toggle && it.bounds[1] < target.bounds[3] && it.bounds[3] > target.bounds[1] }?.let {
+                    trace += "done: “${it.label}” is ${if (toggle) "on" else "off"}"
+                    return finish(now, startPkg, subgoal, typeText, startWords)
+                }
+            }
             // the tap named everything the goal is about ("show the stopwatch" -> "Stopwatch"): reached. Laya isn't
-            // asked again -- it went on and pressed Start on a real stopwatch, twice (2026-10-17)
-            if (s.op == "CLICK" && target != null && about.isNotEmpty() && Routes.contentWords(target.label).containsAll(about)) {
+            // asked again -- it went on and pressed Start on a real stopwatch, twice (2026-10-17). A task that types
+            // isn't there until it has typed ("Refine search to …" ended a Play Store search early, 2026-10-18)
+            if (s.op == "CLICK" && target != null && about.isNotEmpty() && (query.isEmpty() || didType) &&
+                Routes.contentWords(target.label).containsAll(about)) {
                 trace += "done: tapped “${target.label}”, what the goal is about"
                 Thread.sleep(300)
                 return finish(screen(), startPkg, subgoal, typeText, startWords)
@@ -320,6 +350,10 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         trace += "out of steps ($maxSteps)"
         return Outcome.MAX_STEPS
     }
+
+    /** "turn off dark mode" -> false, "enable bluetooth" -> true; null when the goal isn't switching something. */
+    private fun wantOn(goal: String): Boolean? = Regex("\\b(?:turn|switch|toggle) (on|off)\\b|\\b(enable|disable)\\b", RegexOption.IGNORE_CASE)
+        .find(goal)?.groupValues?.let { g -> g[1].ifEmpty { g[2] }.lowercase() in setOf("on", "enable") }
 
     /**
      * The task is done on [scr]: its DONE row, and what Laya did becomes [learned] (until kept or rejected). The

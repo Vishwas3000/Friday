@@ -56,7 +56,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 val c = this@MainActivity
                 val log = java.io.File(c.filesDir, Assistant.REQUEST_LOG).let { it.exists() && it.delete() }
-                toast("Deleted ${Teacher.wipe(c)} recordings, ${Routes.wipe(c)} remembered paths" +
+                toast("Deleted ${Teacher.wipe(c)} recordings, ${Routes.wipe(c)} remembered paths, ${Meanings.wipe(c)} element names" +
                     (if (log) " and the request log" else "") + " from this phone")
             }
         }

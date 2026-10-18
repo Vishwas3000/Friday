@@ -141,6 +141,31 @@ object Routes {
 }
 
 /** Asserts task keys and element matching. */
+/**
+ * What an unnamed element does, learned from where it led (icon labels, step 2; research/24 §4): after Friday taps an
+ * element with no label, the first words the next screen gained become its label from then on -- an icon that opened
+ * "Settings · Help · Profile" reads "settings help profile". Per app, by resource id, else by class and place (toolbar
+ * icons don't move). filesDir/meanings.json; "Delete all learned data" removes it.
+ */
+object Meanings {
+    private fun file(c: Context) = File(c.filesDir, "meanings.json")
+    @Synchronized fun all(c: Context): JSONObject = runCatching { JSONObject(file(c).readText()) }.getOrDefault(JSONObject())
+
+    fun key(pkg: String?, e: ScreenCandidate) =
+        "$pkg|" + if (e.rid.isNotEmpty()) "id:${e.rid}" else "${e.className}@${e.bounds.joinToString(",")}"
+
+    /** The first [max] words [after] shows that [before] didn't, top of the screen first (where titles are). */
+    fun gained(before: Set<String>, after: List<ScreenCandidate>, max: Int = 4) =
+        after.flatMap { Routes.contentWords(it.label) }.filter { w -> w !in before && w.none(Char::isDigit) }.distinct().take(max)
+
+    @Synchronized fun learn(c: Context, pkg: String?, e: ScreenCandidate, words: List<String>) {
+        if (words.isEmpty()) return
+        file(c).writeText(all(c).put(key(pkg, e), words.joinToString(" ")).toString())
+    }
+
+    @Synchronized fun wipe(c: Context): Int = all(c).length().also { file(c).delete() }
+}
+
 fun routesSelfCheck(): String {
     check(Routes.key("Open the Clock app and go to the Timers tab", null) == Routes.key("open clock and go to timer", null))
     check(Routes.key("turn on wifi", null) != Routes.key("turn off wifi", null))
@@ -164,5 +189,9 @@ fun routesSelfCheck(): String {
     check(Routes.aboutWords("open clock and show the stopwatch", "Clock") == setOf("stopwatch"))
     check(Routes.aboutWords("open the clock app and go to the timers tab", "Clock") == setOf("timer"))
     check(Routes.aboutWords("show me the payment history in gpay", "GPay") == setOf("payment", "history"))
+    // an unnamed icon is named by what its tap revealed, titles first, nothing the screen already had
+    check(Meanings.gained(setOf("home"), listOf(c("Settings", ""), c("Help & feedback", ""), c("Home", ""), c("2 new", ""))) ==
+        listOf("setting", "help", "feedback", "new"))  // plurals folded, as everywhere in Routes
+    check(Meanings.key("p", c("", "menu")) == "p|id:menu" && Meanings.key("p", c("", "")) == "p|Button@0,0,10,10")
     return "ok"
 }

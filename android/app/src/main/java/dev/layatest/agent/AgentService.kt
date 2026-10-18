@@ -91,6 +91,7 @@ class AgentService : AccessibilityService() {
         "routes" -> Routes.all(this)  // UI memory (D-040), for debugging
         "step_parity" -> stepParity(c.getString("goal"))
         "shortlist_eval" -> shortlistEval(c)
+        "screenshot" -> screenshotTest()  // icon labels step 3: can Friday see this app's pixels?
         // the request log's last entries (default 20), timelines included
         "requests" -> JSONObject().put("requests", JSONArray(java.io.File(filesDir, Assistant.REQUEST_LOG)
             .takeIf { it.exists() }?.readLines()?.takeLast(c.optInt("last", 20))?.map { JSONObject(it) } ?: emptyList<JSONObject>()))
@@ -182,11 +183,13 @@ class AgentService : AccessibilityService() {
      * submitted (Enter), or the search never runs; a chat box never is -- there Enter can send a message
      * the owner only approved typing.
      */
-    private fun setText(text: String): Boolean {
+    /** Types [text] into the focused field; a search box ([label] is the field as Laya saw it) is then submitted. */
+    private fun setText(text: String, label: String? = null): Boolean {
         val field = findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
         val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
         val ok = field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        val search = listOfNotNull(field.hintText, field.contentDescription, field.viewIdResourceName).any { SEARCH_BOX.containsMatchIn(it) }
+        // Compose fields often expose no hint or id: the Play Store's showed only as "Search Books" (2026-10-18)
+        val search = listOfNotNull(field.hintText, field.contentDescription, field.viewIdResourceName, label).any { SEARCH_BOX.containsMatchIn(it) }
         if (ok && search) field.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
         return ok
     }
@@ -354,6 +357,42 @@ class AgentService : AccessibilityService() {
         return out
     }
 
+    /**
+     * Icon labels, step 3: a screenshot of what is on screen now, reduced to numbers -- its size and the share of
+     * pure-black pixels. An app that sets FLAG_SECURE (money apps) should come back black or refused. Nothing is saved
+     * or sent anywhere.
+     */
+    private fun screenshotTest(): JSONObject {
+        val out = JSONObject().put("package", rootInActiveWindow?.packageName?.toString())
+        val done = CountDownLatch(1)
+        takeScreenshot(android.view.Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+            override fun onSuccess(shot: ScreenshotResult) {
+                runCatching {
+                    val bmp = android.graphics.Bitmap.wrapHardwareBuffer(shot.hardwareBuffer, shot.colorSpace)!!
+                        .copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                    shot.hardwareBuffer.close()
+                    var black = 0
+                    var n = 0
+                    for (y in 0 until bmp.height step 8) for (x in 0 until bmp.width step 8) {
+                        val p = bmp.getPixel(x, y)
+                        n++
+                        if ((p shr 16 and 0xff) < 8 && (p shr 8 and 0xff) < 8 && (p and 0xff) < 8) black++
+                    }
+                    out.put("width", bmp.width).put("height", bmp.height).put("black", black.toDouble() / n)
+                    bmp.recycle()
+                }.onFailure { out.put("error", it.toString()) }
+                done.countDown()
+            }
+
+            override fun onFailure(code: Int) {
+                out.put("error_code", code)  // 3: too soon after the last one; 5 (API 34+): a secure window
+                done.countDown()
+            }
+        })
+        done.await(5, TimeUnit.SECONDS)
+        return out
+    }
+
     /** Bridge test: how a request routes on the phone (rule hit, or Laya's pick + confidence); compare research/09. */
     private fun routeTest(text: String): JSONObject {
         val out = JSONObject().put("rule", ruleSkill(text) ?: JSONObject.NULL).put("was_warm", layaWarm)
@@ -368,11 +407,39 @@ class AgentService : AccessibilityService() {
     }
 
     /** Perform one decided op, reusing the action primitives; geometry per scripts/live_adb.py act(). */
+    /**
+     * [c]'s node in the live tree: the element with the same label, class and id nearest where [c] was (the page may
+     * have moved since), found again among the live nodes by its box clipped to the screen, as the candidates were.
+     */
+    private fun liveNode(c: ScreenCandidate): AccessibilityNodeInfo? {
+        val w = screenW()
+        val h = screenH()
+        val now = buildCandidates(state(), w, h).filter { it.label == c.label && it.className == c.className && it.rid == c.rid }
+            .minByOrNull { kotlin.math.abs(it.bounds[0] - c.bounds[0]) + kotlin.math.abs(it.bounds[1] - c.bounds[1]) } ?: return null
+        fun find(n: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+            val r = Rect().also(n::getBoundsInScreen)
+            if (r.intersect(0, 0, w, h) && n.className?.toString()?.substringAfterLast('.') == now.className &&
+                r.left == now.bounds[0] && r.top == now.bounds[1] && r.right == now.bounds[2] && r.bottom == now.bounds[3]) return n
+            for (i in 0 until n.childCount) n.getChild(i)?.let(::find)?.let { return it }
+            return null
+        }
+        return windows.firstNotNullOfOrNull { win -> win.root?.takeIf { it.packageName != packageName }?.let(::find) }
+    }
+
     internal fun act(op: String, target: ScreenCandidate?, payload: Any?, cands: List<ScreenCandidate>) {
         when {
             op == "CLICK" || op == "LONG_PRESS" -> target?.let {
-                val cx = (it.bounds[0] + it.bounds[2]) / 2.0
-                val cy = (it.bounds[1] + it.bounds[3]) / 2.0
+                // Click the element itself: a tap at its centre lands on whatever is drawn over it (GPay's floating
+                // "Scan any QR code" took a tap meant for "See transaction history", 2026-10-18) or moved there since
+                // the screen was read. A finger tap where it is now only if the app doesn't take the click.
+                val node = liveNode(it)
+                val action = if (op == "CLICK") AccessibilityNodeInfo.ACTION_CLICK else AccessibilityNodeInfo.ACTION_LONG_CLICK
+                var n = node
+                while (n != null && !(if (op == "CLICK") n.isClickable else n.isLongClickable)) n = n.parent
+                if (n?.performAction(action) == true) return
+                val b = node?.let { v -> Rect().also(v::getBoundsInScreen) }?.takeIf { r -> !r.isEmpty }
+                val cx = b?.exactCenterX()?.toDouble() ?: ((it.bounds[0] + it.bounds[2]) / 2.0)
+                val cy = b?.exactCenterY()?.toDouble() ?: ((it.bounds[1] + it.bounds[3]) / 2.0)
                 stroke(cx, cy, cx, cy, if (op == "LONG_PRESS") 1000 else 60)
             }
             op.startsWith("SCROLL_") -> {
@@ -393,7 +460,7 @@ class AgentService : AccessibilityService() {
                 stroke(cx + sx * dx, cy + sy * dy, cx - sx * dx, cy - sy * dy, 400)
             }
             op == "OPEN_APP" -> (payload as? Pair<*, *>)?.let { openApp(it.second.toString()) }
-            op == "INPUT_TEXT" -> (payload as? String)?.let { setText(it) }
+            op == "INPUT_TEXT" -> (payload as? String)?.let { setText(it, target?.label) }
             op == "BACK" -> performGlobalAction(GLOBAL_ACTION_BACK)
             op == "HOME" -> performGlobalAction(GLOBAL_ACTION_HOME)
             op == "WAIT" -> Thread.sleep(2000)

@@ -442,3 +442,37 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Why:** about a dozen places re-read the raw request with different word lists, and several wrong actions come straight from that (research/23 §1: ten found, two fixed in D-050).
 - **Rejected:** a framework or plugin system; letting the Writer decide mode, risk, done or the app's package.
 - **Who / status:** owner approved building it (2026-10-18) · design by a Claude sub-agent, reviewed by Claude · Step (a) next. Open question for the owner: should "open X and …" always show X? ("open settings and check the storage" answers without opening Settings.)
+
+### D-052 — Fixes from the task suite (14 → 20 of 24); icon labels steps 1–3
+- **Decision:**
+  1. **Taps** click the element itself through accessibility (re-found on the live screen), with a finger tap as fallback.
+  2. **The element list:**
+     - leaves out system windows (status bar, navigation bar, shade);
+     - names unlabelled elements from their resource id (icon step 1);
+     - adds text the app draws but doesn't mark tappable when it is at least twice the tappable elements (Compose / React Native food and grocery apps).
+  3. **Understanding and done checks:**
+     - "open X and …" shows X (not an API answer);
+     - a search stays inside the app opened and is submitted with Enter;
+     - "done" checks wait until a search has typed;
+     - a switch for "turn on/off" stops once it shows the wanted state;
+     - payments questions use one goal and read "last N";
+     - the skim waits for a screen with elements and isn't used for searches.
+  4. **Safety:**
+     - taps on add, dismiss and address ask;
+     - so do taps on an alarm's time in Clock;
+     - the bridge survives a client that disconnects.
+  5. **Icon steps 2–3:**
+     - Friday names an unlabelled element it tapped by the first words the next screen gained (`meanings.json`, wiped with "Delete all learned data");
+     - the service may take screenshots, for a test of whether money apps' pixels are readable.
+- **Why:**
+  - Task suite baseline: 14/24 tasks. The same 24 after the fixes: **20/24**, median 9.7 s (was 9.6).
+  - Failures came from wrong checks, routing, Enter not pressed, a double toggle, early "done", a "%" in a label crashing the trace, the status-bar battery icon and taps landing under overlays.
+  - The tests also exposed three unsafe taps on the owner's phone, now asking:
+    - an alarm was created ("Add alarm" → OK);
+    - "Dismiss" was tapped in Clock;
+    - a Zepto delivery address was picked.
+- **Still failing:**
+  - Play Store updates and Amazon orders (Laya doesn't know where they live: Teach or the app map);
+  - Photos search;
+  - Swiggy and Zepto (their restaurant and product pages expose 0–5 tappable elements).
+- **Who / status:** owner (asked for each fix and the icon plan) · Claude · Built and installed. Steps 1–3 of the icon plan are in; the step-3 GPay screenshot test is pending, and steps 4–5 depend on it.

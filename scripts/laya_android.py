@@ -77,23 +77,24 @@ def parse_uiautomator(xml_text, ime_package=""):
 
 
 IME_WINDOW = 2  # AccessibilityWindowInfo.TYPE_INPUT_METHOD
+SYSTEM_WINDOW = 3  # TYPE_SYSTEM: status bar, nav bar, shade -- never a target (Candidates.kt)
 
 
 def parse_forest(state):
     """The phone app's `state` reply (every window's tree) -> the same flat node list as parse_uiautomator."""
     nodes = []
 
-    def walk(j, depth, ime):
+    def walk(j, depth, ime, sys=False):
         n = {k: j[k] for k in ("text", "content_desc", "hint", "clickable", "long_clickable", "scrollable",
                                "checkable", "editable", "checked", "selected", "enabled", "visible")}
         n.update({"class": j["class"].rsplit(".", 1)[-1], "resource_id": j["resource_id"].rsplit("/", 1)[-1],
-                  "bounds": tuple(j["bounds"]), "depth": depth, "ime": ime, "children": []})
+                  "bounds": tuple(j["bounds"]), "depth": depth, "ime": ime, "sys": sys, "children": []})
         nodes.append(n)
-        n["children"] = [walk(c, depth + 1, ime) for c in j["children"]]
+        n["children"] = [walk(c, depth + 1, ime, sys) for c in j["children"]]
         return n
 
     for w in state["windows"]:
-        walk(w["root"], 0, w["type"] == IME_WINDOW)
+        walk(w["root"], 0, w["type"] == IME_WINDOW, w["type"] == SYSTEM_WINDOW)
     return nodes
 
 
@@ -102,7 +103,7 @@ def build_candidates(nodes, screen):
     w, h = screen
     groups = {}
     for n in nodes:
-        if n["ime"] or not n["visible"] or not any(n[f] for f in FLAGS):
+        if n["ime"] or n.get("sys") or not n["visible"] or not any(n[f] for f in FLAGS):
             continue
         x1, y1, x2, y2 = n["bounds"]
         box = (max(0, x1), max(0, y1), min(w, x2), min(h, y2))
@@ -118,8 +119,50 @@ def build_candidates(nodes, screen):
         else:
             for f in FLAGS:
                 c[f] = c[f] or n[f]
+    # Text the app draws but doesn't mark tappable (Compose / React Native): when it is at least twice the tappable ones,
+    # the first 30 such texts (3+ letters, outside every tappable box) join, tapped by finger. Must match Candidates.kt.
+    boxes = [c["bounds"] for c in groups.values()]
+    loose = {}
+    for n in nodes:
+        if n["ime"] or n.get("sys") or not n["visible"] or any(n[f] for f in FLAGS) or not _own_text(n):
+            continue
+        x1, y1, x2, y2 = n["bounds"]
+        box = (max(0, x1), max(0, y1), min(w, x2), min(h, y2))
+        if box[2] <= box[0] or box[3] <= box[1] or any(
+                o[0] <= box[0] and o[1] <= box[1] and o[2] >= box[2] and o[3] >= box[3] for o in boxes):
+            continue
+        lab = _label(n)
+        if sum(ch.isalpha() for ch in lab) < 3:
+            continue
+        c = loose.get((box, lab))
+        if c is None or n["depth"] > c["depth"]:
+            loose[(box, lab)] = {"label": lab, "class": n["class"], "resource_id": n["resource_id"], "enabled": n["enabled"],
+                                 "checked": n["checked"], "selected": n["selected"], "bounds": box, "depth": n["depth"],
+                                 **{f: False for f in FLAGS}}
+    if len(loose) >= 2 * len(groups):
+        for k, c in sorted(loose.items(), key=lambda kv: (kv[1]["bounds"][1], kv[1]["bounds"][0]))[:30]:
+            groups[k] = c
     b = lambda c: c["bounds"]  # noqa: E731
-    return sorted(groups.values(), key=lambda c: (b(c)[1], b(c)[0], b(c)[3], b(c)[2], c["label"], c["class"]))
+    out = sorted(groups.values(), key=lambda c: (b(c)[1], b(c)[0], b(c)[3], b(c)[2], c["label"], c["class"]))
+    for c in out:  # after sorting, as on the phone: the order and the ids don't move
+        c["label"] = c["label"] or _id_label(c["resource_id"])
+    return out
+
+
+_ID_NOISE = {"id", "btn", "button", "iv", "img", "image", "imageview", "icon", "ic", "view", "layout", "container",
+             "wrapper", "root", "item", "cell", "holder", "frame", "txt", "text", "tv", "lbl", "label", "action", "ll",
+             "rl", "cl", "fl", "vg", "group", "content", "wrap", "parent", "child", "widget", "bg", "background", "main",
+             "compound", "webview", "element", "tag"}
+
+
+def _id_label(rid):
+    """Words from a resource id for an element with no text (research/24 §4). Must match Candidates.kt idLabel."""
+    s = re.sub(r"([a-z])([A-Z])", r"\1 \2", rid.rsplit("/", 1)[-1]).lower()
+    return " ".join(w for w in re.split(r"[^a-z]+", s) if len(w) > 1 and w not in _ID_NOISE)
+
+
+assert (_id_label("com.x:id/tab_menu_stopwatch"), _id_label("searchButton"), _id_label("iv_icon"),
+        _id_label("action_orders")) == ("tab menu stopwatch", "search", "", "orders")
 
 
 def option_label(c):
@@ -149,6 +192,20 @@ def decide(agent, goal, history, cands):
                                "criteria": {str(i): lab for i, lab in enumerate(labels)}}
     out = agent.system_one(state, questions, max_len=3072, head_max_len=1536)
     return out["answers"], out["usage"]
+
+
+def _node(cls, box, text="", clickable=False, children=()):
+    return {"text": text, "content_desc": "", "hint": "", "clickable": clickable, "long_clickable": False,
+            "scrollable": False, "checkable": False, "editable": False, "checked": False, "selected": False,
+            "enabled": True, "visible": True, "class": cls, "resource_id": "", "bounds": box, "ime": False,
+            "children": list(children)}
+
+
+_feed = [_node("Button", (0, 0, 100, 20), "Search", True), _node("TextView", (0, 30, 100, 50), "Biryani House"),
+         _node("TextView", (0, 60, 100, 80), "Desserts"), _node("TextView", (0, 90, 100, 110), "4.3")]
+for _n in _feed:
+    _n["depth"] = 1
+assert [c["label"] for c in build_candidates(_feed, (100, 200))] == ["Search", "Biryani House", "Desserts"]
 
 
 if __name__ == "__main__":
@@ -187,3 +244,4 @@ if __name__ == "__main__":
     got = [option_label(c) for c in build_candidates(parse_forest(forest), (100, 200))]
     assert got == want, got
     print("ok")
+

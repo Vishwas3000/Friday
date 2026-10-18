@@ -12,7 +12,9 @@ object Safety {
     enum class Verdict { AUTO, ASK, BLOCK }
 
     val RISKY = Regex(
-        "\\b(send|pay|paid|buy|purchase|order|checkout|book|delete|remove|uninstall|erase|reset|call|dial|post|" +
+        "\\b(send|pay|paid|buy|purchase|order|checkout|book|delete|remove|uninstall|erase|reset|call|dial|post|add|" +
+            // "dismiss" an upcoming alarm, pick another delivery "address" (Clock and Zepto, suite 2026-10-18)
+            "dismiss|address|" +
             "share|confirm|transfer|subscribe|install|accept|allow|proceed|request|withdraw|invest|recharge|" +
             "place order|sign out|log ?out|unlink|block)\\b",
         RegexOption.IGNORE_CASE,
@@ -38,6 +40,9 @@ object Safety {
             if (tap && label.isBlank()) return Verdict.ASK to "unlabelled button in a money app"
         }
         if (tap && foreground in COMMIT_ON_TAP) return Verdict.ASK to "a tap here can place a call"
+        // an alarm's time opens its picker, and OK there saves it: "go to bedtime" got that far (2026-10-18)
+        if (tap && foreground == "com.google.android.deskclock" && Regex("\\b\\d{1,2}:\\d{2}\\b").containsMatchIn(label))
+            return Verdict.ASK to "this could change an alarm"
         if (tap && RISKY.containsMatchIn(label)) return Verdict.ASK to "\"$label\" could send, pay or change something"
         return Verdict.AUTO to ""
     }

@@ -117,8 +117,9 @@ fun ruleSkill(request: String): String? {
     // despacito" -> play_video in YouTube: straight to its results); a task no rule covers ("and go to the
     // timers tab") stays open_app, for Laya inside X. Was: every "open X and ..." went to Laya (2026-10-17).
     // A search stays inside the app opened: "open youtube and search for lofi" had Chrome google the whole sentence.
+    // A status question too: "open settings and show the battery page" answered "61%" without opening Settings.
     if (skill == "open_app") OPEN_AND.find(request)?.let { m ->
-        ruleSkill(m.groupValues[1])?.takeIf { it != "open_app" && it != "web_search" }?.let { return it }
+        ruleSkill(m.groupValues[1])?.takeIf { it !in setOf("open_app", "web_search", "device_status") }?.let { return it }
     }
     return skill
 }
@@ -132,6 +133,7 @@ private val COUNT = Regex("\\b(?:last|latest|recent|past|top)\\s+(\\d{1,2})\\b|\
 /** Up to the count the request asks for (else 3), scrolling down up to 3 pages when the screen shows fewer. */
 private fun readAll(ctx: SkillContext, dated: Boolean): String {
     val n = COUNT.find(ctx.request)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }?.toInt()?.coerceIn(1, 20) ?: 3
+    ctx.waitUntil(5000) { readAmounts(ctx.screen().texts, 1, dated) != null }  // the list loads after the tap
     var texts = ctx.screen().texts
     var pages = 0
     while (pages++ < 3 && (readAmounts(texts, n, dated)?.lines()?.size ?: 0) < n && ctx.scroll("down")) texts = texts + ctx.screen().texts
@@ -170,6 +172,7 @@ fun routingSelfCheck(): String {
     check(ruleSkill("open settings and turn on wifi") == "device_setting")
     check(ruleSkill("open spotify") == "open_app")
     check(ruleSkill("open youtube and search for lofi music") == "open_app" && ruleSkill("search the web for weather") == "web_search")
+    check(ruleSkill("open settings and show the battery page") == "open_app" && ruleSkill("how much battery is left") == "device_status")
     val t = listOf("Paid to", "Ravi Kumar", "₹250", "16 Oct").map { ScreenText(it, intArrayOf(0, 0, 1, 1)) }
     check(readAmounts(t) == "Ravi Kumar · ₹250 · 16 Oct")
     val promo = listOf("Personal loan", "Up to ₹40 lakh", "Check details", "Ravi Kumar", "₹250 debited", "16 October")

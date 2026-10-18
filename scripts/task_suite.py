@@ -65,11 +65,18 @@ def check(c, answer):
     fails = []
     if "pkg" in c and call(cmd="foreground").get("package") != c["pkg"]:
         fails.append("app")
-    if "screen" in c or "selected" in c:
+    for _ in range(6):  # a page that is still loading gets up to 6 s (Chrome's results, 2026-10-18)
+        if "screen" not in c and "selected" not in c:
+            break
         t = texts(call(cmd="state"))
-        fails += ["screen: " + w for w in c.get("screen", []) if not any(w.lower() in s.lower() for s, _ in t)]
+        miss = ["screen: " + w for w in c.get("screen", []) if not any(w.lower() in s.lower() for s, _ in t)]
         if "selected" in c and not any(sel and c["selected"].lower() in s.lower() for s, sel in t):
-            fails.append("selected: " + c["selected"])
+            miss.append("selected: " + c["selected"])
+        if not miss:
+            break
+        time.sleep(1)
+    else:
+        fails += miss
     if "answer" in c and not re.search(c["answer"], answer or ""):
         fails.append("answer")
     if "media" in c and not any(playing(c["media"]) or time.sleep(1) for _ in range(6)):

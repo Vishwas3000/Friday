@@ -32,8 +32,11 @@ fun ScreenCandidate.toCandidate() = Candidate(
 
 private val FLAGS = arrayOf("clickable", "long_clickable", "editable", "scrollable", "checkable")
 private const val IME_WINDOW = 2  // AccessibilityWindowInfo.TYPE_INPUT_METHOD
+// TYPE_SYSTEM: status bar, navigation bar, notification shade. Never a target: Laya tapped the status bar's battery
+// icon for "show the battery page" (2026-10-18). Its text still counts (fingerprint prompts are read there).
+private const val SYSTEM_WINDOW = 3
 
-private class Node(val j: JSONObject, val depth: Int, val ime: Boolean)
+private class Node(val j: JSONObject, val depth: Int, val ime: Boolean, val sys: Boolean = false)
 
 /** (text || content_desc || hint).strip(), with Python's "" == falsy semantics. */
 private fun ownText(j: JSONObject): String {
@@ -72,8 +75,9 @@ private fun flatten(state: JSONObject): List<Node> {
     for (wi in 0 until wins.length()) {
         val w = wins.getJSONObject(wi)
         val ime = w.getInt("type") == IME_WINDOW
+        val sys = w.getInt("type") == SYSTEM_WINDOW
         fun walk(j: JSONObject, depth: Int) {
-            out.add(Node(j, depth, ime))
+            out.add(Node(j, depth, ime, sys))
             val kids = j.optJSONArray("children") ?: return
             for (i in 0 until kids.length()) walk(kids.getJSONObject(i), depth + 1)
         }
@@ -91,7 +95,7 @@ fun buildCandidates(state: JSONObject, screenW: Int, screenH: Int): List<ScreenC
     val groups = LinkedHashMap<String, G>()
     for (n in flatten(state)) {
         val j = n.j
-        if (n.ime || !j.getBoolean("visible") || FLAGS.none { j.getBoolean(it) }) continue
+        if (n.ime || n.sys || !j.getBoolean("visible") || FLAGS.none { j.getBoolean(it) }) continue
         val b = j.getJSONArray("bounds")
         val box = intArrayOf(maxOf(0, b.getInt(0)), maxOf(0, b.getInt(1)),
                              minOf(screenW, b.getInt(2)), minOf(screenH, b.getInt(3)))
@@ -108,10 +112,48 @@ fun buildCandidates(state: JSONObject, screenW: Int, screenH: Int): List<ScreenC
             for (i in FLAGS.indices) g.flags[i] = g.flags[i] || f[i]
         }
     }
+    // Text the app draws but doesn't mark tappable (Compose / React Native handle the tap in code): Swiggy showed 36
+    // texts and 6 tappable elements, so its dishes and restaurants never reached Laya (2026-10-18). When such loose
+    // text, outside every tappable box and with 3+ letters, is at least twice the tappable elements (Clock's alarm cards,
+    // 22 loose to 19, drowned Laya in text; Swiggy is 30 to 6), the first 30 join the list;
+    // AgentService taps them by finger where they are. Must match scripts/laya_android.py build_candidates.
+    val boxes = groups.values.map { it.box }
+    val loose = LinkedHashMap<String, G>()
+    for (n in flatten(state)) {
+        val j = n.j
+        if (n.ime || n.sys || !j.getBoolean("visible") || FLAGS.any { j.getBoolean(it) } || ownText(j).isEmpty()) continue
+        val b = j.getJSONArray("bounds")
+        val box = intArrayOf(maxOf(0, b.getInt(0)), maxOf(0, b.getInt(1)),
+                             minOf(screenW, b.getInt(2)), minOf(screenH, b.getInt(3)))
+        if (box[2] <= box[0] || box[3] <= box[1] ||
+            boxes.any { o -> o[0] <= box[0] && o[1] <= box[1] && o[2] >= box[2] && o[3] >= box[3] }) continue
+        val lab = label(j)
+        if (lab.count { it.isLetter() } < 3) continue
+        val key = "${box.joinToString(",")}|$lab"
+        val g = loose[key]
+        if (g == null || n.depth > g.depth) loose[key] = G(lab, shortClass(j.getString("class")),
+            j.getString("resource_id").substringAfterLast('/'), n.depth, box, j.getBoolean("enabled"),
+            j.getBoolean("checked"), j.getBoolean("selected"), BooleanArray(FLAGS.size))
+    }
+    if (loose.size >= 2 * groups.size) loose.entries.sortedWith(compareBy({ it.value.box[1] }, { it.value.box[0] })).take(30)
+        .forEach { groups[it.key] = it.value }
     return groups.values.sortedWith(compareBy({ it.box[1] }, { it.box[0] }, { it.box[3] }, { it.box[2] }, { it.label }, { it.className }))
-        .map { ScreenCandidate(it.label, it.className, it.flags[0], it.flags[1], it.flags[2], it.flags[3], it.flags[4],
-            it.checked, it.selected, it.enabled, it.box, it.rid) }
+        .map { ScreenCandidate(it.label.ifEmpty { idLabel(it.rid) }, it.className, it.flags[0], it.flags[1], it.flags[2],
+            it.flags[3], it.flags[4], it.checked, it.selected, it.enabled, it.box, it.rid) }
 }
+
+/**
+ * Words from a resource id, for an element with no text of its own or its children's: an icon is labelled better by
+ * its context than by its pixels (research/24 §4). "tab_menu_stopwatch" -> "tab menu stopwatch", "searchButton" ->
+ * "search"; generic parts say nothing about what it does. Must match scripts/laya_android.py `_id_label`.
+ */
+fun idLabel(rid: String): String = rid.replace(Regex("([a-z])([A-Z])"), "$1 $2").lowercase()
+    .split(Regex("[^a-z]+")).filter { it.length > 1 && it !in ID_NOISE }.joinToString(" ")
+
+private val ID_NOISE = setOf("id", "btn", "button", "iv", "img", "image", "imageview", "icon", "ic", "view", "layout",
+    "container", "wrapper", "root", "item", "cell", "holder", "frame", "txt", "text", "tv", "lbl", "label", "action",
+    "ll", "rl", "cl", "fl", "vg", "group", "content", "wrap", "parent", "child", "widget", "bg", "background", "main",
+    "compound", "webview", "element", "tag")  // the last four: junk names seen on the owner's apps (2026-10-18)
 
 /** Labels of the visible selected nodes (the current tab, a chosen item) -- often not actionable, so not candidates. */
 fun selectedLabels(state: JSONObject): List<String> = flatten(state)
@@ -183,5 +225,21 @@ fun candidatesSelfCheck(): String {
     val got = buildCandidates(state, 100, 200).map { optionLabel(it.toCandidate()) }
     val want = listOf("Battery 80% (LinearLayout)", "Search (EditText) edit", "Wi-Fi (Switch) on disabled")
     check(got == want) { "candidates: $got" }
+    check(idLabel("tab_menu_stopwatch") == "tab menu stopwatch" && idLabel("searchButton") == "search" &&
+        idLabel("iv_icon") == "" && idLabel("action_orders") == "orders") { "idLabel" }
+    // loose text joins when it outnumbers the tappable elements; a rating ("4.3") never does
+    val feed = node("ComposeView", intArrayOf(0, 0, 100, 200), listOf(
+        node("Button", intArrayOf(0, 0, 100, 20), text = "Search", clickable = true),
+        node("TextView", intArrayOf(0, 30, 100, 50), text = "Biryani House"),
+        node("TextView", intArrayOf(0, 60, 100, 80), text = "Desserts"),
+        node("TextView", intArrayOf(0, 90, 100, 110), text = "4.3")))
+    fun labels(root: JSONObject) = buildCandidates(JSONObject().put("windows", org.json.JSONArray()
+        .put(JSONObject().put("type", 1).put("root", root))), 100, 200).map { it.label }
+    check(labels(feed) == listOf("Search", "Biryani House", "Desserts")) { "loose: ${labels(feed)}" }
+    check(labels(app) == listOf("Battery 80%", "Search", "Wi-Fi")) { "loose on a normal screen: ${labels(app)}" }
+    val bar = node("ImageView", intArrayOf(0, 0, 50, 10), desc = "Battery charging, 64 percent.", clickable = true)
+    val withBar = buildCandidates(JSONObject().put("windows", org.json.JSONArray()
+        .put(JSONObject().put("type", 1).put("root", feed)).put(JSONObject().put("type", SYSTEM_WINDOW).put("root", bar))), 100, 200)
+    check(withBar.none { it.label.startsWith("Battery charging") }) { "status bar: ${withBar.map { it.label }}" }
     return "ok: $got"
 }

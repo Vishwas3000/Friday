@@ -34,7 +34,9 @@ class Bridge(private val svc: AgentService) {
                 socket.close()
                 continue
             }
-            socket.use { serve(it) }
+            // a client gone before its reply (a USB drop, a killed script) ends that connection, not Friday: the
+            // write threw "Broken pipe" on this thread and took the whole app down (2026-10-17)
+            socket.use { s -> runCatching { serve(s) }.onFailure { Log.w(TAG, "client went away: $it") } }
         }
     }
 
