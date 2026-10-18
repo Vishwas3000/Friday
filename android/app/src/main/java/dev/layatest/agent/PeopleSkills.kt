@@ -16,11 +16,12 @@ private const val CHROME = "com.android.chrome"
 private const val NO_APP = "I couldn't find an app for that"
 
 /** "navigate to MG road", "take me home" -- Maps starts turn-by-turn at once. */
+// Slots come from the task part: "open google maps to navigate to MG road" went to "navigate to MG road" (research/23 §1.2)
 object Navigate : Skill {
     override val id = "navigate"
 
     override fun run(ctx: SkillContext): String {
-        val dest = destination(ctx.request) ?: return "Where to? Try \"navigate to MG Road\""
+        val dest = destination(taskPart(ctx.request)) ?: return "Where to? Try \"navigate to MG Road\""
         val i = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=${Uri.encode(dest)}&mode=d")).setPackage(MAPS)
         return if (ctx.launch(i)) "Navigating to $dest" else "I couldn't open Google Maps"
     }
@@ -31,7 +32,7 @@ object WebSearch : Skill {
     override val id = "web_search"
 
     override fun run(ctx: SkillContext): String {
-        val q = searchQuery(ctx.request) ?: return "What should I search for?"
+        val q = searchQuery(taskPart(ctx.request)) ?: return "What should I search for?"
         // a VIEW of the results page: ACTION_WEB_SEARCH only pre-fills Chrome's omnibox (research/10)
         val i = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(q))).setPackage(CHROME)
         return if (ctx.launch(i)) "Here's what Google found for \"$q\"" else "I couldn't open Chrome"
@@ -43,7 +44,7 @@ object Call : Skill {
     override val id = "call"
 
     override fun run(ctx: SkillContext): String {
-        val who = callee(ctx.request) ?: pick(ctx) ?: return "Who should I call?"
+        val who = callee(taskPart(ctx.request)) ?: pick(ctx) ?: return "Who should I call?"
         dialable(who)?.let { n ->
             val ok = ctx.launch(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", n, null)))
             return if (ok) "$n is ready — tap Call" else "I couldn't open the dialer"
@@ -59,8 +60,8 @@ object Message : Skill {
     override val id = "message"
 
     override fun run(ctx: SkillContext): String {
-        val (rule, body) = messageParts(ctx.request)
-        if (isEmail(ctx.request)) return email(ctx, rule, body)
+        val (rule, body) = messageParts(taskPart(ctx.request))
+        if (isEmail(taskPart(ctx.request))) return email(ctx, rule, body)
         val to = rule ?: pick(ctx) ?: return "Who should I message?"
         val app = ctx.appFor(id) ?: return NO_APP
         ctx.openAndWait(app)
@@ -74,7 +75,7 @@ object Message : Skill {
     private fun email(ctx: SkillContext, to: String?, body: String?): String {
         val addr = to?.takeIf { '@' in it }.orEmpty() // a bare name isn't an address: the owner picks the contact
         val ok = ctx.launch(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$addr"))
-            .putExtra(Intent.EXTRA_SUBJECT, emailSubject(ctx.request)).putExtra(Intent.EXTRA_TEXT, body))
+            .putExtra(Intent.EXTRA_SUBJECT, emailSubject(taskPart(ctx.request))).putExtra(Intent.EXTRA_TEXT, body))
         return when {
             !ok -> "I couldn't open an email app"
             to != null && addr.isEmpty() -> "Email ready — add $to, then tap Send"
@@ -90,7 +91,7 @@ object Ride : Skill {
     override fun run(ctx: SkillContext): String {
         val app = ctx.appFor(id) ?: return NO_APP
         ctx.openAndWait(app)
-        val dest = destination(ctx.request) ?: return "${app.label} is open — where to? I never book without your OK"
+        val dest = destination(taskPart(ctx.request)) ?: return "${app.label} is open — where to? I never book without your OK"
         return outcome(ctx.runLaya("book a ride to $dest", typeText = dest),
             "Your ride to $dest is set up in ${app.label} — I never book without your OK")
     }
@@ -102,11 +103,16 @@ object Shopping : Skill {
 
     override fun run(ctx: SkillContext): String {
         val app = ctx.appFor(id) ?: return NO_APP
-        val track = isTracking(ctx.request)
-        val item = if (track) null else shoppingItem(ctx.request) ?: pick(ctx)
+        val track = isTracking(taskPart(ctx.request))
+        val item = if (track) null else shoppingItem(taskPart(ctx.request)) ?: pick(ctx)
         ctx.openAndWait(app)
         return when {
-            track -> outcome(ctx.runLaya("open my orders"), "Your ${app.label} orders are on screen")
+            // the goal a taught path is keyed on, so "open amazon and show my orders" replays without Laya
+            track -> ctx.runLaya("open ${app.label.lowercase()} and show my orders").let { o ->
+                if (o != Outcome.DONE) outcome(o, "")
+                else readOrders(ctx.screen().texts, countAsked(ctx.request) ?: 3)?.let { "Your latest ${app.label} orders:\n$it" }
+                    ?: "Your ${app.label} orders are on screen"
+            }
             item == null -> "Opened ${app.label}"
             else -> outcome(ctx.runLaya("search for $item", typeText = item), "Here's $item in ${app.label} — pick one and buy it yourself")
         }
@@ -119,7 +125,7 @@ object Photos : Skill {
 
     override fun run(ctx: SkillContext): String {
         val app = ctx.appFor(id) ?: return NO_APP
-        val q = photoQuery(ctx.request) ?: pick(ctx)
+        val q = photoQuery(taskPart(ctx.request)) ?: pick(ctx)
         ctx.openAndWait(app)
         if (q == null) return "Opened ${app.label}"
         return outcome(ctx.runLaya("search for $q", typeText = q), "Here are your photos of $q")
@@ -161,7 +167,9 @@ private val LINKS = Slots.CUT + setOf("about", "to", "for", "from", "in", "at")
 private val SEARCH_CMD = Regex("^(please |can you |could you )?(search( the web| google| online)?( for)?|look up|google)\\b[\\s,:]*",
     RegexOption.IGNORE_CASE)
 private val MSG_CMD = Regex("\\b(message|text|whatsapp|e-?mail|mail)\\b", RegexOption.IGNORE_CASE)
-private val TRACK = Regex("\\b(track\\w*|my orders?|where('s| is)|arriv\\w*|shipped)\\b", RegexOption.IGNORE_CASE)
+// viewing orders, not buying: "Show my last order that I did on Amazon" searched Amazon for "Amazon" (2026-10-18)
+private val TRACK = Regex("\\b(track\\w*|where('s| is)|arriv\\w*|shipped|orders|order (history|status|details)|" +
+    "(my|last|latest|recent|past|previous)( \\w+)? order)\\b", RegexOption.IGNORE_CASE)
 
 private fun dropFillers(s: String?) = s?.split(' ')?.dropWhile { it.lowercase() in FILLERS }?.joinToString(" ")?.ifEmpty { null }
 
@@ -204,6 +212,13 @@ internal fun messageParts(request: String): Pair<String?, String?> {
         ?: rest.takeIf { it.isNotEmpty() && it[0].lowercase() !in LINKS }?.joinToString(" ")
     return name.joinToString(" ").trim(',', '.', '!', '?', ':').ifEmpty { null } to body
 }
+
+/** The first [max] orders on an orders page: lines that say what happened to them ("Order placed 15 October"). */
+internal fun readOrders(texts: List<ScreenText>, max: Int): String? =
+    texts.map { it.text.trim() }.filter { ORDER_LINE.containsMatchIn(it) }.distinct().take(max).takeIf { it.isNotEmpty() }
+        ?.joinToString("\n") { it.take(120) }
+
+private val ORDER_LINE = Regex("\\b(order placed|ordered on|delivered|arriving|shipped|cancelled|returned)\\b", RegexOption.IGNORE_CASE)
 
 /** "order some milk from blinkit" -> "milk". */
 internal fun shoppingItem(request: String) =

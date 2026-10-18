@@ -90,6 +90,8 @@ private val RULES: List<Pair<String, Regex>> = listOf(
     "spend_query" to "\\b(spen[dt]|expens\\w*|transactions?|paid|payments?)\\b|how much did i pay",
     "balance_query" to "\\bbalance\\b",
     "bill_query" to "\\b(bill|dues?)\\b",
+    // a question about the alarm is a status, not a new one: "when's my next alarm" asked what time to set it
+    "device_status" to "\\b(next|upcoming) alarm\\b|\\bwhen('?s| is) my (next )?alarm\\b",
     "alarm_timer" to "\\b(alarm|timer|remind\\w*|wake me)\\b",
     "device_status" to "\\b(battery|storage|space left)\\b",
     // media controls before settings: "turn off the music" is a pause, not a phone setting
@@ -101,7 +103,7 @@ private val RULES: List<Pair<String, Regex>> = listOf(
     "web_search" to "^(search|look up|google)\\b",  // before message: "search for text editors"
     "message" to "\\b(message|text|whatsapp|e-?mail|mail)\\b",
     "navigate" to "\\b(navigate|directions?|get to|route to)\\b",
-    "shopping" to "\\b(order|buy|deliver\\w*)\\b",
+    "shopping" to "\\b(orders?|buy|deliver\\w*)\\b",
     "photos" to "\\b(photos?|pictures?|pics)\\b",
     "play_video" to "\\b(watch|videos?|movie|episode|season)\\b",
     "play_music" to "\\b(play|listen|put on)\\b",
@@ -189,6 +191,14 @@ fun routingSelfCheck(): String {
     check(ruleSkill("open spotify") == "open_app")
     check(ruleSkill("open youtube and search for lofi music") == "open_app" && ruleSkill("search the web for weather") == "web_search")
     check(ruleSkill("open settings and show the battery page") == "open_app" && ruleSkill("how much battery is left") == "device_status")
+    check(ruleSkill("when's my next alarm") == "device_status" && ruleSkill("set an alarm for 6") == "alarm_timer")
+    check(ruleSkill("show mem last 5 orders in amazzon") == "shopping" && isTracking("Show my last order that I did on Amazon") &&
+        isTracking("show mem last 5 orders in amazzon") && !isTracking("order some milk from swiggy"))
+    check(AppResolver.editDistance("amazzon", "amazon") == 1 && AppResolver.editDistance("some", "home") == 1)
+    check(readOrders(listOf("Milky Mist Paneer, 200 g, Order placed 15 October", "Buy again", "Lamp, Delivered 9 October")
+        .map { ScreenText(it, intArrayOf(0, 0, 1, 1)) }, 5) == "Milky Mist Paneer, 200 g, Order placed 15 October\nLamp, Delivered 9 October")
+    check(bareTimer("set a timer for 5", 5 to 0) == 300 && bareTimer("set a timer for 1:30", 1 to 30) == 90 &&
+        bareTimer("set an alarm for 5", 5 to 0) == null && bareTimer("set a timer for 5 pm", 17 to 0) == null)
     check(deepLink("com.android.vending", "open the play store and show app updates") != null &&
         deepLink("com.android.vending", "open the play store and search for whatsapp") == null)
     val t = listOf("Paid to", "Ravi Kumar", "₹250", "16 Oct").map { ScreenText(it, intArrayOf(0, 0, 1, 1)) }

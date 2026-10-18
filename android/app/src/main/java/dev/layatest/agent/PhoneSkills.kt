@@ -57,6 +57,16 @@ object DeviceStatus : Skill {
     }
 }
 
+/**
+ * A timer's length when the request says "timer" with no unit: "set a timer for 5" is 5 minutes and "for 1:30"
+ * 1 min 30 s -- it was a 5:00 AM alarm (research/23 §1.4). "for 5 pm" stays a time of day. Null: not that case.
+ */
+internal fun bareTimer(request: String, clock: Pair<Int, Int>?): Int? {
+    if (clock == null || !Regex("\\btimer\\b", RegexOption.IGNORE_CASE).containsMatchIn(request) ||
+        Regex("\\b(a\\.?m|p\\.?m)\\b", RegexOption.IGNORE_CASE).containsMatchIn(request)) return null
+    return if (Regex("\\d:\\d").containsMatchIn(request)) clock.first * 60 + clock.second else clock.first * 60
+}
+
 /** The alarm time [sec] seconds after [now], to the nearest minute (alarms are minute-granular). */
 internal fun alarmAfter(now: LocalTime, sec: Int): Pair<Int, Int> =
     now.plusSeconds(sec + 30L).truncatedTo(ChronoUnit.MINUTES).let { it.hour to it.minute }
@@ -78,6 +88,7 @@ object AlarmTimer : Skill {
         val note = reminderText(ctx.slots)
         var sec = ctx.slots.durationSec
         var clock = ctx.slots.clock
+        if (sec == null) bareTimer(ctx.request, clock)?.let { sec = it; clock = null }
         if (sec == null && clock == null) {
             if (note != null || Regex("remind|timer", RegexOption.IGNORE_CASE).containsMatchIn(ctx.request)) {
                 val i = ctx.ask("When should I remind you?", IN_MIN.map { if (it < 60) "In $it minutes" else "In 1 hour" }) ?: return "Cancelled"

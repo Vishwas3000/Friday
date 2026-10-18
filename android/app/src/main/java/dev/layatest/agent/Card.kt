@@ -48,24 +48,25 @@ fun understand(request: String, named: (String) -> AppInfo?): TaskCard {
     val app = named(request)
     val s = Slots(task)
     val control = ON_OFF.find(request)?.groupValues?.let { g -> if (g[1].ifEmpty { g[2] }.lowercase() in setOf("on", "enable")) "on" else "off" }
-    val (person, body) = if (skill == "message") messageParts(request) else null to null
+    val (person, body) = if (skill == "message") messageParts(task) else null to null
     val query = when (skill) {
         "play_music", "play_video" -> mediaQuery(request, app?.label).ifEmpty { null }
-        "web_search" -> searchQuery(request)
-        "shopping" -> if (isTracking(request)) null else shoppingItem(request)
-        "photos" -> photoQuery(request)
+        "web_search" -> searchQuery(task)
+        "shopping" -> if (isTracking(task)) null else shoppingItem(task)
+        "photos" -> photoQuery(task)
         else -> s.quoted.firstOrNull() ?: s.after("search for", "search", "look for", "find", "type", "play", "watch", "listen to")
     }
-    val clock = s.clock?.let { (h, m) -> "%02d:%02d".format(h, m) }
+    val timer = bareTimer(request, s.clock)  // "a timer for 5": 5 minutes, not 5:00
+    val clock = s.clock?.takeIf { timer == null }?.let { (h, m) -> "%02d:%02d".format(h, m) }
     val money = app?.pkg in AppResolver.MONEY || skill in READ_SKILLS
     return TaskCard(
         request = request, task = task, skill = skill, app = app?.pkg,
         about = Routes.aboutWords(task, app?.label), query = query,
-        person = if (skill == "call") callee(request) else person,
+        person = if (skill == "call") callee(task) else person,
         text = body ?: if (skill == "alarm_timer") reminderText(s) else null,
-        place = if (skill == "navigate" || skill == "ride") destination(request) else null,
-        clock = clock, seconds = s.durationSec, range = s.timeRange?.label, count = countAsked(request), control = control,
-        mode = if (skill in READ_SKILLS || skill == "device_status" || (skill == "shopping" && isTracking(request))) "read" else "act",
+        place = if (skill == "navigate" || skill == "ride") destination(task) else null,
+        clock = clock, seconds = s.durationSec ?: timer, range = s.timeRange?.label, count = countAsked(request), control = control,
+        mode = if (skill in READ_SKILLS || skill == "device_status" || (skill == "shopping" && isTracking(task))) "read" else "act",
         risk = when { money -> "money"; skill in COMMIT -> "commit"; else -> "none" },
         done = when (skill) {
             "play_music", "play_video" -> "playing"
@@ -91,6 +92,8 @@ fun cardSelfCheck(): String {
     }
     card("open clock and show the stopwatch").let { check(it.skill == "open_app" && it.about == setOf("stopwatch") && it.done == "subject") { "card: $it" } }
     card("set an alarm for 6 am").let { check(it.skill == "alarm_timer" && it.clock == "06:00" && it.done == "alarm:06:00") { "card: $it" } }
+    card("open google maps to navigate to MG road").let { check(it.skill == "navigate" && it.place == "MG road") { "card: $it" } }
+    card("set a timer for 5").let { check(it.seconds == 300 && it.clock == null && it.done == "none") { "card: $it" } }
     card("turn off dark mode").let { check(it.skill == "device_setting" && it.control == "off" && it.done == "switch:off") { "card: $it" } }
     return "ok"
 }

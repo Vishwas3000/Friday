@@ -43,11 +43,35 @@ class AppResolver(ctx: Context) {
         return installed
             .filter { it.label.isNotBlank() && Regex("\\b${Regex.escape(it.label)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(request) }
             .maxByOrNull { it.label.length }
+            ?: typo(request)
     }
+
+    /** "amazzon" -> Amazon: a one-word label one letter off (two for 8+ letters), for words of 5+ letters that aren't
+     *  everyday words ("alarm" must not find an app called "Alarmy"). The closest wins. */
+    private fun typo(request: String): AppInfo? = Regex("[a-z]{5,}").findAll(request.lowercase()).map { it.value }
+        .filter { it !in EVERYDAY }
+        .flatMap { w -> installed.filter { ' ' !in it.label && it.label.length >= 5 }.map { a -> a to editDistance(w, a.label.lowercase()) }
+            .filter { (a, d) -> d in 1..(if (a.label.length >= 8) 2 else 1) } }
+        .minByOrNull { it.second }?.first
 
     private fun category(pkg: String) = runCatching { pm.getApplicationInfo(pkg, 0).category }.getOrDefault(ApplicationInfo.CATEGORY_UNDEFINED)
 
     companion object {
+        private val EVERYDAY = setOf("alarm", "alarms", "timer", "timers", "music", "photo", "photos", "video", "videos",
+            "order", "orders", "search", "phone", "message", "messages", "clock", "camera", "settings", "store", "notes",
+            "weather", "calendar", "files", "contacts", "maps", "email", "emails", "mail", "chrome", "money", "books", "games")
+
+        /** Levenshtein distance: inserts, deletes and substitutions to turn [a] into [b]. */
+        fun editDistance(a: String, b: String): Int {
+            var prev = IntArray(b.length + 1) { it }
+            for (i in 1..a.length) {
+                val cur = IntArray(b.length + 1).also { it[0] = i }
+                for (j in 1..b.length) cur[j] = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+                prev = cur
+            }
+            return prev[b.length]
+        }
+
         private val UPI = listOf(
             "com.google.android.apps.nbu.paisa.user", // Google Pay
             "com.phonepe.app", "net.one97.paytm", "in.org.npci.upiapp", // PhonePe, Paytm, BHIM

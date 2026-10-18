@@ -493,3 +493,14 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - An always-on microphone (D-046 stands: the mic opens only on a tap).
 - **Supersedes:** D-021's "typed only" for this path. Speaker verification is still deferred.
 - **Who / status:** owner (asked) · Claude · Built and installed; the owner's first try is pending. If the wake word is listening while charging, the mic may report busy.
+
+### D-054 — Understanding fixes from the owner's requests and research/23's bug list
+- **Decision:**
+  1. **Viewing orders, not buying.** "my … order", "last/recent/past order", "orders" and "order history/status/details" open the orders page. They use the goal "open <app> and show my orders", which a taught path replays, and then read up to the asked count of order lines ("last 5 orders").
+  2. **App names tolerate a typo.** A word of 5+ letters within 1 edit of a one-word label (2 for 8+ letters) names that app ("amazzon" → Amazon). Everyday words ("alarm", "music", …) never do.
+  3. **"orders"** routes to shopping.
+  4. **"when's my next alarm"** is a status question.
+  5. **"timer for 5"** is 5 minutes, not a 5:00 AM alarm.
+  6. **The people skills** read their slots from the task part ("open google maps to navigate to MG road" → "MG road").
+- **Why:** the owner asked "Show my last order that I did on Amazon" and "show mem last 5 orders in amazzon". The first searched Amazon for "Amazon" (82.7 s); in the second, neither "orders" nor "amazzon" was recognised. Items 4–6 are research/23 §1.2–1.4.
+- **Who / status:** owner (reported) · Claude · Built and installed; self-checks pass. The phone was too hot to re-run the requests (thermal status 3).
