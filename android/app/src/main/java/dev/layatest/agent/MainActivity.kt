@@ -86,14 +86,27 @@ class MainActivity : Activity() {
         // every launch (icon, "Hey Google, open Friday", Quick Tap, the wake word) opens ready to type; the
         // manifest's stateAlwaysVisible brings the keyboard up whenever this window gets focus
         goal.requestFocus()
+        askMicForBubble(intent)
     }
 
     private fun micGranted() = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     private fun askMic() = requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
 
+    /** The bubble's first tap without the mic: ask for it here (only an activity can), for talking, not "Hey Friday". */
+    private fun askMicForBubble(i: Intent?) {
+        if (i?.getBooleanExtra(ASK_MIC, false) == true && !micGranted()) requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), BUBBLE_MIC)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        askMicForBubble(intent)
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         val ok = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+        if (requestCode == BUBBLE_MIC) return toast(if (ok) "Microphone allowed: tap the bubble and talk" else "Friday needs the microphone to listen")
         WakeWord.setOn(this, ok)  // a "no" leaves listening off
         listen.isChecked = ok
         if (!ok) toast("Friday needs the microphone to hear “Hey Friday”")
@@ -113,4 +126,9 @@ class MainActivity : Activity() {
     }
 
     private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
+
+    companion object {
+        const val ASK_MIC = "ask_mic"  // from the bubble: ask for the microphone
+        private const val BUBBLE_MIC = 2
+    }
 }

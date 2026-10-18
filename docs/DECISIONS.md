@@ -476,3 +476,20 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - Photos search;
   - Swiggy and Zepto (their restaurant and product pages expose 0–5 tappable elements).
 - **Who / status:** owner (asked for each fix and the icon plan) · Claude · Built and installed. Steps 1–3 of the icon plan are in; the step-3 GPay screenshot test is pending, and steps 4–5 depend on it.
+
+### D-053 — Voice requests from a floating bubble, with Android's on-device recognizer
+- **Decision:**
+  - A floating button over every app (`Bubble.kt`, an accessibility overlay, off by default; switch in the main screen).
+  - **Tap:** Friday listens (red), with live words at the top of the screen. **Tap again:** it runs what it heard; if speech ended first, it shows green ▶ and the next tap runs it.
+  - **Long-press:** the typed request box. **Drag:** move it.
+  - Speech uses `SpeechRecognizer.createOnDeviceSpeechRecognizer` only. If no offline model is installed, Friday says so instead of going online.
+  - The button hides while a request runs or Friday is taught.
+- **Why:** the owner asked for "a small bubble floating around the screen … tapping should start the listening and tap again should run the query" (2026-10-18).
+  - The on-device recognizer ships no model in Friday, keeps audio on the phone, and leaves Friday without INTERNET.
+  - research/21 flagged that the plain `SpeechRecognizer` some prototypes use may go online.
+- **Rejected:**
+  - Shipping Whisper / Vosk now: 40–150 MB and more CPU, for what the phone already does offline.
+  - The default (possibly online) recognizer.
+  - An always-on microphone (D-046 stands: the mic opens only on a tap).
+- **Supersedes:** D-021's "typed only" for this path. Speaker verification is still deferred.
+- **Who / status:** owner (asked) · Claude · Built and installed; the owner's first try is pending. If the wake word is listening while charging, the mic may report busy.
