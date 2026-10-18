@@ -353,6 +353,16 @@ class AgentService : AccessibilityService() {
                 .put("ms", SystemClock.elapsedRealtime() - t).put("tokens", st.tokens).put("shown", JSONArray(s))
         }
         val out = JSONObject().put("full", run(cands.indices.toList()))
+        // the operation row on a shortlist (research/18 §11): same goal and history, fewer elements
+        c.optJSONArray("op_ks")?.let { ks ->
+            for (i in -1 until ks.length()) {  // -1: every element, timed alone for a fair comparison
+                val shown = if (i < 0) cands.indices.toList() else shortlist(cands, want, ks.getInt(i))
+                val t = SystemClock.elapsedRealtime()
+                val (op, tokens) = e.operation(goal, history, shown.map { cands[it].toCandidate() })
+                out.put(if (i < 0) "op_all" else "op${ks.getInt(i)}", JSONObject().put("op", op.choiceKey).put("conf", op.answerConfidence)
+                    .put("ms", SystemClock.elapsedRealtime() - t).put("tokens", tokens).put("size", shown.size))
+            }
+        }
         // a step without a target (scroll, back, done) is the same either way
         if (out.getJSONObject("full").getInt("target") >= 0) {
             val ks = c.getJSONArray("ks")

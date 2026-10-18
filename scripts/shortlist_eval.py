@@ -3,6 +3,7 @@ shortlist of k elements as from all of them, and how much faster is the step? Ru
 bridge command: the app's own Kotlin shortlist and model), screens from the git-ignored captures/.
 
     uv run python scripts/shortlist_eval.py 12 16 20
+    uv run python scripts/shortlist_eval.py 16 --op 16 24 32    # also the operation row on a shortlist (research/18 §11)
 """
 import json
 import socket
@@ -24,18 +25,30 @@ def call(**cmd):
 
 
 def main():
-    ks = [int(k) for k in sys.argv[1:]] or [16]
+    args = sys.argv[1:]
+    op_ks = [int(k) for k in args[args.index("--op") + 1:]] if "--op" in args else []
+    ks = [int(k) for k in (args[:args.index("--op")] if "--op" in args else args)] or [16]
     subprocess.run(["adb", "forward", "tcp:8765", "localabstract:layatest_agent"], check=True, capture_output=True)
     rows = []
     for i, (key, goal, hist) in enumerate(PAIRS):
         cands = [dict(c, rid=c.get("resource_id", "").split("/")[-1]) for c in screen(key)]
         cands = [{k: v for k, v in c.items() if k != "bounds"} for c in cands]
-        r = call(cmd="shortlist_eval", cands=cands, goal=goal, history=hist, ks=ks)
+        r = call(cmd="shortlist_eval", cands=cands, goal=goal, history=hist, ks=ks, **({"op_ks": op_ks} if op_ks else {}))
         rows.append((key, goal, cands, r))
         f = r["full"]
         print("%2d %-10s %2d cands  %-10s full %3s %5d ms %4d tok  " % (i, key, len(cands), f["op"], f["target"], f["ms"], f["tokens"])
               + "  ".join("k%d %s%3s %5d ms" % (k, "=" if r["k%d" % k]["target"] == f["target"] else "≠", r["k%d" % k]["target"],
                                                  r["k%d" % k]["ms"]) for k in ks if "k%d" % k in r), flush=True)
+    for k in op_ks:
+        crowded = [(key, goal, c, r) for key, goal, c, r in rows if len(c) > k]
+        same = sum(r["op%d" % k]["op"] == r["op_all"]["op"] for _, _, _, r in rows)
+        print("operation row from %d: same operation %d/%d; on the %d screens with more than %d: %.1f -> %.1f s, tokens %d -> %d" % (
+            k, same, len(rows), len(crowded), k, sum(r["op_all"]["ms"] for *_, r in crowded) / 1000,
+            sum(r["op%d" % k]["ms"] for *_, r in crowded) / 1000, sum(r["op_all"]["tokens"] for *_, r in crowded),
+            sum(r["op%d" % k]["tokens"] for *_, r in crowded)))
+        for key, goal, c, r in rows:
+            if r["op%d" % k]["op"] != r["op_all"]["op"]:
+                print("   changed: %-10s %r: %s -> %s" % (key, goal, r["op_all"]["op"], r["op%d" % k]["op"]))
     taps = [(key, goal, c, r) for key, goal, c, r in rows if r["full"]["target"] >= 0]
     print("\n%d pairs, %d with a target (tap/type); the operation row is the same either way" % (len(rows), len(taps)))
     for k in ks:
