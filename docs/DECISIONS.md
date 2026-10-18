@@ -504,3 +504,28 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   6. **The people skills** read their slots from the task part ("open google maps to navigate to MG road" → "MG road").
 - **Why:** the owner asked "Show my last order that I did on Amazon" and "show mem last 5 orders in amazzon". The first searched Amazon for "Amazon" (82.7 s); in the second, neither "orders" nor "amazzon" was recognised. Items 4–6 are research/23 §1.2–1.4.
 - **Who / status:** owner (reported) · Claude · Built and installed; self-checks pass. The phone was too hot to re-run the requests (thermal status 3).
+
+### D-055 — Train our own tiny icon classifier on the GPU box
+- **Decision:**
+  - **Model:** MobileNetV3-Small, from scratch, 64×64 grey in, ~6.5 MB fp32 ONNX out.
+  - **Data:**
+    - UIST'18's 113,854 labelled Rico app icons in 99 classes;
+    - Material Symbols renders (Apache-2.0) for the classes they lack (QR code, scan, camera, wallet, rupee, translate, apps, sort), for today's look of the common classes, and for an "other" class.
+  - **Run-pack:** `training/icons/` (`setup.sh`, `prepare.py`, `train.py`, `run.sh`). Everything runs in `/root/friday-laya/icons` on the box.
+  - **Ship gate:**
+    - a confidence threshold at ≥ 95% precision; below it an icon stays unnamed;
+    - a PyTorch-vs-ONNX parity check;
+    - then the owner's own icons and the task suite before Laya sees its labels.
+- **Why:**
+  - The owner asked for it ("do it on the remote machine. I give you permission to train the Icon classifier model", 2026-10-19).
+  - No released model fits (research/25: the UIST'18 network is 294 MB, 38.5M parameters).
+  - Training our own is minutes of GPU time.
+- **Licences:**
+  - Rico's terms grant no licence to its screenshots and bind the downloader's employer. The owner accepted that for personal research, not published (2026-10-17 and 2026-10-19).
+  - From scratch, so no ImageNet terms.
+  - Renders-only is the clean fallback.
+- **Rejected:**
+  - Porting the UIST'18 network (147 MB fp32).
+  - COALA's GPL classifier; captioners (0.7–1.9 GB).
+  - int8 MobileNetV3: hard-swish and squeeze-excite lose accuracy under ORT int8.
+- **Who / status:** owner (approved) · Claude · Run-pack written and syntax-checked; waiting for the box's current SSH port.
