@@ -17,8 +17,10 @@ class RouteStep(val op: String, val pkg: String?, val rid: String, val label: St
     fun find(scr: Screen): ScreenCandidate? {
         if (pkg != null && scr.pkg != pkg) return null
         val same = scr.candidates.filter { it.className == cls && (rid.isEmpty() || it.rid == rid) }
-        // a lone same-id element may have changed its text (a counter, a time); without an id, the label must match
+        // a lone same-id element may have changed its text (a counter, a time); without an id, the label must match.
+        // Ids that change between visits (Amazon's web-based You page, 2026-10-18): the label alone, if no other has it
         return same.singleOrNull { it.label == label } ?: same.singleOrNull()?.takeIf { rid.isNotEmpty() }
+            ?: scr.candidates.singleOrNull { it.className == cls && label.isNotEmpty() && it.label == label }
     }
 
     val targeted get() = label.isNotEmpty() || rid.isNotEmpty()
@@ -178,6 +180,7 @@ fun routesSelfCheck(): String {
     check(RouteStep("CLICK", "p", "fab", "Stop", "Button", null, false).find(scr)?.label == "Start")  // same id, new text
     check(RouteStep("CLICK", "p", "", "Lap", "Button", null, false).find(scr) == null)              // two look-alikes
     check(RouteStep("CLICK", "q", "reset", "Reset", "Button", null, false).find(scr) == null)       // another app
+    check(RouteStep("CLICK", "p", "yo_footer", "Reset", "Button", null, false).find(scr)?.label == "Reset")  // id changed
     // the skim's match (Assistant.skim): two shared content words, the app's own name left out
     val want = Routes.contentWords("show me the payment history in gpay") - Routes.contentWords("GPay")
     check((Routes.contentWords("Show transaction history") intersect want).size == 2)

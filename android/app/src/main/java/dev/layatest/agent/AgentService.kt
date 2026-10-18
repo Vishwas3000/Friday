@@ -24,11 +24,13 @@ class AgentService : AccessibilityService() {
     @Volatile private var lastEventAt = SystemClock.uptimeMillis()
     private var bridge: Bridge? = null
     internal var wake: WakeWord? = null  // "Hey Friday" (D-035)
+    internal var bubble: Bubble? = null  // quick access over every app
 
     override fun onServiceConnected() {
         instance = this
         bridge = Bridge(this).also { it.start() }
         wake = WakeWord(this).also { it.start() }
+        bubble = Bubble(this).also { it.show() }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -41,6 +43,7 @@ class AgentService : AccessibilityService() {
     override fun onDestroy() {
         bridge?.stop()
         wake?.close()
+        bubble?.hide()
         instance = null
         super.onDestroy()
     }
@@ -274,6 +277,7 @@ class AgentService : AccessibilityService() {
     fun startTeaching(goal: String, rawTouches: Boolean = false): Boolean {
         if (goal.isBlank() || teacher != null || running) return false
         listenForTeaching(true)
+        bubble?.hide()
         teacher = Teacher(this, goal.trim(), rawTouches)
         return true
     }
@@ -285,6 +289,7 @@ class AgentService : AccessibilityService() {
     internal fun teachingEnded(message: String) {
         teacher = null
         listenForTeaching(false)
+        bubble?.show()
         toast(message)
     }
 

@@ -18,6 +18,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var goal: EditText
     private lateinit var listen: Switch
+    private lateinit var bubble: Switch
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,9 +71,17 @@ class MainActivity : Activity() {
             setPadding(48, 32, 48, 16)
             setOnClickListener { if (isChecked && !micGranted()) askMic() else WakeWord.setOn(this@MainActivity, isChecked) }
         }
+        bubble = Switch(this).apply {
+            text = "Show the Friday bubble over other apps"
+            setPadding(48, 16, 48, 16)
+            setOnClickListener {
+                Bubble.setOn(this@MainActivity, isChecked)
+                AgentService.instance?.bubble?.let { b -> if (isChecked) b.show() else b.hide() }
+            }
+        }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(status); addView(goal); addView(run); addView(teach); addView(wipe); addView(open); addView(listen)
+            addView(status); addView(goal); addView(run); addView(teach); addView(wipe); addView(open); addView(listen); addView(bubble)
         })
         // every launch (icon, "Hey Google, open Friday", Quick Tap, the wake word) opens ready to type; the
         // manifest's stateAlwaysVisible brings the keyboard up whenever this window gets focus
@@ -94,6 +103,7 @@ class MainActivity : Activity() {
         super.onResume()
         AgentService.instance?.prewarm() // load Laya while the owner types (~10 s), so Run doesn't wait for it
         listen.isChecked = WakeWord.isOn(this)
+        bubble.isChecked = Bubble.isOn(this)
         AgentService.instance?.wake?.update()  // picks up a mic grant made outside the app (setup_phone.py, Settings)
         status.text = if (AgentService.instance != null) {
             "Friday: ON\n\nType a goal below and tap Run — Laya decides on this phone and asks before each step."

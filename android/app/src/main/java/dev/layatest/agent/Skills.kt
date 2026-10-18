@@ -124,6 +124,18 @@ fun ruleSkill(request: String): String? {
     return skill
 }
 
+/**
+ * Screens an app opens straight to, by what the request asks for there. The Play Store's account menu, the way to
+ * its updates, isn't exposed to accessibility at all (2026-10-18), so neither Laya nor Teach could get there.
+ */
+private val DEEP_LINKS: List<Triple<String, Regex, String>> = listOf(
+    Triple("com.android.vending", Regex("\\b(updates?|update (my|all) apps|manage (my )?apps|my apps)\\b", RegexOption.IGNORE_CASE),
+        "com.google.android.finsky.VIEW_MY_DOWNLOADS"),
+)
+
+fun deepLink(pkg: String, request: String): Intent? =
+    DEEP_LINKS.firstOrNull { (p, re, _) -> p == pkg && re.containsMatchIn(request) }?.let { Intent(it.third).setPackage(pkg) }
+
 /** Money questions: when Laya reaches the screen, Friday reads the amounts out instead of saying "Done". */
 private val READ_SKILLS = setOf("spend_query", "balance_query", "bill_query")
 /** "last 10 transactions", "5 payments": how many to read. */
@@ -173,6 +185,8 @@ fun routingSelfCheck(): String {
     check(ruleSkill("open spotify") == "open_app")
     check(ruleSkill("open youtube and search for lofi music") == "open_app" && ruleSkill("search the web for weather") == "web_search")
     check(ruleSkill("open settings and show the battery page") == "open_app" && ruleSkill("how much battery is left") == "device_status")
+    check(deepLink("com.android.vending", "open the play store and show app updates") != null &&
+        deepLink("com.android.vending", "open the play store and search for whatsapp") == null)
     val t = listOf("Paid to", "Ravi Kumar", "₹250", "16 Oct").map { ScreenText(it, intArrayOf(0, 0, 1, 1)) }
     check(readAmounts(t) == "Ravi Kumar · ₹250 · 16 Oct")
     val promo = listOf("Personal loan", "Up to ₹40 lakh", "Check details", "Ravi Kumar", "₹250 debited", "16 October")
@@ -210,6 +224,10 @@ fun route(request: String, laya: () -> LayaEngine, ask: (String, List<String>) -
 class GenericSkill(override val id: String) : Skill {
     override fun run(ctx: SkillContext): String? {
         val app = if (id == "open_app") ctx.apps.named(ctx.request) else ctx.appFor(id)
+        // a screen the app opens straight to: no steps, and no menu Friday can't read
+        app?.let { a -> deepLink(a.pkg, ctx.request) }?.let { i ->
+            if (ctx.launch(i)) return "Here it is in ${app.label}"
+        }
         if (app != null) {
             ctx.say("Opening ${app.label}…")
             // a task in the app starts from its home screen: GPay reopened on the page the last run left, so the

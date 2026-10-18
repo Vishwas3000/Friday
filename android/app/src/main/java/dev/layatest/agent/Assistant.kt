@@ -50,6 +50,7 @@ class Assistant(private val svc: AgentService, override val request: String, pri
     /** Handle the request; returns what to tell the owner. Every request is logged with its timeline (D-045). */
     fun run(): String {
         val t0 = SystemClock.elapsedRealtime()
+        svc.bubble?.hide()
         val said = try {
             banner.say("Understanding…")
             val skill = route(request, { laya }) { q, options -> ask(q, options) }
@@ -64,6 +65,7 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         } finally {
             banner.remove()
             if (usedLaya) svc.layaIdle()
+            svc.bubble?.show()
         }
         // the request log (D-045): what was asked and said, how long it took, and the timeline; text only, no screens
         runCatching {
@@ -384,7 +386,10 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         for ((i, st) in route.steps.withIndex()) {
             if (stopped) return Outcome.STOPPED
             val t0 = SystemClock.elapsedRealtime()
-            val scr = screen()
+            var scr = screen()
+            // a remembered element can take a moment to appear: Amazon's You page loads after the tap, and the
+            // replay gave up 1.3 s in and handed a wrong "See all" to Laya (2026-10-18)
+            if (st.targeted && st.find(scr) == null) waitUntil(4000) { screen().also { scr = it }.let(st::find) != null }
             val target = if (!st.targeted) null else st.find(scr) ?: run {
                 trace += "memory step ${i + 1}: \"${st.label}\" isn't on this screen -> Laya"
                 return null
