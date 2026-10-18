@@ -173,7 +173,7 @@ typed request (or "Hey Friday" while charging)
 2. **Task card (D-051, research/23):** read each request once into one structured card (skill, app, about-words,
    query and slots, read or act, risk, done-check), used by every stage. Rules fill it; a small on-phone text LLM
    (the "Writer", LFM2.5-1.2B in llama.cpp, D-041, not built) fills it when rules can't.
-3. **App map + element ranker (ideation; prior-work review running as research/24):**
+3. **App map + element ranker (ideation; prior work in research/24):**
    - **The map:** learn each app's screens and what every element leads to, from the owner's own use, Friday's runs
      and safe exploration while charging. Plan paths on it with no model.
    - **The ranker:** a tiny learned model picks the likely elements on screens the map doesn't know.
@@ -205,6 +205,7 @@ typed request (or "Hey Friday" while charging)
   - 21 working prototypes
   - 22 training plan
   - 23 task card
+  - 24 app maps and exploration (prior art)
 - **Decisions:** D-016 load on demand, D-025/026 safety, D-033 Teach, D-040 memory, D-041 Writer, D-042 compute rule,
   D-046 no always-on mic, D-047 faster steps and the 8-bit model, D-048 learning loops, D-049 task suite and shortlist,
   D-050 fixes from failed requests, D-051 task card.

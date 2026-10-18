@@ -220,7 +220,7 @@ This section firms up several items 03 left [UNCERTAIN].
 | MacroDroid "UI Interaction"; Tasker AutoInput Actions v2 | point at one element; no multi-step recorder | text / view id / x,y | Tasker variables | yes | commercial | proprietary | [secondary] |
 | Klick'r (Smart AutoClicker) | scenario editor | image matching | no | yes | 3,680★ | GPL-3.0 | [primary] |
 | SUGILITE (also backs APPINITE, PUMICE, EPIDOSITE) | demonstration + voice | first unique feature: label → view id or child label → bbox | yes: spoken words matched to clicked labels; siblings kept as alternative values | scripts stored on the phone; speech and parser on servers | 63★; last push 2022-04 | none | [primary] |
-| GPTVoiceTasker (UIST'24) | screen graph built from use | path replayed by bounds | yes (LLM) | graph on the phone; GPT-4 by API | 13★; 2024-04 | none | [primary] |
+| GPTVoiceTasker (UIST'24) | screen graph built from its own runs (not the owner's ordinary use; research/24) | path replayed by bounds | yes (LLM) | graph on the phone; GPT-4 by API | 13★; 2024-04 | none | [primary] |
 
 **Results and notes** [primary unless tagged]:
 - **SUGILITE:** 65 of 76 user-made scripts (85.5%) ran.
