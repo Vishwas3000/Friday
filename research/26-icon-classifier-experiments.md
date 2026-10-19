@@ -179,6 +179,7 @@ The task suite (D-049) with icon names on vs off. No task may get worse. Then th
 ## 6. Results log
 | Exp | Config | Real top-1 | Renders top-1 | Threshold | Precision / coverage at it | Size | Parity | Time |
 |---|---|---|---|---|---|---|---|---|
+| **E0b (shipped)** | fixed data + E1's best (lr 0.0078, wd 0.092, smoothing 0.077, crop 0.82, blur 0.21), 40 epochs | **94.07%** | **98.58%** | **0.90** | **99.2% / 86%** on real; unseen "other" wrongly named **5.0%** | 6.53 MB | **7.7e-7** | 6.5 min |
 | E0 | §3.5, 40 epochs | **94.1%** | **98.1%** | **0.70** (shipped) | **98.3% / 92%** on real; renders 98.8% / 78%* | 6.53 MB | **1.0e-6** | 6.4 min (9.6 s/epoch) |
 
 \* About 20% of the render test set is "other", which is correctly left unnamed.
@@ -202,6 +203,27 @@ The task suite (D-049) with icon names on vs off. No task may get worse. Then th
   statistics, so PyTorch in train mode was compared with ONNX in eval mode. The ONNX file itself was right: 1.6e-6 on
   512 icons, the same top-1 on all. Fixed in `train.py`, which now also has `--eval-only`.
 - **E1 started** (Optuna, 12 trials): validation 6,545 images by unique image (56,017 unique).
+
+**E0b — the shipped model [measured, 2026-10-19]:**
+- **Data:** the fixed data (no named icons in "other"; 280 unseen-"other" test images).
+- **Settings:** E1's best.
+- **Accuracy:** real top-1 94.07% (E0 94.09%), renders 98.58% (E0 98.14%), ONNX parity 7.7e-7.
+- **The threshold trade-off**, now with icons from outside the list it never saw:
+
+  | threshold | 0.50 | 0.60 | 0.70 | 0.80 | 0.85 | **0.90** | 0.95 |
+  |---|---|---|---|---|---|---|---|
+  | real: named icons right | 97.0% | 97.6% | 98.0% | 98.6% | 98.8% | **99.2%** | 95.1% |
+  | real: icons named | 95.8% | 94.5% | 93.5% | 91.7% | 90.4% | **85.9%** | 3.4% |
+  | unseen "other": wrongly named | 17.1% | 14.6% | 12.5% | 9.6% | 8.2% | **5.0%** | 0.4% |
+
+- **The threshold decision is 0.90.**
+  - The rule "≥ 95% right over all three sets" alone would pick 0.19, but that names a quarter of the unseen icons
+    outside the list.
+  - On a phone, many unnamed icons are brand or app-specific (outside the list). A wrong name misleads Laya more than
+    none, so 0.90: 99.2% right, 86% of known icons named, 5% of unseen ones wrongly named.
+  - Above ~0.92 nothing is named, because label smoothing caps confidence.
+  - E4 re-sets the threshold on the owner's icons.
+- **On the phone:** pushed with threshold 0.90. E0 is kept in `models/icons/e0/` (git-ignored).
 
 **Independent review of the run-pack** (a separate agent, read only, 2026-10-19). Nothing blocked the run. Findings:
 1. **The parity check ran PyTorch in train mode.** Found and fixed above.

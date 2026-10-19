@@ -80,9 +80,14 @@ def main():
     ap.add_argument("--crop-min", type=float, default=0.7)
     ap.add_argument("--blur", type=float, default=0.2)
     ap.add_argument("--eval-only", action="store_true", help="skip training: threshold, export and checks from out/best.pt")
+    ap.add_argument("--subset", choices=["all", "real", "renders"], default="all", help="ablations A1/A2 (research/26 §4)")
     a = ap.parse_args()
     OUT.mkdir(exist_ok=True)
-    d = np.load("data/icons.npz")
+    d = dict(np.load("data/icons.npz"))
+    if a.subset != "all":  # UIST'18's 113,854 real crops come first in x_train (prepare.py), then the renders
+        n = int(d.get("n_real", 113854))
+        rows = slice(0, n) if a.subset == "real" else slice(n, None)
+        d["x_train"], d["y_train"] = d["x_train"][rows], d["y_train"][rows]
     meta = json.loads(Path("data/classes.json").read_text())
     classes, other = meta["classes"], meta["classes"].index("other")
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -126,7 +131,7 @@ def evaluate(model, d, meta, dev):
     model.load_state_dict(torch.load(OUT / "best.pt", map_location=dev))
     # the threshold: the lowest confidence at which named (non-"other") icons are >= 95% right over the real, render and
     # unseen-"other" test sets -- a name given to an icon from outside the list it never saw counts as wrong
-    has_other = "x_test_other" in d.files
+    has_other = "x_test_other" in d
     p = np.concatenate([predict(model, d["x_test_real"], dev), predict(model, d["x_test_render"], dev)] +
                        ([predict(model, d["x_test_other"], dev)] if has_other else []))
     y = np.concatenate([d["y_test_real"], d["y_test_render"]] + ([d["y_test_other"]] if has_other else []))
@@ -139,11 +144,11 @@ def evaluate(model, d, meta, dev):
             threshold = round(float(t), 2)
             break
     keep = named & (conf >= threshold)
-    real_n = len(d["y_test_real"])
+    real_n, rend_n = len(d["y_test_real"]), len(d["y_test_render"])  # the unseen-"other" predictions come after both
     per_class = {classes[c]: round(float((pred[:real_n][d["y_test_real"] == c] == c).mean()), 3)
                  for c in range(len(classes)) if (d["y_test_real"] == c).any()}
     metrics = {"real_top1": float((pred[:real_n] == d["y_test_real"]).mean()),
-               "render_top1": float((pred[real_n:] == d["y_test_render"]).mean()),
+               "render_top1": float((pred[real_n:real_n + rend_n] == d["y_test_render"]).mean()),
                "threshold": threshold, "precision_at_threshold": float((pred[keep] == y[keep]).mean()),
                "named_share_at_threshold": float(keep.mean()), "per_class_real": per_class}
     if has_other:  # how often an unseen icon from outside the list still gets a name
