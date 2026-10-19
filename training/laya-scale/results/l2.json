@@ -1,0 +1,1606 @@
+{
+ "F0_differs": 0,
+ "F0_diff_steps": [],
+ "variants": {
+  "L1": {
+   "metrics": {
+    "steps": 9987,
+    "op": 74.72,
+    "target": 65.41,
+    "groundable": 4756,
+    "coverage": 93.57,
+    "joint": 60.99,
+    "type": 76.75,
+    "grounding": 61.86,
+    "by_bucket": {
+     "0": {
+      "op": 77.32,
+      "steps": 97,
+      "target": null,
+      "clicks": 0
+     },
+     "1-5": {
+      "op": 69.72,
+      "steps": 1344,
+      "target": 84.1,
+      "clicks": 547
+     },
+     "6-10": {
+      "op": 70.46,
+      "steps": 1943,
+      "target": 67.56,
+      "clicks": 860
+     },
+     "11-20": {
+      "op": 77.34,
+      "steps": 4095,
+      "target": 66.52,
+      "clicks": 2025
+     },
+     "21-50": {
+      "op": 75.93,
+      "steps": 2385,
+      "target": 54.64,
+      "clicks": 1228
+     },
+     ">50": {
+      "op": 83.74,
+      "steps": 123,
+      "target": 54.17,
+      "clicks": 96
+     }
+    }
+   }
+  },
+  "F0": {
+   "metrics": {
+    "steps": 9987,
+    "op": 74.72,
+    "target": 65.41,
+    "groundable": 4756,
+    "coverage": 93.57,
+    "joint": 60.99,
+    "type": 76.75,
+    "grounding": 61.86,
+    "by_bucket": {
+     "0": {
+      "op": 77.32,
+      "steps": 97,
+      "target": null,
+      "clicks": 0
+     },
+     "1-5": {
+      "op": 69.72,
+      "steps": 1344,
+      "target": 84.1,
+      "clicks": 547
+     },
+     "6-10": {
+      "op": 70.46,
+      "steps": 1943,
+      "target": 67.56,
+      "clicks": 860
+     },
+     "11-20": {
+      "op": 77.34,
+      "steps": 4095,
+      "target": 66.52,
+      "clicks": 2025
+     },
+     "21-50": {
+      "op": 75.93,
+      "steps": 2385,
+      "target": 54.64,
+      "clicks": 1228
+     },
+     ">50": {
+      "op": 83.74,
+      "steps": 123,
+      "target": 54.17,
+      "clicks": 96
+     }
+    }
+   },
+   "fired": {
+    "steps": 0,
+    "steps_pct": 0.0,
+    "cands_added": 0,
+    "cands_removed": 0,
+    "cands_relabeled": 0,
+    "gold_option_changed": 0,
+    "gold_lost": 0,
+    "gold_gained": 0,
+    "icons_named": 0
+   },
+   "vs_L1": {
+    "op": {
+     "n": 9987,
+     "base": 74.72,
+     "variant": 74.72,
+     "worse": 0,
+     "better": 0,
+     "p": 1.0
+    },
+    "tgt": {
+     "n": 4756,
+     "base": 65.41,
+     "variant": 65.41,
+     "worse": 0,
+     "better": 0,
+     "p": 1.0
+    },
+    "hi": {
+     "n": 5074,
+     "base": 61.86,
+     "variant": 61.86,
+     "worse": 0,
+     "better": 0,
+     "p": 1.0
+    }
+   },
+   "vs_L1_target_where_fired": {
+    "n": 0,
+    "base": null,
+    "variant": null,
+    "worse": 0,
+    "better": 0,
+    "p": 1.0
+   },
+   "vs_L1_target_by_bucket": {
+    "1-5": {
+     "n": 547,
+     "base": 84.1,
+     "variant": 84.1,
+     "worse": 0,
+     "better": 0,
+     "p": 1.0
+    },
+    "6-10": {
+     "n": 860,
+     "base": 67.56,
+     "variant": 67.56,
+     "worse": 0,
+     "better": 0,
+     "p": 1.0
+    },
+    "11-20": {
+     "n": 2025,
+     "base": 66.52,
+     "variant": 66.52,
+     "worse": 0,
+     "better": 0,
+     "p": 1.0
+    },
+    "21-50": {
+     "n": 1228,
+     "base": 54.64,
+     "variant": 54.64,
+     "worse": 0,
+     "better": 0,
+     "p": 1.0
+    },
+    ">50": {
+     "n": 96,
+     "base": 54.17,
+     "variant": 54.17,
+     "worse": 0,
+     "better": 0,
+     "p": 1.0
+    }
+   }
+  },
+  "a_system": {
+   "metrics": {
+    "steps": 9987,
+    "op": 74.64,
+    "target": 65.54,
+    "groundable": 4742,
+    "coverage": 93.29,
+    "joint": 61.05,
+    "type": 76.68,
+    "grounding": 61.69,
+    "by_bucket": {
+     "0": {
+      "op": 77.32,
+      "steps": 97,
+      "target": null,
+      "clicks": 0
+     },
+     "1-5": {
+      "op": 69.57,
+      "steps": 1344,
+      "target": 84.54,
+      "clicks": 537
+     },
+     "6-10": {
+      "op": 70.36,
+      "steps": 1943,
+      "target": 67.64,
+      "clicks": 859
+     },
+     "11-20": {
+      "op": 77.29,
+      "steps": 4095,
+      "target": 66.77,
+      "clicks": 2022
+     },
+     "21-50": {
+      "op": 75.85,
+      "steps": 2385,
+      "target": 54.64,
+      "clicks": 1228
+     },
+     ">50": {
+      "op": 83.74,
+      "steps": 123,
+      "target": 54.17,
+      "clicks": 96
+     }
+    }
+   },
+   "fired": {
+    "steps": 178,
+    "steps_pct": 1.78,
+    "cands_added": 0,
+    "cands_removed": 416,
+    "cands_relabeled": 0,
+    "gold_option_changed": 1,
+    "gold_lost": 14,
+    "gold_gained": 0,
+    "icons_named": 0
+   },
+   "vs_L1": {
+    "op": {
+     "n": 9987,
+     "base": 74.72,
+     "variant": 74.64,
+     "worse": 13,
+     "better": 5,
+     "p": 0.0963
+    },
+    "tgt": {
+     "n": 4742,
+     "base": 65.44,
+     "variant": 65.54,
+     "worse": 2,
+     "better": 7,
+     "p": 0.1797
+    },
+    "hi": {
+     "n": 5074,
+     "base": 61.86,
+     "variant": 61.69,
+     "worse": 13,
+     "better": 4,
+     "p": 0.049
+    }
+   },
+   "vs_L1_target_where_fired": {
+    "n": 78,
+    "base": 62.82,
+    "variant": 69.23,
+    "worse": 2,
+    "better": 7,
+    "p": 0.1797
+   },
+   "vs_L1_target_by_bucket": {
+    "1-5": {
+     "n": 537,
+     "base": 84.54,
+     "variant": 84.54,
+     "worse": 0,
+     "better": 0,
+     "p": 1.0
+    },
+    "6-10": {
+     "n": 859,
+     "base": 67.64,
+     "variant": 67.64,
+     "worse": 0,
+     "better": 0,
+     "p": 1.0
+    },
+    "11-20": {
+     "n": 2022,
+     "base": 66.52,
+     "variant": 66.77,
+     "worse": 0,
+     "better": 5,
+     "p": 0.0625
+    },
+    "21-50": {
+     "n": 1228,
+     "base": 54.64,
+     "variant": 54.64,
+     "worse": 2,
+     "better": 2,
+     "p": 1.0
+    },
+    ">50": {
+     "n": 96,
+     "base": 54.17,
+     "variant": 54.17,
+     "worse": 0,
+     "better": 0,
+     "p": 1.0
+    }
+   }
+  },
+  "b_idlabel": {
+   "metrics": {
+    "steps": 9987,
+    "op": 74.52,
+    "target": 66.48,
+    "groundable": 4756,
+    "coverage": 93.57,
+    "joint": 61.23,
+    "type": 76.61,
+    "grounding": 62.79,
+    "by_bucket": {
+     "0": {
+      "op": 77.32,
+      "steps": 97,
+      "target": null,
+      "clicks": 0
+     },
+     "1-5": {
+      "op": 69.2,
+      "steps": 1344,
+      "target": 84.1,
+      "clicks": 547
+     },
+     "6-10": {
+      "op": 70.46,
+      "steps": 1943,
+      "target": 69.3,
+      "clicks": 860
+     },
+     "11-20": {
+      "op": 77.14,
+      "steps": 4095,
+      "target": 67.95,
+      "clicks": 2025
+     },
+     "21-50": {
+      "op": 75.89,
+      "steps": 2385,
+      "target": 55.54,
+      "clicks": 1228
+     },
+     ">50": {
+      "op": 80.49,
+      "steps": 123,
+      "target": 50.0,
+      "clicks": 96
+     }
+    }
+   },
+   "fired": {
+    "steps": 4070,
+    "steps_pct": 40.75,
+    "cands_added": 0,
+    "cands_removed": 0,
+    "cands_relabeled": 15204,
+    "gold_option_changed": 362,
+    "gold_lost": 0,
+    "gold_gained": 0,
+    "icons_named": 0
+   },
+   "vs_L1": {
+    "op": {
+     "n": 9987,
+     "base": 74.72,
+     "variant": 74.52,
+     "worse": 121,
+     "better": 101,
+     "p": 0.2021
+    },
+    "tgt": {
+     "n": 4756,
+     "base": 65.41,
+     "variant": 66.48,
+     "worse": 74,
+     "better": 125,
+     "p": 0.0004
+    },
+    "hi": {
+     "n": 5074,
+     "base": 61.86,
+     "variant": 62.79,
+     "worse": 66,
+     "better": 113,
+     "p": 0.0005
+    }
+   },
+   "vs_L1_target_where_fired": {
+    "n": 2014,
+    "base": 58.64,
+    "variant": 61.17,
+    "worse": 72,
+    "better": 123,
+    "p": 0.0003
+   },
+   "vs_L1_target_by_bucket": {
+    "1-5": {
+     "n": 547,
+     "base": 84.1,
+     "variant": 84.1,
+     "worse": 9,
+     "better": 9,
+     "p": 1.0
+    },
+    "6-10": {
+     "n": 860,
+     "base": 67.56,
+     "variant": 69.3,
+     "worse": 8,
+     "better": 23,
+     "p": 0.0107
+    },
+    "11-20": {
+     "n": 2025,
+     "base": 66.52,
+     "variant": 67.95,
+     "worse": 25,
+     "better": 54,
+     "p": 0.0015
+    },
+    "21-50": {
+     "n": 1228,
+     "base": 54.64,
+     "variant": 55.54,
+     "worse": 27,
+     "better": 38,
+     "p": 0.2145
+    },
+    ">50": {
+     "n": 96,
+     "base": 54.17,
+     "variant": 50.0,
+     "worse": 5,
+     "better": 1,
+     "p": 0.2188
+    }
+   }
+  },
+  "c_loose": {
+   "metrics": {
+    "steps": 9987,
+    "op": 73.97,
+    "target": 63.66,
+    "groundable": 4780,
+    "coverage": 94.04,
+    "joint": 59.37,
+    "type": 75.86,
+    "grounding": 60.54,
+    "by_bucket": {
+     "0": {
+      "op": 50.52,
+      "steps": 97,
+      "target": 100.0,
+      "clicks": 7
+     },
+     "1-5": {
+      "op": 67.49,
+      "steps": 1344,
+      "target": 75.45,
+      "clicks": 550
+     },
+     "6-10": {
+      "op": 69.69,
+      "steps": 1943,
+      "target": 65.37,
+      "clicks": 872
+     },
+     "11-20": {
+      "op": 77.17,
+      "steps": 4095,
+      "target": 65.61,
+      "clicks": 2027
+     },
+     "21-50": {
+      "op": 76.06,
+      "steps": 2385,
+      "target": 54.48,
+      "clicks": 1228
+     },
+     ">50": {
+      "op": 83.74,
+      "steps": 123,
+      "target": 54.17,
+      "clicks": 96
+     }
+    }
+   },
+   "fired": {
+    "steps": 1663,
+    "steps_pct": 16.65,
+    "cands_added": 35287,
+    "cands_removed": 0,
+    "cands_relabeled": 0,
+    "gold_option_changed": 1,
+    "gold_lost": 0,
+    "gold_gained": 24,
+    "icons_named": 0
+   },
+   "vs_L1": {
+    "op": {
+     "n": 9987,
+     "base": 74.72,
+     "variant": 73.97,
+     "worse": 177,
+     "better": 102,
+     "p": 0.0
+    },
+    "tgt": {
+     "n": 4756,
+     "base": 65.41,
+     "variant": 63.62,
+     "worse": 103,
+     "better": 18,
+     "p": 0.0
+    },
+    "hi": {
+     "n": 5074,
+     "base": 61.86,
+     "variant": 60.54,
+     "worse": 100,
+     "better": 33,
+     "p": 0.0
+    }
+   },
+   "vs_L1_target_where_fired": {
+    "n": 701,
+    "base": 73.04,
+    "variant": 60.91,
+    "worse": 103,
+    "better": 18,
+    "p": 0.0
+   },
+   "vs_L1_target_by_bucket": {
+    "1-5": {
+     "n": 547,
+     "base": 84.1,
+     "variant": 75.69,
+     "worse": 52,
+     "better": 6,
+     "p": 0.0
+    },
+    "6-10": {
+     "n": 860,
+     "base": 67.56,
+     "variant": 65.23,
+     "worse": 23,
+     "better": 3,
+     "p": 0.0001
+    },
+    "11-20": {
+     "n": 2025,
+     "base": 66.52,
+     "variant": 65.68,
+     "worse": 24,
+     "better": 7,
+     "p": 0.0033
+    },
+    "21-50": {
+     "n": 1228,
+     "base": 54.64,
+     "variant": 54.48,
+     "worse": 4,
+     "better": 2,
+     "p": 0.6875
+    },
+    ">50": {
+     "n": 96,
+     "base": 54.17,
+     "variant": 54.17,
+     "worse": 0,
+     "better": 0,
+     "p": 1.0
+    }
+   }
+  },
+  "d_icons": {
+   "metrics": {
+    "steps": 9987,
+    "op": 74.81,
+    "target": 66.13,
+    "groundable": 4756,
+    "coverage": 93.57,
+    "joint": 61.47,
+    "type": 76.72,
+    "grounding": 62.04,
+    "by_bucket": {
+     "0": {
+      "op": 77.32,
+      "steps": 97,
+      "target": null,
+      "clicks": 0
+     },
+     "1-5": {
+      "op": 70.01,
+      "steps": 1344,
+      "target": 84.1,
+      "clicks": 547
+     },
+     "6-10": {
+      "op": 70.97,
+      "steps": 1943,
+      "target": 69.19,
+      "clicks": 860
+     },
+     "11-20": {
+      "op": 77.46,
+      "steps": 4095,
+      "target": 67.16,
+      "clicks": 2025
+     },
+     "21-50": {
+      "op": 75.56,
+      "steps": 2385,
+      "target": 55.29,
+      "clicks": 1228
+     },
+     ">50": {
+      "op": 82.93,
+      "steps": 123,
+      "target": 53.12,
+      "clicks": 96
+     }
+    }
+   },
+   "fired": {
+    "steps": 3458,
+    "steps_pct": 34.63,
+    "cands_added": 0,
+    "cands_removed": 0,
+    "cands_relabeled": 8484,
+    "gold_option_changed": 205,
+    "gold_lost": 0,
+    "gold_gained": 0,
+    "icons_named": 8484
+   },
+   "vs_L1": {
+    "op": {
+     "n": 9987,
+     "base": 74.72,
+     "variant": 74.81,
+     "worse": 80,
+     "better": 89,
+     "p": 0.5384
+    },
+    "tgt": {
+     "n": 4756,
+     "base": 65.41,
+     "variant": 66.13,
+     "worse": 55,
+     "better": 89,
+     "p": 0.0058
+    },
+    "hi": {
+     "n": 5074,
+     "base": 61.86,
+     "variant": 62.04,
+     "worse": 58,
+     "better": 67,
+     "p": 0.4744
+    }
+   },
+   "vs_L1_target_where_fired": {
+    "n": 1615,
+    "base": 53.87,
+    "variant": 56.16,
+    "worse": 51,
+    "better": 88,
+    "p": 0.0021
+   },
+   "vs_L1_target_by_bucket": {
+    "1-5": {
+     "n": 547,
+     "base": 84.1,
+     "variant": 84.1,
+     "worse": 6,
+     "better": 6,
+     "p": 1.0
+    },
+    "6-10": {
+     "n": 860,
+     "base": 67.56,
+     "variant": 69.19,
+     "worse": 8,
+     "better": 22,
+     "p": 0.0161
+    },
+    "11-20": {
+     "n": 2025,
+     "base": 66.52,
+     "variant": 67.16,
+     "worse": 24,
+     "better": 37,
+     "p": 0.1237
+    },
+    "21-50": {
+     "n": 1228,
+     "base": 54.64,
+     "variant": 55.29,
+     "worse": 16,
+     "better": 24,
+     "p": 0.2682
+    },
+    ">50": {
+     "n": 96,
+     "base": 54.17,
+     "variant": 53.12,
+     "worse": 1,
+     "better": 0,
+     "p": 1.0
+    }
+   }
+  },
+  "all": {
+   "metrics": {
+    "steps": 9987,
+    "op": 74.3,
+    "target": 66.58,
+    "groundable": 4761,
+    "coverage": 93.67,
+    "joint": 61.14,
+    "type": 76.5,
+    "grounding": 62.69,
+    "by_bucket": {
+     "0": {
+      "op": 75.26,
+      "steps": 97,
+      "target": 100.0,
+      "clicks": 7
+     },
+     "1-5": {
+      "op": 68.68,
+      "steps": 1344,
+      "target": 84.2,
+      "clicks": 538
+     },
+     "6-10": {
+      "op": 70.51,
+      "steps": 1943,
+      "target": 69.43,
+      "clicks": 870
+     },
+     "11-20": {
+      "op": 76.92,
+      "steps": 4095,
+      "target": 68.15,
+      "clicks": 2022
+     },
+     "21-50": {
+      "op": 75.68,
+      "steps": 2385,
+      "target": 55.46,
+      "clicks": 1228
+     },
+     ">50": {
+      "op": 80.49,
+      "steps": 123,
+      "target": 48.96,
+      "clicks": 96
+     }
+    }
+   },
+   "fired": {
+    "steps": 5102,
+    "steps_pct": 51.09,
+    "cands_added": 1046,
+    "cands_removed": 416,
+    "cands_relabeled": 17040,
+    "gold_option_changed": 400,
+    "gold_lost": 14,
+    "gold_gained": 19,
+    "icons_named": 2186
+   },
+   "vs_L1": {
+    "op": {
+     "n": 9987,
+     "base": 74.72,
+     "variant": 74.3,
+     "worse": 165,
+     "better": 123,
+     "p": 0.0155
+    },
+    "tgt": {
+     "n": 4742,
+     "base": 65.44,
+     "variant": 66.6,
+     "worse": 89,
+     "better": 144,
+     "p": 0.0004
+    },
+    "hi": {
+     "n": 5074,
+     "base": 61.86,
+     "variant": 62.69,
+     "worse": 91,
+     "better": 133,
+     "p": 0.006
+    }
+   },
+   "vs_L1_target_where_fired": {
+    "n": 2401,
+    "base": 59.48,
+    "variant": 61.68,
+    "worse": 88,
+    "better": 141,
+    "p": 0.0006
+   },
+   "vs_L1_target_by_bucket": {
+    "1-5": {
+     "n": 537,
+     "base": 84.54,
+     "variant": 84.36,
+     "worse": 13,
+     "better": 12,
+     "p": 1.0
+    },
+    "6-10": {
+     "n": 859,
+     "base": 67.64,
+     "variant": 69.73,
+     "worse": 12,
+     "better": 30,
+     "p": 0.0079
+    },
+    "11-20": {
+     "n": 2022,
+     "base": 66.52,
+     "variant": 68.15,
+     "worse": 29,
+     "better": 62,
+     "p": 0.0007
+    },
+    "21-50": {
+     "n": 1228,
+     "base": 54.64,
+     "variant": 55.46,
+     "worse": 29,
+     "better": 39,
+     "p": 0.275
+    },
+    ">50": {
+     "n": 96,
+     "base": 54.17,
+     "variant": 48.96,
+     "worse": 6,
+     "better": 1,
+     "p": 0.125
+    }
+   }
+  },
+  "all-a": {
+   "metrics": {
+    "steps": 9987,
+    "op": 73.68,
+    "target": 64.75,
+    "groundable": 4780,
+    "coverage": 94.04,
+    "joint": 59.58,
+    "type": 75.65,
+    "grounding": 61.47,
+    "by_bucket": {
+     "0": {
+      "op": 51.55,
+      "steps": 97,
+      "target": 100.0,
+      "clicks": 7
+     },
+     "1-5": {
+      "op": 66.82,
+      "steps": 1344,
+      "target": 76.0,
+      "clicks": 550
+     },
+     "6-10": {
+      "op": 69.84,
+      "steps": 1943,
+      "target": 67.43,
+      "clicks": 872
+     },
+     "11-20": {
+      "op": 76.8,
+      "steps": 4095,
+      "target": 66.95,
+      "clicks": 2027
+     },
+     "21-50": {
+      "op": 75.85,
+      "steps": 2385,
+      "target": 55.21,
+      "clicks": 1228
+     },
+     ">50": {
+      "op": 80.49,
+      "steps": 123,
+      "target": 48.96,
+      "clicks": 96
+     }
+    }
+   },
+   "fired": {
+    "steps": 5934,
+    "steps_pct": 59.42,
+    "cands_added": 35287,
+    "cands_removed": 0,
+    "cands_relabeled": 16034,
+    "gold_option_changed": 400,
+    "gold_lost": 0,
+    "gold_gained": 24,
+    "icons_named": 2189
+   },
+   "vs_L1": {
+    "op": {
+     "n": 9987,
+     "base": 74.72,
+     "variant": 73.68,
+     "worse": 299,
+     "better": 195,
+     "p": 0.0
+    },
+    "tgt": {
+     "n": 4756,
+     "base": 65.41,
+     "variant": 64.72,
+     "worse": 177,
+     "better": 144,
+     "p": 0.0739
+    },
+    "hi": {
+     "n": 5074,
+     "base": 61.86,
+     "variant": 61.47,
+     "worse": 163,
+     "better": 143,
+     "p": 0.2774
+    }
+   },
+   "vs_L1_target_where_fired": {
+    "n": 2784,
+    "base": 62.46,
+    "variant": 61.28,
+    "worse": 176,
+    "better": 143,
+    "p": 0.073
+   },
+   "vs_L1_target_by_bucket": {
+    "1-5": {
+     "n": 547,
+     "base": 84.1,
+     "variant": 76.23,
+     "worse": 51,
+     "better": 8,
+     "p": 0.0
+    },
+    "6-10": {
+     "n": 860,
+     "base": 67.56,
+     "variant": 67.33,
+     "worse": 34,
+     "better": 32,
+     "p": 0.9022
+    },
+    "11-20": {
+     "n": 2025,
+     "base": 66.52,
+     "variant": 67.01,
+     "worse": 54,
+     "better": 64,
+     "p": 0.4075
+    },
+    "21-50": {
+     "n": 1228,
+     "base": 54.64,
+     "variant": 55.21,
+     "worse": 32,
+     "better": 39,
+     "p": 0.4767
+    },
+    ">50": {
+     "n": 96,
+     "base": 54.17,
+     "variant": 48.96,
+     "worse": 6,
+     "better": 1,
+     "p": 0.125
+    }
+   },
+   "adding_it_back": {
+    "fired": {
+     "steps": 1790,
+     "steps_pct": 17.92,
+     "cands_added": 0,
+     "cands_removed": 34657,
+     "cands_relabeled": 163,
+     "gold_option_changed": 2,
+     "gold_lost": 22,
+     "gold_gained": 3,
+     "icons_named": 2186
+    },
+    "op": {
+     "n": 9987,
+     "base": 73.68,
+     "variant": 74.3,
+     "worse": 101,
+     "better": 163,
+     "p": 0.0002
+    },
+    "tgt": {
+     "n": 4758,
+     "base": 64.88,
+     "variant": 66.62,
+     "worse": 23,
+     "better": 106,
+     "p": 0.0
+    },
+    "hi": {
+     "n": 5074,
+     "base": 61.47,
+     "variant": 62.69,
+     "worse": 36,
+     "better": 98,
+     "p": 0.0
+    },
+    "tgt_where_fired": {
+     "n": 772,
+     "base": 61.66,
+     "variant": 72.41,
+     "worse": 23,
+     "better": 106,
+     "p": 0.0
+    }
+   }
+  },
+  "all-b": {
+   "metrics": {
+    "steps": 9987,
+    "op": 74.74,
+    "target": 66.14,
+    "groundable": 4761,
+    "coverage": 93.67,
+    "joint": 61.39,
+    "type": 76.68,
+    "grounding": 61.9,
+    "by_bucket": {
+     "0": {
+      "op": 75.26,
+      "steps": 97,
+      "target": 100.0,
+      "clicks": 7
+     },
+     "1-5": {
+      "op": 69.87,
+      "steps": 1344,
+      "target": 83.46,
+      "clicks": 538
+     },
+     "6-10": {
+      "op": 70.92,
+      "steps": 1943,
+      "target": 68.85,
+      "clicks": 870
+     },
+     "11-20": {
+      "op": 77.44,
+      "steps": 4095,
+      "target": 67.46,
+      "clicks": 2022
+     },
+     "21-50": {
+      "op": 75.51,
+      "steps": 2385,
+      "target": 55.29,
+      "clicks": 1228
+     },
+     ">50": {
+      "op": 82.93,
+      "steps": 123,
+      "target": 53.12,
+      "clicks": 96
+     }
+    }
+   },
+   "fired": {
+    "steps": 3696,
+    "steps_pct": 37.01,
+    "cands_added": 1046,
+    "cands_removed": 416,
+    "cands_relabeled": 8343,
+    "gold_option_changed": 206,
+    "gold_lost": 14,
+    "gold_gained": 19,
+    "icons_named": 8481
+   },
+   "vs_L1": {
+    "op": {
+     "n": 9987,
+     "base": 74.72,
+     "variant": 74.74,
+     "worse": 104,
+     "better": 106,
+     "p": 0.945
+    },
+    "tgt": {
+     "n": 4742,
+     "base": 65.44,
+     "variant": 66.15,
+     "worse": 61,
+     "better": 95,
+     "p": 0.008
+    },
+    "hi": {
+     "n": 5074,
+     "base": 61.86,
+     "variant": 61.9,
+     "worse": 75,
+     "better": 77,
+     "p": 0.9354
+    }
+   },
+   "vs_L1_target_where_fired": {
+    "n": 1689,
+    "base": 54.71,
+    "variant": 56.9,
+    "worse": 57,
+    "better": 94,
+    "p": 0.0033
+   },
+   "vs_L1_target_by_bucket": {
+    "1-5": {
+     "n": 537,
+     "base": 84.54,
+     "variant": 83.61,
+     "worse": 11,
+     "better": 6,
+     "p": 0.3323
+    },
+    "6-10": {
+     "n": 859,
+     "base": 67.64,
+     "variant": 69.15,
+     "worse": 9,
+     "better": 22,
+     "p": 0.0294
+    },
+    "11-20": {
+     "n": 2022,
+     "base": 66.52,
+     "variant": 67.46,
+     "worse": 23,
+     "better": 42,
+     "p": 0.0248
+    },
+    "21-50": {
+     "n": 1228,
+     "base": 54.64,
+     "variant": 55.29,
+     "worse": 17,
+     "better": 25,
+     "p": 0.28
+    },
+    ">50": {
+     "n": 96,
+     "base": 54.17,
+     "variant": 53.12,
+     "worse": 1,
+     "better": 0,
+     "p": 1.0
+    }
+   },
+   "adding_it_back": {
+    "fired": {
+     "steps": 3952,
+     "steps_pct": 39.57,
+     "cands_added": 0,
+     "cands_removed": 0,
+     "cands_relabeled": 13905,
+     "gold_option_changed": 316,
+     "gold_lost": 0,
+     "gold_gained": 0,
+     "icons_named": 2186
+    },
+    "op": {
+     "n": 9987,
+     "base": 74.74,
+     "variant": 74.3,
+     "worse": 117,
+     "better": 73,
+     "p": 0.0017
+    },
+    "tgt": {
+     "n": 4761,
+     "base": 66.14,
+     "variant": 66.58,
+     "worse": 79,
+     "better": 100,
+     "p": 0.1347
+    },
+    "hi": {
+     "n": 5074,
+     "base": 61.9,
+     "variant": 62.69,
+     "worse": 58,
+     "better": 98,
+     "p": 0.0017
+    },
+    "tgt_where_fired": {
+     "n": 1955,
+     "base": 60.36,
+     "variant": 61.23,
+     "worse": 79,
+     "better": 96,
+     "p": 0.2264
+    }
+   }
+  },
+  "all-c": {
+   "metrics": {
+    "steps": 9987,
+    "op": 74.36,
+    "target": 66.72,
+    "groundable": 4742,
+    "coverage": 93.29,
+    "joint": 61.33,
+    "type": 76.48,
+    "grounding": 62.57,
+    "by_bucket": {
+     "0": {
+      "op": 77.32,
+      "steps": 97,
+      "target": null,
+      "clicks": 0
+     },
+     "1-5": {
+      "op": 69.05,
+      "steps": 1344,
+      "target": 85.29,
+      "clicks": 537
+     },
+     "6-10": {
+      "op": 70.41,
+      "steps": 1943,
+      "target": 69.97,
+      "clicks": 859
+     },
+     "11-20": {
+      "op": 76.95,
+      "steps": 4095,
+      "target": 68.1,
+      "clicks": 2022
+     },
+     "21-50": {
+      "op": 75.68,
+      "steps": 2385,
+      "target": 55.46,
+      "clicks": 1228
+     },
+     ">50": {
+      "op": 80.49,
+      "steps": 123,
+      "target": 48.96,
+      "clicks": 96
+     }
+    }
+   },
+   "fired": {
+    "steps": 4990,
+    "steps_pct": 49.96,
+    "cands_added": 0,
+    "cands_removed": 416,
+    "cands_relabeled": 17055,
+    "gold_option_changed": 400,
+    "gold_lost": 14,
+    "gold_gained": 0,
+    "icons_named": 2186
+   },
+   "vs_L1": {
+    "op": {
+     "n": 9987,
+     "base": 74.72,
+     "variant": 74.36,
+     "worse": 149,
+     "better": 113,
+     "p": 0.0304
+    },
+    "tgt": {
+     "n": 4742,
+     "base": 65.44,
+     "variant": 66.72,
+     "worse": 82,
+     "better": 143,
+     "p": 0.0001
+    },
+    "hi": {
+     "n": 5074,
+     "base": 61.86,
+     "variant": 62.57,
+     "worse": 87,
+     "better": 123,
+     "p": 0.0155
+    }
+   },
+   "vs_L1_target_where_fired": {
+    "n": 2379,
+    "base": 59.18,
+    "variant": 61.66,
+    "worse": 81,
+    "better": 140,
+    "p": 0.0001
+   },
+   "vs_L1_target_by_bucket": {
+    "1-5": {
+     "n": 537,
+     "base": 84.54,
+     "variant": 85.29,
+     "worse": 8,
+     "better": 12,
+     "p": 0.5034
+    },
+    "6-10": {
+     "n": 859,
+     "base": 67.64,
+     "variant": 69.97,
+     "worse": 10,
+     "better": 30,
+     "p": 0.0022
+    },
+    "11-20": {
+     "n": 2022,
+     "base": 66.52,
+     "variant": 68.1,
+     "worse": 29,
+     "better": 61,
+     "p": 0.001
+    },
+    "21-50": {
+     "n": 1228,
+     "base": 54.64,
+     "variant": 55.46,
+     "worse": 29,
+     "better": 39,
+     "p": 0.275
+    },
+    ">50": {
+     "n": 96,
+     "base": 54.17,
+     "variant": 48.96,
+     "worse": 6,
+     "better": 1,
+     "p": 0.125
+    }
+   },
+   "adding_it_back": {
+    "fired": {
+     "steps": 125,
+     "steps_pct": 1.25,
+     "cands_added": 1046,
+     "cands_removed": 0,
+     "cands_relabeled": 0,
+     "gold_option_changed": 0,
+     "gold_lost": 0,
+     "gold_gained": 19,
+     "icons_named": 2186
+    },
+    "op": {
+     "n": 9987,
+     "base": 74.36,
+     "variant": 74.3,
+     "worse": 18,
+     "better": 12,
+     "p": 0.3616
+    },
+    "tgt": {
+     "n": 4742,
+     "base": 66.72,
+     "variant": 66.6,
+     "worse": 7,
+     "better": 1,
+     "p": 0.0703
+    },
+    "hi": {
+     "n": 5074,
+     "base": 62.57,
+     "variant": 62.69,
+     "worse": 4,
+     "better": 10,
+     "p": 0.1796
+    },
+    "tgt_where_fired": {
+     "n": 25,
+     "base": 92.0,
+     "variant": 64.0,
+     "worse": 7,
+     "better": 0,
+     "p": 0.0156
+    }
+   }
+  },
+  "all-d": {
+   "metrics": {
+    "steps": 9987,
+    "op": 74.34,
+    "target": 66.48,
+    "groundable": 4761,
+    "coverage": 93.67,
+    "joint": 61.06,
+    "type": 76.54,
+    "grounding": 62.61,
+    "by_bucket": {
+     "0": {
+      "op": 75.26,
+      "steps": 97,
+      "target": 100.0,
+      "clicks": 7
+     },
+     "1-5": {
+      "op": 68.68,
+      "steps": 1344,
+      "target": 83.64,
+      "clicks": 538
+     },
+     "6-10": {
+      "op": 70.36,
+      "steps": 1943,
+      "target": 68.97,
+      "clicks": 870
+     },
+     "11-20": {
+      "op": 77.05,
+      "steps": 4095,
+      "target": 68.15,
+      "clicks": 2022
+     },
+     "21-50": {
+      "op": 75.77,
+      "steps": 2385,
+      "target": 55.54,
+      "clicks": 1228
+     },
+     ">50": {
+      "op": 80.49,
+      "steps": 123,
+      "target": 50.0,
+      "clicks": 96
+     }
+    }
+   },
+   "fired": {
+    "steps": 4286,
+    "steps_pct": 42.92,
+    "cands_added": 1046,
+    "cands_removed": 416,
+    "cands_relabeled": 14880,
+    "gold_option_changed": 363,
+    "gold_lost": 14,
+    "gold_gained": 19,
+    "icons_named": 0
+   },
+   "vs_L1": {
+    "op": {
+     "n": 9987,
+     "base": 74.72,
+     "variant": 74.34,
+     "worse": 150,
+     "better": 112,
+     "p": 0.0221
+    },
+    "tgt": {
+     "n": 4742,
+     "base": 65.44,
+     "variant": 66.49,
+     "worse": 79,
+     "better": 129,
+     "p": 0.0006
+    },
+    "hi": {
+     "n": 5074,
+     "base": 61.86,
+     "variant": 62.61,
+     "worse": 83,
+     "better": 121,
+     "p": 0.0094
+    }
+   },
+   "vs_L1_target_where_fired": {
+    "n": 2078,
+    "base": 59.29,
+    "variant": 61.65,
+    "worse": 78,
+    "better": 127,
+    "p": 0.0008
+   },
+   "vs_L1_target_by_bucket": {
+    "1-5": {
+     "n": 537,
+     "base": 84.54,
+     "variant": 83.8,
+     "worse": 13,
+     "better": 9,
+     "p": 0.5235
+    },
+    "6-10": {
+     "n": 859,
+     "base": 67.64,
+     "variant": 69.27,
+     "worse": 9,
+     "better": 23,
+     "p": 0.0201
+    },
+    "11-20": {
+     "n": 2022,
+     "base": 66.52,
+     "variant": 68.15,
+     "worse": 24,
+     "better": 57,
+     "p": 0.0003
+    },
+    "21-50": {
+     "n": 1228,
+     "base": 54.64,
+     "variant": 55.54,
+     "worse": 28,
+     "better": 39,
+     "p": 0.2215
+    },
+    ">50": {
+     "n": 96,
+     "base": 54.17,
+     "variant": 50.0,
+     "worse": 5,
+     "better": 1,
+     "p": 0.2188
+    }
+   },
+   "adding_it_back": {
+    "fired": {
+     "steps": 1197,
+     "steps_pct": 11.99,
+     "cands_added": 0,
+     "cands_removed": 0,
+     "cands_relabeled": 2186,
+     "gold_option_changed": 37,
+     "gold_lost": 0,
+     "gold_gained": 0,
+     "icons_named": 2186
+    },
+    "op": {
+     "n": 9987,
+     "base": 74.34,
+     "variant": 74.3,
+     "worse": 21,
+     "better": 17,
+     "p": 0.6271
+    },
+    "tgt": {
+     "n": 4761,
+     "base": 66.48,
+     "variant": 66.58,
+     "worse": 13,
+     "better": 18,
+     "p": 0.4731
+    },
+    "hi": {
+     "n": 5074,
+     "base": 62.61,
+     "variant": 62.69,
+     "worse": 11,
+     "better": 15,
+     "p": 0.5572
+    },
+    "tgt_where_fired": {
+     "n": 500,
+     "base": 59.2,
+     "variant": 60.0,
+     "worse": 13,
+     "better": 17,
+     "p": 0.5847
+    }
+   }
+  }
+ }
+}

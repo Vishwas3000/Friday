@@ -31,12 +31,11 @@ import laya_android as F  # noqa: E402  (Friday's builder: a copy of the Mac rep
 import serialization as S  # noqa: E402
 from evaluate_android_control import evaluate_android_control_action  # noqa: E402  (InfiGUI-R1 judge, unmodified)
 from evaluate_androidcontrol import to_reference  # noqa: E402
-from ac_data import is_icon  # noqa: E402  (IconNamer.isIcon)
+from ac_data import ICON_THRESHOLD, friday_nodes, icon_words, is_icon  # noqa: E402
 
 OUT = ROOT + "/results"
 PREDS = ROOT + "/ac/preds"
 CLICKS = ("CLICK", "LONG_PRESS")
-BOOLS = ("clickable", "long_clickable", "editable", "scrollable", "checkable", "checked", "selected", "enabled", "visible")
 VARIANTS = {  # Friday's builder switches (scripts/laya_android.py build_candidates) + icon names
     "F0": dict(system=False, ids=False, loose_text=False, icons=False),
     "a_system": dict(system=True, ids=False, loose_text=False, icons=False),
@@ -51,7 +50,6 @@ VARIANTS = {  # Friday's builder switches (scripts/laya_android.py build_candida
     "all-c": dict(system=True, ids=True, loose_text=False, icons=True),
     "all-d": dict(system=True, ids=True, loose_text=True, icons=False),
 }
-ICON_THRESHOLD = 0.90  # models/icons/labels.json, as shipped
 _model = None
 
 
@@ -72,26 +70,6 @@ def load_test():
             extra[(x["episode_id"], x["step"])] = x
     assert len(extra) == len(items), (len(extra), len(items))
     return items, extra
-
-
-def friday_nodes(nodes):
-    """The repo's flat forest nodes -> scripts/laya_android.py's node dicts: same order, children linked, IME and
-    TYPE_SYSTEM windows tagged."""
-    out = [{"text": n.get("text", ""), "content_desc": n.get("content_desc", ""), "hint": n.get("hint", ""),
-            **{f: n.get(f, False) for f in BOOLS}, "class": (n.get("class") or "").rsplit(".", 1)[-1],
-            "resource_id": (n.get("resource_id") or "").rsplit("/", 1)[-1],
-            "bounds": tuple(n.get("bounds", (0, 0, 0, 0))), "depth": n["depth"], "ime": n["window_type"] == 2,
-            "sys": n["window_type"] == 3, "children": []} for n in nodes]
-    by = {(n["window"], n.get("id")): f for n, f in zip(nodes, out)}
-    for n, f in zip(nodes, out):
-        f["children"] = [by[(n["window"], c)] for c in n["children"] if (n["window"], c) in by]
-    return out
-
-
-def icon_words():
-    lab = json.load(open(ROOT + "/icons/labels.json"))
-    assert lab["threshold"] == ICON_THRESHOLD
-    return [None if c == "other" else w for c, w in zip(lab["classes"], lab["words"])]
 
 
 def variant_items(items, extra, v, words):

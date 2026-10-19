@@ -8,7 +8,7 @@ own venv: no global installs, drivers, cron or shell changes. Results come back 
 |---|---|---|
 | GPU | any NVIDIA with ≥ 8 GB (3090, 4090, A5000…) | 24 GB (RTX 4090 or 3090) |
 | CPU / RAM | ≥ 8 vCPU / ≥ 32 GB | same |
-| Disk | 40 GB | **120 GB** (AndroidControl alone is ~50 GB, research/14) |
+| Disk | 40 GB | 40 GB is enough when AndroidControl is streamed (research/27 does); 120 GB to keep the raw shards |
 | Image | Vast's PyTorch template (CUDA 12.x), launch mode **SSH** | same |
 | Type | interruptible is fine (~30 min job) | on-demand (multi-hour jobs) |
 
@@ -30,8 +30,39 @@ own venv: no global installs, drivers, cron or shell changes. Results come back 
 (max diff < 1e-4), and the file must be ≤ 10 MB. Then it gets wired into Friday (crop unnamed icons outside money apps,
 classify, cache) and checked on the owner's apps and the task suite before Laya sees its names.
 
-## Later jobs (same machine if it has 120 GB)
-- **Laya fine-tune pilots** (research/14 data + research/15 method): AndroidControl download and processing (~50 GB,
-  20–60 min CPU), baselines, pilots A/B (~3–7 min each, 8–12 GB VRAM). The run-pack is in the session scratchpad
-  (`gpu_runpack/`); it moves into `training/laya/` when it runs.
-- **Custom "Hey Friday" model** (research/16 §4.5): synthetic speech plus openWakeWord training, ~1–2 h.
+## Job 2: Laya at scale on AndroidControl (research/27, D-056), `training/laya-scale/`
+| Step | What runs | Time |
+|---|---|---|
+| 1. Copy | `training/laya-scale/*.py` and `scripts/laya_android.py` → `/root/friday-laya/laya/`; `models/icons/{icons.onnx,labels.json}` → `/root/friday-laya/laya/icons/` | 1 min |
+| 2. Setup | `bash setup.sh`: clones laya-android at `ab216d4`; venv with torch 2.14.1 cu126, laya 0.3.28, transformers 4.57.6, onnxruntime 1.31.0 | 5 min |
+| 3. Data (L0) | `python ac_data.py --workers 10`: streams AndroidControl's 20 shards over HTTPS (no raw shard on disk). Writes the repo-format items, test forests with icon names, `data/ac_{train,val,test}.jsonl` and `data/READY` | ~5 min |
+| 4. Evaluate | `python ac_eval.py l1` (must reproduce Type 76.66 / Grounding 61.71 within ~1 point), then `l2`, `l3`, `l3op` → `results/*.json` (copies in `training/laya-scale/results/`) | ~1.5 h on a shared GPU |
+| 5. Friday-format rows | `CUDA_VISIBLE_DEVICES= python friday_data.py --workers 20`, then `--check` → `data/friday_{train,val,test}.jsonl` + `READY_FRIDAY` | ~30 min CPU |
+
+## Job 3: the student, a smaller Laya (research/28, D-056/D-058), `training/laya-student/`
+Needs Job 2's `data/READY` (it reads `/root/friday-laya/laya/data/`). The two jobs can share one GPU.
+
+| Step | What runs | Time |
+|---|---|---|
+| 1. Copy | `training/laya-student/*` → `/root/friday-laya/laya-student/`; `scripts/{export_onnx,speed_eval,laya_android}.py` → its `repo-scripts/`; optionally the phone's `models/laya-android.nb8-h-e16.onnx` → its `shipped/` (the contract check) and `models/fixture.json` → its folder | 2 min |
+| 2. Setup | `bash setup.sh`: clones laya at `4ac226d` (0.4.8, editable) and laya-android at `ab216d4`; venv with torch cu126, transformers 4.57.6, onnxruntime 1.31.0 | 5 min |
+| 3. Build the students | `python student.py make --layers 0,2,4,6,8,10,12,14,16,18,20 --out ckpt/s11-init`, and `--layers 0,2,5,9,11,14,18,20 --out ckpt/s8-init` | 2 min |
+| 4. Teacher's answers | `tmux new -d -s friday-student "bash run.sh teacher"`: caches the teacher's distributions on train once, plus its own test metrics | ~20 min |
+| 5. Train S11 | `bash run.sh s11` (in tmux): distils 3 epochs, keeps the best validation epoch, refits the temperature, evaluates on test | ~1.7 h |
+| 6. Export and the rest | `tmux new -d -s friday-student-chain "bash chain.sh"`: exports S11 as the phone's 8-bit file, checks parity, builds the English-only cut (`-en`) with its id map and fixture, then trains S8 if S11 passed the gate | ~2.5 h |
+| 7. Fine-tune on Friday's format | `bash chain_f.sh` after S8, once Job 2 step 5's `READY_FRIDAY` exists: S11-F (research/27 §7) | ~1.5 h |
+| 8. Bring back | `out/laya-android-s11*.onnx`, `*.vocab-map.json`, `fixture-s11*.json` → the Mac's `models/student/` | 5 min |
+
+Shared Hugging Face cache for both jobs: `export HF_HOME=/root/friday-laya/hf` (the model is ~0.65 GB).
+
+## If the box is lost
+Everything needed to rebuild is in this folder. Rent again (the table above), add the Mac's key, then redo the jobs'
+Copy and Setup steps. Data is re-streamed from AndroidControl's public bucket, the models come from Hugging Face at
+their pinned revisions, and the trained results to keep (models, metrics) are on the Mac in git-ignored `models/`.
+Nothing on the box is the only copy of anything.
+
+## Later jobs
+- **Laya fine-tune on the owner's own rows** (Teach demos, verified runs, research/22): the same recipe as Job 3
+  step 5, with AndroidControl replay.
+- **Custom "Hey Friday" model** (research/16 §4.5): synthetic speech plus openWakeWord training, ~1–2 h. Parked: the
+  floating bubble (D-053) replaced the always-on wake word.

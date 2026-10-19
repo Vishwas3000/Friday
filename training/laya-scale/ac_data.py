@@ -94,6 +94,39 @@ def icon_classes(png, boxes):
             for c in crops], shot.size
 
 
+def episode(e):
+    """AC.episodes' episode dict, from an example parsed with its screenshots kept."""
+    return {"episode_id": e["episode_id"][0], "goal": e["goal"][0].decode("utf8"),
+            "step_instructions": [s.decode("utf8") for s in e.get("step_instructions", [])],
+            "actions": [json.loads(a) for a in e.get("actions", [])], "trees": e["accessibility_trees"],
+            "screen": (e["screenshot_widths"][0], e["screenshot_heights"][0])}
+
+
+BOOLS = ("clickable", "long_clickable", "editable", "scrollable", "checkable", "checked", "selected", "enabled", "visible")
+ICON_THRESHOLD = 0.90  # models/icons/labels.json, as shipped
+
+
+def friday_nodes(nodes):
+    """The repo's flat forest nodes -> scripts/laya_android.py's node dicts: same order, children linked, IME and
+    TYPE_SYSTEM windows tagged."""
+    out = [{"text": n.get("text", ""), "content_desc": n.get("content_desc", ""), "hint": n.get("hint", ""),
+            **{f: n.get(f, False) for f in BOOLS}, "class": (n.get("class") or "").rsplit(".", 1)[-1],
+            "resource_id": (n.get("resource_id") or "").rsplit("/", 1)[-1],
+            "bounds": tuple(n.get("bounds", (0, 0, 0, 0))), "depth": n["depth"], "ime": n["window_type"] == 2,
+            "sys": n["window_type"] == 3, "children": []} for n in nodes]
+    by = {(n["window"], n.get("id")): f for n, f in zip(nodes, out)}
+    for n, f in zip(nodes, out):
+        f["children"] = [by[(n["window"], c)] for c in n["children"] if (n["window"], c) in by]
+    return out
+
+
+def icon_words():
+    """Each icon class's word, None for "other" (never a name)."""
+    lab = json.load(open(ROOT + "/icons/labels.json"))
+    assert lab["threshold"] == ICON_THRESHOLD
+    return [None if c == "other" else w for c, w in zip(lab["classes"], lab["words"])]
+
+
 def work(shard):
     out = os.path.join(B.OUT, "shards", "%02d.jsonl" % shard)
     extra = os.path.join(EXTRA, "%02d.jsonl" % shard)
@@ -106,10 +139,7 @@ def work(shard):
             with open(out + ".tmp", "w", encoding="utf8") as f, open(extra + ".tmp", "w", encoding="utf8") as fx:
                 for rec in records(URL % shard):
                     e = AC._example(rec, skip=())
-                    ep = {"episode_id": e["episode_id"][0], "goal": e["goal"][0].decode("utf8"),
-                          "step_instructions": [s.decode("utf8") for s in e.get("step_instructions", [])],
-                          "actions": [json.loads(a) for a in e.get("actions", [])], "trees": e["accessibility_trees"],
-                          "screen": (e["screenshot_widths"][0], e["screenshot_heights"][0])}
+                    ep = episode(e)
                     split = split_of.get(ep["episode_id"])
                     if split is None:
                         continue

@@ -628,3 +628,21 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - Keeping 16.
 - **Who / status:** owner (chose 32 over 24 and 16, 2026-10-19) · Claude (measured, recommended) · **shipped.**
 
+
+### D-061 — The half-depth student S11, and how it was made (research/28)
+- **Decision:** S11 is the candidate light Laya:
+  - **Layers:** Laya-Android's even layers 0, 2, …, 20. Its global-attention slots 0, 3, 6, 9 are the teacher's
+    global layers 0, 6, 12, 18, and layer 0 (which has no attention pre-norm) stays in slot 0.
+  - **Loss:** soft cross-entropy to 0.5 × the teacher's probabilities at τ = 2 + 0.5 × the gold answer; otherwise the
+    teacher's recipe (3 epochs, epoch kept by validation Policy Joint).
+  - **Temperature:** refitted on validation (0.837) and built into the scorer (× 1.387), so the app's fixed T = 1.161
+    still gives calibrated probabilities with no code change.
+  - **Export:** the shipped exporter and nb8-h-e16 quantizer, unchanged; same inputs, outputs and op types.
+- **Why:** AndroidControl test Policy Joint 0.6029 vs the teacher's 0.6099 (−0.70, 95% CI −1.46 to +0.05; the gate
+  was 2 points) at ~0.56× the compute per token; nb8 file 515.6 MB vs 578 MB. With the English-only vocabulary cut
+  (D-058): 198.7 MB and ~272 MB RAM [estimate], at no measurable accuracy cost (+0.09).
+- **Rejected:** the bottom 11 layers (the head was trained on top-layer features); odd layers (slot 0 would lose its
+  layout); a narrower model (nothing copies over); teacher-only targets and Hinton's two-term loss (research/28 §3.3).
+- **Who / status:** owner (asked for a half-depth student, D-056) · Claude (layers, loss, temperature handling) ·
+  **built, gate passed; waiting for the owner's phone bench** (`models/laya-android-s11.nb8-h-e16.onnx`, and the
+  English-only `-en` file with its id map, which needs `Tokenizer.encode` to apply the map before real runs).

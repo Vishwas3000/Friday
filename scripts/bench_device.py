@@ -51,13 +51,15 @@ def main():
     ap.add_argument("--model", default="laya-android.nb8-h-e16.onnx")  # what the app runs (LayaEngine.MODEL)
     ap.add_argument("--decide", action="store_true", help="full on-device tokenize+build+ORT+decode on the fixture")
     ap.add_argument("--no-push", action="store_true")
+    # a student needs its own expected logits (research/28: models/fixture-s11.json); the app always reads fixture.json
+    ap.add_argument("--fixture", default="fixture.json")
     a = ap.parse_args()
 
-    model, fixture = MODELS / a.model, MODELS / "fixture.json"
+    model, fixture = MODELS / a.model, MODELS / a.fixture
     assert model.exists() and fixture.exists(), "run export_onnx.py, quantize_onnx.py, make_fixture.py first"
     if not a.no_push:
         push_into_files(model, model.name)
-        push_into_files(fixture, fixture.name)
+        push_into_files(fixture, "fixture.json")
         if a.decide:
             tok = MODELS / "tokenizer.json"
             assert tok.exists(), "copy tokenizer.json into models/ first"

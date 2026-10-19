@@ -1,0 +1,217 @@
+{
+ "16": {
+  "steps": 3756,
+  "op_on_cut_steps": {
+   "n": 3756,
+   "base": 75.13,
+   "variant": 73.96,
+   "worse": 145,
+   "better": 101,
+   "p": 0.006
+  },
+  "op_all_steps": {
+   "full": 74.3,
+   "cut": 73.86
+  },
+  "joint_all_steps": {
+   "full": 61.14,
+   "op_cut": 60.94,
+   "target_cut": 60.32,
+   "both_cut": 60.24
+  },
+  "op_row_tokens_full": 470.0,
+  "op_row_tokens_cut": 354.7,
+  "flips": {
+   "better CLICK->CLICK": 41,
+   "worse CLICK->SCROLL_DOWN": 30,
+   "better SCROLL_DOWN->SCROLL_DOWN": 22,
+   "worse CLICK->DONE": 21,
+   "better DONE->DONE": 20,
+   "worse DONE->CLICK": 17,
+   "worse SCROLL_DOWN->CLICK": 14,
+   "worse CLICK->BACK": 10,
+   "worse CLICK->INPUT_TEXT": 9,
+   "worse CLICK->WAIT": 9,
+   "better OPEN_APP->OPEN_APP": 7,
+   "worse DONE->WAIT": 6
+  },
+  "by_bucket": {
+   "11-20": {
+    "op": {
+     "n": 1227,
+     "base": 72.86,
+     "variant": 72.94,
+     "worse": 22,
+     "better": 23,
+     "p": 1.0
+    },
+    "joint_full": 57.54,
+    "joint_op_cut": 57.95,
+    "joint_target_cut": 57.04,
+    "joint_both_cut": 57.45
+   },
+   "21-50": {
+    "op": {
+     "n": 2406,
+     "base": 76.02,
+     "variant": 74.23,
+     "worse": 116,
+     "better": 73,
+     "p": 0.0022
+    },
+    "joint_full": 56.19,
+    "joint_op_cut": 55.31,
+    "joint_target_cut": 53.62,
+    "joint_both_cut": 53.12
+   },
+   ">50": {
+    "op": {
+     "n": 123,
+     "base": 80.49,
+     "variant": 78.86,
+     "worse": 7,
+     "better": 5,
+     "p": 0.7744
+    },
+    "joint_full": 46.34,
+    "joint_op_cut": 43.9,
+    "joint_target_cut": 36.59,
+    "joint_both_cut": 35.77
+   }
+  }
+ },
+ "24": {
+  "steps": 1493,
+  "op_on_cut_steps": {
+   "n": 1493,
+   "base": 78.16,
+   "variant": 76.42,
+   "worse": 53,
+   "better": 27,
+   "p": 0.0049
+  },
+  "op_all_steps": {
+   "full": 74.3,
+   "cut": 74.04
+  },
+  "joint_all_steps": {
+   "full": 61.14,
+   "op_cut": 61.01,
+   "target_cut": 60.89,
+   "both_cut": 60.73
+  },
+  "op_row_tokens_full": 576.7,
+  "op_row_tokens_cut": 454.0,
+  "flips": {
+   "worse CLICK->SCROLL_DOWN": 16,
+   "worse SCROLL_DOWN->CLICK": 10,
+   "better CLICK->CLICK": 9,
+   "worse CLICK->DONE": 8,
+   "better SCROLL_DOWN->SCROLL_DOWN": 7,
+   "better DONE->DONE": 5,
+   "better BACK->BACK": 4,
+   "worse CLICK->SCROLL_UP": 3,
+   "worse BACK->CLICK": 3,
+   "better OPEN_APP->OPEN_APP": 2,
+   "worse DONE->CLICK": 2,
+   "worse WAIT->CLICK": 2
+  },
+  "by_bucket": {
+   "21-50": {
+    "op": {
+     "n": 1370,
+     "base": 77.96,
+     "variant": 76.13,
+     "worse": 49,
+     "better": 24,
+     "p": 0.0046
+    },
+    "joint_full": 57.16,
+    "joint_op_cut": 56.28,
+    "joint_target_cut": 56.06,
+    "joint_both_cut": 54.95
+   },
+   ">50": {
+    "op": {
+     "n": 123,
+     "base": 80.49,
+     "variant": 79.67,
+     "worse": 4,
+     "better": 3,
+     "p": 1.0
+    },
+    "joint_full": 46.34,
+    "joint_op_cut": 46.34,
+    "joint_target_cut": 39.02,
+    "joint_both_cut": 39.02
+   }
+  }
+ },
+ "32": {
+  "steps": 657,
+  "op_on_cut_steps": {
+   "n": 657,
+   "base": 81.74,
+   "variant": 79.45,
+   "worse": 22,
+   "better": 7,
+   "p": 0.0081
+  },
+  "op_all_steps": {
+   "full": 74.3,
+   "cut": 74.15
+  },
+  "joint_all_steps": {
+   "full": 61.14,
+   "op_cut": 61.07,
+   "target_cut": 61.06,
+   "both_cut": 60.98
+  },
+  "op_row_tokens_full": 676.3,
+  "op_row_tokens_cut": 550.5,
+  "flips": {
+   "worse CLICK->SCROLL_DOWN": 5,
+   "worse CLICK->DONE": 4,
+   "worse SCROLL_DOWN->CLICK": 4,
+   "better BACK->BACK": 2,
+   "worse WAIT->CLICK": 2,
+   "worse DONE->CLICK": 2,
+   "better CLICK->CLICK": 2,
+   "better DONE->DONE": 2,
+   "worse CLICK->OPEN_APP": 1,
+   "worse BACK->CLICK": 1,
+   "worse CLICK->BACK": 1,
+   "worse DONE->WAIT": 1
+  },
+  "by_bucket": {
+   "21-50": {
+    "op": {
+     "n": 534,
+     "base": 82.02,
+     "variant": 79.96,
+     "worse": 17,
+     "better": 6,
+     "p": 0.0347
+    },
+    "joint_full": 60.61,
+    "joint_op_cut": 59.28,
+    "joint_target_cut": 59.66,
+    "joint_both_cut": 58.33
+   },
+   ">50": {
+    "op": {
+     "n": 123,
+     "base": 80.49,
+     "variant": 77.24,
+     "worse": 5,
+     "better": 1,
+     "p": 0.2188
+    },
+    "joint_full": 46.34,
+    "joint_op_cut": 46.34,
+    "joint_target_cut": 43.9,
+    "joint_both_cut": 43.9
+   }
+  }
+ }
+}
