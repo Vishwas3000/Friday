@@ -646,3 +646,34 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Who / status:** owner (asked for a half-depth student, D-056) · Claude (layers, loss, temperature handling) ·
   **built, gate passed; waiting for the owner's phone bench** (`models/laya-android-s11.nb8-h-e16.onnx`, and the
   English-only `-en` file with its id map, which needs `Tokenizer.encode` to apply the map before real runs).
+
+### D-061 — Conversations: carry on a task from where Friday stopped
+- **Decision:** after a request, the task stays open for 5 minutes (`Session`).
+  - The answer card has **Reply**: the bubble listens, or the typed box opens. Stuck answers say "Tap Reply and tell me where to go".
+  - The owner's next words continue the task unless they name another app or read as a task of their own:
+    - "stop", "go back", "scroll down";
+    - "tap X" or "it's under X": Friday finds X on screen, else on the way back to the app's start screen, else in the
+      app opened fresh, taps it (Safety still decides), and carries on the original task;
+    - "keep going": carries on as is;
+    - "now track it", "open the second one", "search for X": a new step from this screen, with "it" standing for what
+      the task was about.
+  - A follow-up continues from the screen as left (typed replies resume the app, not restart it), with Laya's history
+    carried over.
+  - A guided success remembers the whole path (earlier steps + the owner's tap + the rest) under the original request,
+    on ✓, so next time it replays with no help.
+  - Read tasks (orders, payments) read out when a follow-up finishes them.
+- **Also fixed while testing:**
+  - "Stuck: same action 3 times" counts only the current run's actions.
+  - A named element must be the element's name: its label has all the words plus at most two more ("Bedtime" isn't
+    "View more bedtime activity options").
+  - Done-on-tap requires the task's app to still be in front after the tap: a help topic named "Stopwatch" opened
+    Google Help and was called done.
+- **Why:** owner, 2026-10-19: "I want to talk from this place and give it more tasks or clarity". When stuck, the only
+  options were ✗ or a full Teach demo.
+- **Measured on the phone** (Clock, memory off):
+  - "open clock and show bedtime" → stuck after 3 refused alarm taps;
+  - "it's under the Bedtime tab" → tapped Bedtime, done, learned "tap Bedtime";
+  - "now show the stopwatch" → done in 8 s.
+- **Not yet:** when Friday is unsure, showing the owner Laya's top 3 picks to tap (planned next); the typed box doesn't
+  show which task a reply would continue.
+- **Who / status:** owner (asked) · Claude (design) · **shipped.**

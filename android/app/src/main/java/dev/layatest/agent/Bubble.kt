@@ -60,6 +60,9 @@ class Bubble(private val svc: AgentService) {
         view = null
     }
 
+    /** Start listening without a tap: Reply on the answer card (D-061). */
+    fun listenNow() = svc.main.post { if (view == null) show(); if (mode == Mode.IDLE) listen() }
+
     private fun tapped() = when (mode) {
         Mode.IDLE -> listen()
         Mode.LISTENING -> { runWhenHeard = true; recognizer?.stopListening() }  // onResults runs it

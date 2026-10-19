@@ -168,6 +168,13 @@ private fun readAll(ctx: SkillContext, dated: Boolean): String =
     readList(ctx, countAsked(ctx.request) ?: 3) { t, n -> readAmounts(t, n, dated) }?.let { ctx.succeeded(); "Here's what I see:\n$it" }
         ?: if (dated) "I didn't find any dated payments on this screen" else "Done"
 
+/** What a finished read task reads out (money, orders); null for the rest. A follow-up that finishes one reads too (D-061). */
+internal fun readFor(ctx: SkillContext, card: TaskCard): String? = when {
+    card.skill in READ_SKILLS -> readAll(ctx, dated = card.skill == "spend_query")
+    card.skill == "shopping" && card.mode == "read" -> readList(ctx, card.count ?: 3, ::readOrders)?.let { "Your latest orders:\n$it" }
+    else -> null
+}
+
 /** Up to [n] items as [read] finds them, once the list has loaded, scrolling down up to 3 pages when fewer show. */
 internal fun readList(ctx: SkillContext, n: Int, read: (List<ScreenText>, Int) -> String?): String? {
     // the list loads after the tap: Amazon's orders weren't there yet when read at once (2026-10-19)
@@ -294,8 +301,8 @@ class GenericSkill(override val id: String) : Skill {
         return when (ctx.runLaya(goal, typeText = text, pickText = pick)) {
             Outcome.DONE -> if (id !in READ_SKILLS) "Done" else readAll(ctx, dated = id == "spend_query")
             Outcome.STOPPED -> "Stopped"
-            Outcome.STUCK -> "I got stuck — the screen is where I stopped"
-            Outcome.MAX_STEPS -> "I ran out of steps before finishing"
+            Outcome.STUCK -> Assistant.STUCK
+            Outcome.MAX_STEPS -> Assistant.OUT_OF_STEPS
         }
     }
 }

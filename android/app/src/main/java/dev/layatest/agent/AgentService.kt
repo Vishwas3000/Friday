@@ -68,6 +68,7 @@ class AgentService : AccessibilityService() {
             .put("media", mediaSelfCheck()).put("people", peopleSelfCheck()).put("profiler", appCatalogSelfCheck())
             .put("routes", routesSelfCheck()).put("routing", routingSelfCheck()).put("wake", wakeSelfCheck(this))
             .put("shortlist", shortlistSelfCheck()).put("card", cardSelfCheck()).put("icons", iconNamerSelfCheck())
+            .put("conversation", conversationSelfCheck())
         "wake" -> wake?.command(c) ?: error("the wake word isn't set up yet")  // {"on": bool} optional; listening stats
         "wake_test" -> wakeTest(this, java.io.File(filesDir, c.getString("wav")))  // max score of a WAV in filesDir
         "profiles" -> JSONObject(AppProfiler.profiles(packageManager) as Map<*, *>)  // D-031: auto app profiles, to evaluate
@@ -84,10 +85,12 @@ class AgentService : AccessibilityService() {
         "teach_wipe" -> JSONObject().put("deleted", Teacher.wipe(this))
         // debugging: run a request on the bridge thread and return its answer + step trace
         // the task suite's options (D-049): memory on/read/off, unattended (never wait for a tap), shortlist size
+        // "follow": true carries on the open task, as the owner's next words on the phone do (D-061)
         "ask" -> Assistant(this, c.getString("goal"), c.optString("memory", "on"), c.optBoolean("unattended"),
-            c.optInt("shortlist", Assistant.SHORTLIST)).also { lastAsk = it }.let { a ->
-            JSONObject().put("answer", a.run()).put("trace", JSONArray(a.trace)).put("kept", a.kept)
+            c.optInt("shortlist", Assistant.SHORTLIST), session?.takeIf { c.optBoolean("follow") && it.fresh }).also { lastAsk = it }.let { a ->
+            JSONObject().put("answer", a.run().also { session = a.session() }).put("trace", JSONArray(a.trace)).put("kept", a.kept)
                 .put("learned", a.learned?.steps?.joinToString(" → ") { it.describe() } ?: JSONObject.NULL)
+                .put("session", session?.let { s -> JSONObject().put("goal", s.goal).put("pkg", s.pkg).put("finished", s.finished).put("steps", s.path.size) } ?: JSONObject.NULL)
         }
         // the answer card's ✓ Right / ✗ Wrong, for the last "ask" -- after checking its steps
         "remember" -> JSONObject().put("remembered", lastAsk?.learned != null).also { lastAsk?.keep("confirmed") }
@@ -222,14 +225,24 @@ class AgentService : AccessibilityService() {
     /** Running a request or being taught: the wake word must not pop the request box over either. */
     internal val busy get() = running || teacher != null
 
+    /** The task the owner can carry on with, by voice or text, for a few minutes after a request (D-061). */
+    @Volatile internal var session: Session? = null
+
+    /** Reply to the answer card: the bubble listens where the owner is, or the typed box opens. */
+    private fun reply() {
+        if (Bubble.isOn(this)) bubble?.listenNow()
+        else startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
     /** Handle one typed request on a background thread (one at a time) and show the answer as a card. */
     fun runGoal(goal: String) {
         if (goal.isBlank() || running || teacher != null) return  // while teaching, Friday's own taps would be recorded as the owner's
         running = true
         Thread({
             try {
-                val a = Assistant(this, goal.trim())
+                val a = Assistant(this, goal.trim(), prev = session?.takeIf { it.fresh })
                 val said = a.run()
+                session = a.session()
                 // the owner sees the steps and says right or wrong: Laya sometimes overshoots (D-048 feedback)
                 val did = (a.learned ?: a.replayed)?.steps?.joinToString(" → ") { it.describe() }
                 val text = buildString {
@@ -240,7 +253,8 @@ class AgentService : AccessibilityService() {
                 Overlay(this).answer(text,
                     right = a.learned?.takeIf { !a.kept }?.let { { a.keep("confirmed"); toast("Got it — I'll do it this way next time") } },
                     wrong = if (did != null) { { a.reject(); toast("Noted — I won't do it that way again") } } else null,
-                    showMe = if (did != null) { { startTeaching(goal.trim()) } } else null)
+                    showMe = if (did != null) { { startTeaching(goal.trim()) } } else null,
+                    reply = session?.let { { reply() } })
             } catch (e: Throwable) {
                 toast("error: ${e.message}")
             } finally {

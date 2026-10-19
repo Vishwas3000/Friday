@@ -147,8 +147,8 @@ private fun pick(ctx: SkillContext): String? {
 private fun outcome(o: Outcome, done: String) = when (o) {
     Outcome.DONE -> done
     Outcome.STOPPED -> "Stopped"
-    Outcome.STUCK -> "I got stuck — the screen is where I stopped"
-    Outcome.MAX_STEPS -> "I ran out of steps before finishing"
+    Outcome.STUCK -> Assistant.STUCK
+    Outcome.MAX_STEPS -> Assistant.OUT_OF_STEPS
 }
 
 // ---- Slot rules (pure; peopleSelfCheck asserts them) ----

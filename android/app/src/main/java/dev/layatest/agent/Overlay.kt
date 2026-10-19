@@ -85,9 +85,11 @@ class Overlay(private val svc: AgentService) {
 
     /**
      * A result card until the owner taps a button (or a minute passes). The feedback buttons teach Friday (D-048):
-     * [right] keeps what it did, [wrong] marks it wrong, [showMe] starts Teach mode on the same goal. Doesn't block.
+     * [right] keeps what it did, [wrong] marks it wrong, [showMe] starts Teach mode on the same goal, [reply] carries the
+ * task on from here. Doesn't block.
      */
-    fun answer(text: String, right: (() -> Unit)? = null, wrong: (() -> Unit)? = null, showMe: (() -> Unit)? = null) = svc.main.post {
+    fun answer(text: String, right: (() -> Unit)? = null, wrong: (() -> Unit)? = null, showMe: (() -> Unit)? = null,
+               reply: (() -> Unit)? = null) = svc.main.post {
         val ctx = theme()
         lateinit var panel: View
         fun button(label: String, then: (() -> Unit)?) = Button(ctx).apply {
@@ -96,6 +98,8 @@ class Overlay(private val svc: AgentService) {
         }
         panel = card(ctx).apply {
             addView(TextView(ctx).apply { this.text = text; setTextColor(Color.WHITE); textSize = 18f })
+            // carry on from here by voice or text: "it's under the You tab", "now open the second one" (D-061)
+            reply?.let { addView(button("Reply: tell me what next", it)) }
             addView(LinearLayout(ctx).apply {
                 addView(button("OK", null))
                 right?.let { addView(button("✓ Right", it)) }

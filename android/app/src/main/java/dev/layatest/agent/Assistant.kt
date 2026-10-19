@@ -21,7 +21,8 @@ import java.util.Locale
  * [unattended] skips every step that would wait for the owner; [shortlistK] is the target row's size (0: all).
  */
 class Assistant(private val svc: AgentService, override val request: String, private val memory: String = "on",
-                private val unattended: Boolean = false, private val shortlistK: Int = SHORTLIST) : SkillContext {
+                private val unattended: Boolean = false, private val shortlistK: Int = SHORTLIST,
+                private val prev: Session? = null) : SkillContext {
     override val android: Context get() = svc
     override val slots = Slots(taskPart(request))
     override val apps = AppResolver(svc)
@@ -55,12 +56,17 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         svc.bubble?.hide()
         val said = try {
             banner.say("Understanding…")
-            val skill = route(request, { laya }) { q, options -> ask(q, options) }
+            val follow = prev?.let { Conversation.read(request, it, apps::named) }
+            val skill = if (follow == null) route(request, { laya }) { q, options -> ask(q, options) } else null
             if (card.skill == null) card = card.copy(skill = skill)
             trace += "card: ${card.json()}"
             Log.i(TAG, "request routed to ${skill ?: "something else"}")
-            trace += "route: ${skill ?: "something else"}"
-            val result = if (stopped) null else (skill?.let { skills[it] ?: GenericSkill(it) } ?: GenericSkill("other")).run(this)
+            trace += "route: ${if (follow != null) "follow-up to \"${prev!!.goal}\": $follow" else skill ?: "something else"}"
+            val result = when {
+                stopped -> null
+                follow != null -> followUp(prev!!, follow)
+                else -> (skill?.let { skills[it] ?: GenericSkill(it) } ?: GenericSkill("other")).run(this)
+            }
             if (stopped) "Stopped" else result ?: "Done"
         } catch (e: Throwable) {  // an Error (e.g. a failed class init) must not vanish silently either
             Log.e(TAG, "request failed", e)
@@ -206,6 +212,102 @@ class Assistant(private val svc: AgentService, override val request: String, pri
     var kept = false
         private set
 
+    // ---- a conversation (D-061): the owner's next words carry on from where this request left the screen ----
+    private var nudge: String? = null                  // "it's under X": words Laya, the shortlist and the skim look for
+    private var prefix: List<RouteStep> = emptyList()  // earlier steps toward the same goal: a guided success keeps them
+    private var task: String? = null                   // the goal left open for the next follow-up
+    private var outcome: Outcome? = null
+    private var ended = false
+
+    /** The task left open for a follow-up; null when the owner ended it. */
+    fun session(): Session? = if (ended) null else Session(task ?: request, prev?.takeIf { task == it.goal }?.card ?: card,
+        foreground(), outcome == null || outcome == Outcome.DONE, trail.takeLast(3), prefix + path, typed)
+
+    private fun followUp(prev: Session, f: FollowUp): String {
+        trail += prev.trail
+        typed = prev.typed
+        // a typed reply brings Friday's own screen up: go back to the app as it was left, not restarted
+        apps.installed.firstOrNull { it.pkg == prev.pkg }?.takeIf { foreground() != it.pkg }?.let { app ->
+            open(app); waitUntil(5000) { foreground() == app.pkg }
+        }
+        return when (f) {
+            is FollowUp.End -> { ended = true; "OK" }
+            is FollowUp.Back -> { back(); task = prev.goal; prefix = prev.path; "Went back" }
+            is FollowUp.Scroll -> { scroll(f.dir); task = prev.goal; prefix = prev.path; "Scrolled ${f.dir}" }
+            is FollowUp.Tap -> reach(prev, f.what)
+            is FollowUp.Nudge -> f.where?.let { reach(prev, it) } ?: carryOn(prev, null)
+            is FollowUp.Next -> said(runLaya(f.goal, 12, f.typed, null), f.goal)
+        }
+    }
+
+    /**
+     * What the owner named ("tap See all orders", "it's under the Bedtime tab"): on this screen, else on the way back
+     * to the app's start screen (Friday may have wandered off: into Clock's settings for "show bedtime", 2026-10-19),
+     * else the app opened fresh. Found: tapped, then the task carries on. Not found: Laya carries on with it as a hint.
+     */
+    private fun reach(prev: Session, what: String): String {
+        var scr = screen()
+        var moved = false
+        for (i in 0..3) {
+            onScreen(scr, what)?.let { return tapThen(prev, scr, it, if (moved) emptyList() else prev.path) }
+            if (i == 3 || scr.pkg != prev.pkg || !back()) break
+            trace += "follow-up: “$what” isn't here, back"
+            moved = true
+            Thread.sleep(800)
+            scr = screen()
+        }
+        apps.installed.firstOrNull { it.pkg == prev.pkg }?.let { app ->
+            trace += "follow-up: “$what” not found going back, reopening ${app.label}"
+            open(app, fresh = true); waitUntil(5000) { foreground() == app.pkg }; Thread.sleep(1000)
+            scr = screen()
+            onScreen(scr, what)?.let { return tapThen(prev, scr, it, emptyList()) }
+            moved = true
+        }
+        if (prev.finished) return said(runLaya(request, 12, null, null), request)
+        return carryOn(prev, what, if (moved) emptyList() else prev.path)
+    }
+
+    /** Carry on with [prev]'s task from this screen, looking for [hint] first; a success keeps [before] + the rest. */
+    private fun carryOn(prev: Session, hint: String?, before: List<RouteStep> = prev.path): String {
+        nudge = hint
+        prefix = before
+        return said(runLaya(prev.goal, 12, prev.typed, null), prev.goal, prev.card)
+    }
+
+    /** Tap what the owner named (Safety still decides), then carry on if the task isn't finished. */
+    private fun tapThen(prev: Session, scr: Screen, c: ScreenCandidate, before: List<RouteStep>): String {
+        val (verdict, why) = Safety.verdict("CLICK", c, scr.pkg)
+        if (verdict == Safety.Verdict.BLOCK) return why
+        if (verdict == Safety.Verdict.ASK && confirm(describe("CLICK", c, null), why, c) != "run") return "OK, I didn't tap it"
+        path.clear()
+        trace += "follow-up: tap “${c.label}”"
+        perform("CLICK", c, null, scr)
+        Thread.sleep(800)
+        if (prev.finished) { task = request; return "Tapped “${c.label}”" }
+        return carryOn(prev, null, before + path)
+    }
+
+    /**
+     * The element the owner named: its label has every word of [what] (plurals folded) and at most two more, the
+     * closest first. "Bedtime" isn't "View more bedtime activity options" (tapped by a looser match, 2026-10-19).
+     */
+    private fun onScreen(scr: Screen, what: String): ScreenCandidate? {
+        val w = Routes.contentWords(what)
+        if (w.isEmpty()) return null
+        return scr.candidates.map { it to Routes.contentWords(it.label) }
+            .filter { (_, l) -> l.containsAll(w) && l.size <= w.size + 2 }.minByOrNull { (_, l) -> l.size }?.first
+    }
+
+    private fun said(o: Outcome, goal: String, read: TaskCard? = null): String {
+        task = goal
+        return when (o) {
+            Outcome.DONE -> read?.let { readFor(this, it) } ?: "Done"
+            Outcome.STOPPED -> "Stopped"
+            Outcome.STUCK -> STUCK
+            Outcome.MAX_STEPS -> OUT_OF_STEPS
+        }
+    }
+
     /** Keep this request's experience (D-048): its path for hints and replay, its screens as training rows. */
     fun keep(source: String) {
         val r = learned ?: return
@@ -231,7 +333,10 @@ class Assistant(private val svc: AgentService, override val request: String, pri
             .writeText(rows.joinToString("") { it.put("outcome", outcome).toString() + "\n" })
     }
 
-    override fun runLaya(subgoal: String, maxSteps: Int, typeText: String?, pickText: (() -> String?)?): Outcome {
+    override fun runLaya(subgoal: String, maxSteps: Int, typeText: String?, pickText: (() -> String?)?): Outcome =
+        steps(subgoal, maxSteps, typeText, pickText).also { outcome = it; task = task ?: subgoal }
+
+    private fun steps(subgoal: String, maxSteps: Int, typeText: String?, pickText: (() -> String?)?): Outcome {
         val startPkg = foreground()
         path.clear(); rows.clear(); goal = subgoal; typed = typeText
         Routes.find(svc, startPkg, subgoal, typeText)?.takeIf { memory != "off" }?.let { route ->
@@ -242,7 +347,8 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         // (so a renamed or moved element still works), and its finished screen means this task is done
         val hint = Routes.similar(svc, startPkg, subgoal, apps.installed.firstOrNull { it.pkg == startPkg }?.label)
             ?.takeIf { memory != "off" }
-        val lead = hint?.let { h -> "$subgoal (last time: ${h.steps.joinToString(", then ") { it.describe() }})" } ?: subgoal
+        val lead = (hint?.let { h -> "$subgoal (last time: ${h.steps.joinToString(", then ") { it.describe() }})" } ?: subgoal) +
+            (nudge?.let { " (look for: $it)" } ?: "")
         hint?.let { trace += "hint (${it.source}): \"${it.goal}\" -> ${it.steps.joinToString(" → ") { s -> s.describe() }}" }
         val blocked = HashSet<String>()  // targets skipped or refused, so Laya doesn't pick them again
         var misses = 0
@@ -252,8 +358,10 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         // (the skim scrolled Photos 4 pages for "screenshots", 2026-10-18); the shortlist still looks for those words
         val query = Routes.contentWords(typeText.orEmpty())
         val about = Routes.aboutWords(subgoal, apps.installed.firstOrNull { it.pkg == startPkg }?.label) - query
-        val want = about + query + hint?.steps.orEmpty().flatMap { Routes.contentWords(it.label) }
+        val told = Routes.contentWords(nudge.orEmpty())
+        val want = about + query + told + hint?.steps.orEmpty().flatMap { Routes.contentWords(it.label) }
         val toggle = wantOn(subgoal)
+        val trailStart = trail.size  // a follow-up carries the last request's actions: only this run's count as stuck
         var didType = false
         var tapped: Triple<String?, ScreenCandidate, Set<String>>? = null  // an unnamed element just tapped: app, it, words before
         for (step in 1..maxSteps) {
@@ -287,7 +395,7 @@ class Assistant(private val svc: AgentService, override val request: String, pri
                 skimmed = true
                 // no need to look further down when an element the hint names is right here
                 val hinted = hint?.steps?.any { st -> st.label.isNotEmpty() && scr.candidates.any { it.label == st.label } } == true
-                if (!hinted) skim(about, scr)?.let { scr = it }
+                if (!hinted) skim(told.ifEmpty { about }, scr)?.let { scr = it }
             }
             val readMs = SystemClock.elapsedRealtime() - t0
             // what policy would block (Pay/Send in a money app) never reaches Laya: picking it only wastes a pass
@@ -346,13 +454,16 @@ class Assistant(private val svc: AgentService, override val request: String, pri
             // the tap named everything the goal is about ("show the stopwatch" -> "Stopwatch"): reached. Laya isn't
             // asked again -- it went on and pressed Start on a real stopwatch, twice (2026-10-17). A task that types
             // isn't there until it has typed ("Refine search to …" ended a Play Store search early, 2026-10-18)
-            if (s.op == "CLICK" && target != null && about.isNotEmpty() && (query.isEmpty() || didType) &&
+            if (s.op == "CLICK" && target != null && about.isNotEmpty() && (query.isEmpty() || didType) && scr.pkg == startPkg &&
                 Routes.contentWords(target.label).containsAll(about)) {
-                trace += "done: tapped “${target.label}”, what the goal is about"
-                Thread.sleep(300)
-                return finish(screen(), startPkg, subgoal, typeText, startWords)
+                Thread.sleep(600)
+                val now = screen()
+                if (now.pkg == startPkg) {  // still in the app: a help topic named "Stopwatch" opened Google Help instead
+                    trace += "done: tapped “${target.label}”, what the goal is about"
+                    return finish(now, startPkg, subgoal, typeText, startWords)
+                }
             }
-            if (trail.size >= 3 && trail.takeLast(3).toSet().size == 1) { trace += "stuck: same action 3 times"; return Outcome.STUCK }
+            if (trail.size - trailStart >= 3 && trail.takeLast(3).toSet().size == 1) { trace += "stuck: same action 3 times"; return Outcome.STUCK }
             Thread.sleep(300)
         }
         trace += "out of steps ($maxSteps)"
@@ -369,9 +480,9 @@ class Assistant(private val svc: AgentService, override val request: String, pri
      */
     private fun finish(scr: Screen, startPkg: String?, subgoal: String, typeText: String?, startWords: Set<String>?): Outcome {
         rows += row("DONE", scr, null, null)
-        if (path.isNotEmpty() && startPkg != null) {
+        if ((prefix + path).isNotEmpty() && startPkg != null) {
             // keyed without the typed text only if this path typed it (see Routes.find)
-            learned = Route(subgoal, startPkg, Routes.key(subgoal, typeText.takeIf { path.any { it.slot } }), path.toList(),
+            learned = Route(subgoal, startPkg, Routes.key(subgoal, typeText.takeIf { path.any { it.slot } }), prefix + path,
                 "run", Routes.screenWords(scr.candidates) - startWords.orEmpty())
         }
         return Outcome.DONE
@@ -518,6 +629,8 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         /** The target row's size on crowded screens; 0: all. 16 hid 17% of gold targets on AndroidControl's test steps
          *  (research/27 L3), 32 costs nothing measurable (D-060, owner); the 52 screens of D-049 were too few to tell. */
         const val SHORTLIST = 32
+        const val STUCK = "I got stuck here. Tap Reply and tell me where to go"
+        const val OUT_OF_STEPS = "I ran out of steps. Tap Reply and tell me what to do next"
         private const val TAG = "FridayAssistant"
         private const val GROUP = 16
     }
