@@ -2,6 +2,15 @@
 __pycache__/
 *.pyc
 .DS_Store
+# Local credentials, signing keys and machine-specific configuration
+.env
+.env.*
+!.env.example
+.aws/
+*.pem
+*.key
+*.keystore
+*.jks
 # screen dumps/screenshots from the phone contain personal data: never commit
 captures/
 *.xml.dump
@@ -14,6 +23,8 @@ android/.kotlin/
 android/build/
 android/app/build/
 android/app/.cxx/
+android/third_party/llama.cpp/
+android/third_party/llama.cpp.download/
 android/local.properties
 *.apk
 # jniLibs/arm64-v8a/libc++_shared.so IS committed: DJL's tokenizer .so needs it and its aar

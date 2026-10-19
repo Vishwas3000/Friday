@@ -62,7 +62,7 @@ Laya answers multiple-choice questions, so each skill is just another kind of ro
 - **Cadence:** retrain from the base on all data so far (not from the last checkpoint, so errors don't compound), weekly or when about 50 new demos/corrections arrive.
 
 ## 4. Where it runs
-- **GPU box** (D-034, D-042): everything that trains. The run-packs for research/14 and 15 are ready. **Blocked on the instance's SSH port** (<previous-port> / <previous-port> refused).
+- **GPU box** (D-034, D-042): everything that trains. The run-packs for research/14 and 15 are ready. **Blocked on a reachable instance SSH endpoint.**
 - **Mac:** at most one small model job at a time; no training (D-042).
 - **Phone:** collection, inference, the task suite. Training data leaves the phone only to the Mac (`captures/`, git-ignored) and the box, and is deleted after training (D-033).
 

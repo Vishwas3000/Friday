@@ -8,6 +8,8 @@ _Last updated: 2026-10-17 · Trust tags: [primary] read at source · [secondary]
 - cleaned-up search queries;
 - one-line answers read off the screen.
 
+**Follow-up (2026-10-20):** the local Writer is now implemented and installed: [app guide](../docs/writer.md), [actual phone results](33-writer-live-tests.md), [evaluation plan](31-slm-text-generation.md). The initial suite exposed quality failures and retesting of refinements is pending. This note's older runtime comparisons and borrowed speed figures remain historical; current code uses ORT 1.31. D-058 keeps active support English only.
+
 The owner decided on 2026-10-17 to add a lightweight on-device LLM for these text outputs only, under four rules:
 - Laya keeps every decision: routing, slots, apps and UI steps (D-024).
 - The LLM loads on demand, is freed after, and is never resident with Laya (D-016).

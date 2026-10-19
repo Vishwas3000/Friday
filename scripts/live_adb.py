@@ -1,6 +1,6 @@
 """Live test: Laya-Android drives the USB-connected phone, one step at a time.
 
-uv run python scripts/live_adb.py --app "Open the Clock app and go to the Timer tab"   # via the Laya agent app
+uv run python scripts/live_adb.py --app "Open the Clock app and go to the Timer tab"   # via the Friday app
 uv run python scripts/live_adb.py "Open the Clock app and go to the Timer tab"         # plain adb, no app (~3 s/step)
 
 Every step is shown before it runs: on the phone with --app (Run / Skip / Stop), otherwise in this terminal.
@@ -41,7 +41,7 @@ class AppPhone:
         self.f.flush()
         line = self.f.readline()
         if not line:
-            sys.exit("the phone app closed the connection: is 'Laya agent' on in Accessibility settings?")
+            sys.exit("the phone app closed the connection: is 'Friday' on in Accessibility settings?")
         reply = json.loads(line)
         if "error" in reply:
             raise RuntimeError(reply["error"])
@@ -197,7 +197,7 @@ def top(probs, k=3):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("goal")
-    ap.add_argument("--app", action="store_true", help="drive the phone through the Laya agent app (fast)")
+    ap.add_argument("--app", action="store_true", help="drive the phone through the Friday app (fast)")
     ap.add_argument("--yes", action="store_true", help="run steps without asking (risky ones still ask)")
     ap.add_argument("--steps", type=int, default=10)
     ap.add_argument("--serial", help="adb serial; default: the only connected device")

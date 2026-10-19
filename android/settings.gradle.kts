@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "layaAgent"
+rootProject.name = "Friday"
 include(":app")

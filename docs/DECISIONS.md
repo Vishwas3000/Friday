@@ -247,7 +247,7 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 ### D-034 — Train on the owner's remote GPU box, isolated from its other projects
 - **Decision:** fine-tuning runs on the owner's remote CUDA machine: one dedicated directory with its own environment, no global installs or system changes, a GPU-usage check before each run, nothing outside our directory touched. The owner's personal data (Teach mode) may be used there.
 - **Why:** owner offered it, 2026-10-17 ("don't delete or interfere with the existing projects"); Laya-Android's own fine-tune needed an RTX 4090-class GPU (2.7 h).
-- **Who / status:** user · Rule confirmed by the owner (D-042): "for any training use the remote vast machine". Run-packs for research/14 and 15 are ready; waiting for the instance's current SSH port (<previous-port> and <previous-port> refused). Agents' own SSH attempts are blocked by the permission check, so main runs box commands.
+- **Who / status:** user · Rule confirmed by the owner (D-042): "for any training use the remote vast machine". Run-packs for research/14 and 15 are ready; waiting for a reachable instance SSH endpoint. Agents' own SSH attempts are blocked by the permission check, so main runs box commands.
 
 ### D-035 — A wake word for Friday, at very low standby power
 - **Decision:** add a wake word ("Hey Friday") so Friday can be started hands-free, with standby power kept minimal and audio never leaving the phone. Speech-to-text and owner-voice verification follow later.
@@ -685,3 +685,22 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   `models/student/out/laya-android-s11a{,-en}.nb8-h-e16.onnx` with the `-en` id map and fixtures. **The swap waits
   for the owner's phone bench** (speed, RAM, the task suite) and for the request log's words in the kept list: the
   English-only cut costs routing 4 points through re-spelt request words (2 for the teacher).
+
+### D-063 — Implement Writer and share one draft between generation and app handoff
+- **Decision:** implement D-032/D-041 using pinned llama.cpp and separately installed GGUF weights. Explicit
+  writing requests and natural message/email commands use the same local Writer. Explicit verbatim bodies
+  bypass generation. English remains the active scope (D-058).
+- Writer and Laya have exclusive model ownership. Each Writer request frees its native context and weights;
+  this implementation does not keep the proposed three-minute Writer cache from D-041. MainActivity skips
+  Laya prewarming for recognized writing and messaging requests.
+- JSON grammar, deadlines, cancellation, model-name allowlists and limited fact/word-limit checks bound
+  generation. One validation repair uses the original source within the same deadline. Only complete accepted
+  output can reach handoff. These checks do not prove semantic correctness.
+- Keep one accepted draft through review, app/recipient selection and composer population. Read destinations
+  from the original command rather than generated text. Preserve exact payloads in Android intents and UI
+  typing. A successful app launch is distinct from checked recipient/body fields; no automatic Send is added.
+- **Why:** owner, 2026-10-20: standalone drafts stopped in Friday while message commands opened apps using
+  extracted text without the SLM. Two routes must share generation and handoff.
+- **Who / status:** owner (requested implementation and device tests) · Codex · implementation and Pixel
+  evaluation recorded in [research/33](../research/33-writer-live-tests.md). Model quality and latency gates
+  remain separate from protocol checks; the original proposal's targets are not claimed as achieved.

@@ -57,6 +57,8 @@ interface SkillContext {
     fun say(text: String)
     /** The owner picks one of [options]; null if they cancel. */
     fun ask(question: String, options: List<String>): Int?
+    /** One draft object, then owner preview and the same app handoff for writing and messaging requests. */
+    fun draft(kind: String, instruction: String, text: String, verbatim: Boolean = false, subject: String = ""): String
 }
 
 /** The skill catalog Laya routes over (research/09: 81% on unseen phrasings). Keep it at 16 or fewer. */
@@ -118,6 +120,9 @@ const val CONFIDENT = 0.7  // research/09: routing at >= 0.7 was 93% right; belo
 const val SLOT_Q = "Which words in the request name the song, artist, show, person, place or item?"
 
 fun ruleSkill(request: String): String? {
+    // A message's contents can mention bills, payments or alarms. Its command still selects messaging.
+    if (Regex("^(?:please\\s+)?(?:send\\s+(?:an?\\s+)?)?(?:message|text|whatsapp|e-?mail|mail)\\b", RegexOption.IGNORE_CASE)
+            .containsMatchIn(taskPart(request).trim())) return "message"
     val skill = RULES.firstOrNull { it.second.containsMatchIn(request) }?.first
     // "open X and <task>": the task picks the skill, which then uses the app named ("open youtube and play
     // despacito" -> play_video in YouTube: straight to its results); a task no rule covers ("and go to the
@@ -210,6 +215,9 @@ private val OPEN_AND = Regex("^\\s*(?:please\\s+)?(?:open|launch|start)\\s+.+?\\
 
 /** Asserts the "open X and <task>" routing. */
 fun routingSelfCheck(): String {
+    check(ruleSkill("message Rahul on WhatsApp saying I paid the bill") == "message")
+    check(ruleSkill("email alex@example.test saying set an alarm tomorrow") == "message")
+    check(ruleSkill("open WhatsApp and message Rahul saying I paid the bill") == "message")
     check(ruleSkill("open youtube and play despacito") == "play_music")  // PlayMusic hands a video app to PlayVideo
     check(ruleSkill("open the clock app and go to the timers tab") == "open_app")
     check(ruleSkill("open the clock app and set an alarm for 7") == "alarm_timer")

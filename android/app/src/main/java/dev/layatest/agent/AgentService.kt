@@ -18,6 +18,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
 
 /** The agent's eyes and hands: exports the screen's window forest and performs actions, driven through [Bridge]. */
 class AgentService : AccessibilityService() {
@@ -26,6 +27,11 @@ class AgentService : AccessibilityService() {
     private var bridge: Bridge? = null
     internal var wake: WakeWord? = null  // "Hey Friday" (D-035)
     internal var bubble: Bubble? = null  // quick access over every app
+    // UI requests, bridge model diagnostics and prewarm share ownership of model lifetimes.
+    private val modelLock = ReentrantLock()
+    private val requestState = Any()
+    @Volatile private var destroyed = false
+    @Volatile private var writing = false
 
     override fun onServiceConnected() {
         instance = this
@@ -42,14 +48,34 @@ class AgentService : AccessibilityService() {
     override fun onInterrupt() {}
 
     override fun onDestroy() {
+        destroyed = true  // the Writer monitor cancels an in-flight load/generation
         bridge?.stop()
         wake?.close()
         bubble?.hide()
+        Thread({ modelLock.lock(); try { freeLaya() } finally { modelLock.unlock() } }, "models-destroy").start()
         instance = null
         super.onDestroy()
     }
 
-    fun handle(c: JSONObject): JSONObject = when (val cmd = c.getString("cmd")) {
+    fun handle(c: JSONObject): JSONObject {
+        val cmd = c.getString("cmd")
+        if (cmd !in MODEL_COMMANDS) return command(c)
+        if (!beginRequest()) return JSONObject().put("status", "busy").put("error", "Friday is already working")
+        if (!modelLock.tryLock()) {
+            endRequest()
+            return JSONObject().put("status", "busy").put("error", "A model is loading or running")
+        }
+        return try {
+            if (cmd == "bench" || cmd == "decide_test") freeLaya()
+            command(c)
+        } finally {
+            layaIdle()
+            modelLock.unlock()
+            endRequest()
+        }
+    }
+
+    private fun command(c: JSONObject): JSONObject = when (val cmd = c.getString("cmd")) {
         "state" -> {
             settle(c.optLong("quiet_ms", 300), c.optLong("timeout_ms", 3000))
             state()
@@ -68,12 +94,26 @@ class AgentService : AccessibilityService() {
             .put("media", mediaSelfCheck()).put("people", peopleSelfCheck()).put("profiler", appCatalogSelfCheck())
             .put("routes", routesSelfCheck()).put("routing", routingSelfCheck()).put("wake", wakeSelfCheck(this))
             .put("shortlist", shortlistSelfCheck()).put("card", cardSelfCheck()).put("icons", iconNamerSelfCheck())
-            .put("conversation", conversationSelfCheck())
+            .put("conversation", conversationSelfCheck()).put("writer", Writer.selfCheck()).put("message_read", ReadMessages.selfCheck())
+            .put("research", ResearchWorkflow.selfCheck()).put("hotel", HotelSearch.selfCheck())
+        "workflow_state" -> JSONObject().put("research", ResearchWorkflow.state(this) ?: JSONObject.NULL)
         "wake" -> wake?.command(c) ?: error("the wake word isn't set up yet")  // {"on": bool} optional; listening stats
         "wake_test" -> wakeTest(this, java.io.File(filesDir, c.getString("wav")))  // max score of a WAV in filesDir
         "profiles" -> JSONObject(AppProfiler.profiles(packageManager) as Map<*, *>)  // D-031: auto app profiles, to evaluate
         "route" -> routeTest(c.getString("text"))
-        "run" -> { runGoal(c.getString("goal")); JSONObject().put("started", true) }
+        "run" -> JSONObject().put("started", runGoal(c.getString("goal")))
+        "writer" -> when (c.optString("action", "generate")) {
+            "status", "unload" -> JSONObject().put("status", "ok").put("writer_loaded", false)
+                .put("laya_loaded", layaWarm).put("cold", true)
+            "generate" -> {
+                val banner = Overlay(this).banner()
+                try {
+                    banner.say("Writing a draft…")
+                    write(Writer.fromJson(c)) { banner.stopped }
+                } finally { banner.remove() }
+            }
+            else -> JSONObject().put("status", "invalid").put("validation_errors", JSONArray(listOf("unsupported action")))
+        }
         "teach" -> JSONObject().put("started", startTeaching(c.getString("goal"), c.optBoolean("raw")))
         // a real touch from scripts/teach_touches.py: {x, y, long} or {op: BACK|HOME}; says whether still teaching
         "teach_input" -> JSONObject().put("teaching", teacher?.let { t ->
@@ -213,6 +253,18 @@ class AgentService : AccessibilityService() {
         return ok
     }
 
+    /** An approved workflow types into the field it just checked, without submitting a keyboard action. */
+    internal fun setFocusedTextExact(pkg: String, bounds: IntArray, old: String, text: String): Boolean {
+        val field = findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
+        val actual = Rect().also(field::getBoundsInScreen)
+        if (!field.isEditable || !field.isEnabled || !field.isVisibleToUser || field.packageName?.toString() != pkg ||
+            field.text?.toString().orEmpty() != old ||
+            !bounds.contentEquals(intArrayOf(actual.left, actual.top, actual.right, actual.bottom))) return false
+        return field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        })
+    }
+
     private fun openApp(pkg: String): Boolean {
         val intent = packageManager.getLaunchIntentForPackage(pkg) ?: return false
         startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -221,6 +273,12 @@ class AgentService : AccessibilityService() {
 
     // ---- Friday the assistant: a typed request runs through Assistant (route -> skill -> answer) ----
     @Volatile private var running = false
+
+    private fun beginRequest(): Boolean = synchronized(requestState) {
+        if (running || teacher != null || destroyed) false else { running = true; true }
+    }
+
+    private fun endRequest() = synchronized(requestState) { running = false }
 
     /** Running a request or being taught: the wake word must not pop the request box over either. */
     internal val busy get() = running || teacher != null
@@ -235,10 +293,10 @@ class AgentService : AccessibilityService() {
     }
 
     /** Handle one typed request on a background thread (one at a time) and show the answer as a card. */
-    fun runGoal(goal: String) {
-        if (goal.isBlank() || running || teacher != null) return  // while teaching, Friday's own taps would be recorded as the owner's
-        running = true
+    fun runGoal(goal: String): Boolean {
+        if (goal.isBlank() || !beginRequest()) return false
         Thread({
+            modelLock.lock()
             try {
                 val a = Assistant(this, goal.trim(), prev = session?.takeIf { it.fresh })
                 val said = a.run()
@@ -258,20 +316,23 @@ class AgentService : AccessibilityService() {
             } catch (e: Throwable) {
                 toast("error: ${e.message}")
             } finally {
-                running = false
+                modelLock.unlock()
+                endRequest()
             }
         }, "friday-request").start()
+        return true
     }
 
     // ---- Laya stays warm between requests and is freed after IDLE_MS unused (D-016: load on demand, free when idle) ----
-    private var warm: LayaEngine? = null
+    @Volatile private var warm: LayaEngine? = null
     // off the main thread: releasing waits on the lock that laya() holds while loading (~10 s)
     private val idleRelease = Runnable { Thread(::releaseLaya, "laya-release").start() }
 
     internal val layaWarm get() = warm != null
 
     /** The shared engine, loading it if needed (~10 s). Callers must not close it; call [layaIdle] when done. */
-    @Synchronized internal fun laya(): LayaEngine {
+    internal fun laya(): LayaEngine {
+        check(modelLock.isHeldByCurrentThread && !writing) { "Laya needs exclusive model ownership" }
         main.removeCallbacks(idleRelease)
         return warm ?: LayaEngine(this).also { warm = it }
     }
@@ -281,15 +342,34 @@ class AgentService : AccessibilityService() {
         main.postDelayed(idleRelease, IDLE_MS)
     }
 
-    @Synchronized private fun releaseLaya() {
-        if (running) return  // never under a request; it re-arms the timer when it finishes
+    private fun freeLaya() {
+        check(modelLock.isHeldByCurrentThread)
+        main.removeCallbacks(idleRelease)
         warm?.close()
         warm = null
     }
 
+    private fun releaseLaya() {
+        if (running || !modelLock.tryLock()) return
+        try { if (!running) freeLaya() } finally { modelLock.unlock() }
+    }
+
+    /** Writer requests are text-only; it is always freed before this model lock can pass to Laya. */
+    internal fun write(request: WriterRequest, stopped: () -> Boolean = { false }): JSONObject {
+        check(modelLock.isHeldByCurrentThread)
+        if (request.errors().isEmpty()) freeLaya()
+        writing = true
+        return try { Writer.run(this, request) { destroyed || stopped() } }
+        finally { writing = false }
+    }
+
     /** Load Laya in the background when the owner opens Friday, so it's warm by the time they tap Run. */
     fun prewarm() {
-        if (warm == null) Thread({ runCatching { laya(); layaIdle() } }, "laya-prewarm").start()
+        if (warm == null && !busy && !destroyed) Thread({
+            if (modelLock.tryLock()) try {
+                if (!busy && !destroyed) runCatching { laya(); layaIdle() }
+            } finally { modelLock.unlock() }
+        }, "laya-prewarm").start()
     }
 
     override fun onTrimMemory(level: Int) {
@@ -301,12 +381,12 @@ class AgentService : AccessibilityService() {
     @Volatile private var teacher: Teacher? = null
     @Volatile private var lastAsk: Assistant? = null  // the bridge's last "ask", for "remember"
 
-    fun startTeaching(goal: String, rawTouches: Boolean = false): Boolean {
-        if (goal.isBlank() || teacher != null || running) return false
+    fun startTeaching(goal: String, rawTouches: Boolean = false): Boolean = synchronized(requestState) {
+        if (goal.isBlank() || teacher != null || running || destroyed) return@synchronized false
         listenForTeaching(true)
         bubble?.hide()
         teacher = Teacher(this, goal.trim(), rawTouches)
-        return true
+        true
     }
 
     internal fun finishTeaching(keep: Boolean) {
@@ -538,6 +618,7 @@ class AgentService : AccessibilityService() {
     companion object {
         @Volatile var instance: AgentService? = null
         private const val IDLE_MS = 3 * 60_000L  // ~700 MB stays resident this long after a request (D-016)
+        private val MODEL_COMMANDS = setOf("ask", "writer", "route", "bench", "decide_test", "step_parity", "shortlist_eval", "laya_pin")
         private val SEARCH_BOX = Regex("search|query|find|look ?up", RegexOption.IGNORE_CASE)
         private val TEACH_EVENTS = AccessibilityEvent.TYPE_VIEW_CLICKED or AccessibilityEvent.TYPE_VIEW_LONG_CLICKED or
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED

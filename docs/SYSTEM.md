@@ -187,7 +187,8 @@ typed request, or spoken to the floating bubble (tap, speak, tap), or "Hey Frida
    be connected over USB.
 2. **Task card (D-051, research/23):** read each request once into one structured card (skill, app, about-words,
    query and slots, read or act, risk, done-check), used by every stage. Rules fill it; a small on-phone text LLM
-   (the "Writer", LFM2.5-1.2B in llama.cpp, D-041, not built) fills it when rules can't.
+   (the "Writer", LFM2.5-1.2B in llama.cpp, D-041) is intended to fill it when rules can't. Explicit text drafts are
+   now implemented ([guide](writer.md)); automatic task-card filling is still planned.
 3. **App map + element ranker (ideation; prior work in research/24):**
    - **The map:** learn each app's screens and what every element leads to, from the owner's own use, Friday's runs
      and safe exploration while charging. Plan paths on it with no model.

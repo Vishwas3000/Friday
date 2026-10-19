@@ -1,8 +1,17 @@
 # Research: can Laya run an Android phone, fully locally?
 
-_Last updated: 2026-10-17 · Trust tags: [primary] read at source · [secondary] search/blog/forum · [measured] run here · [UNCERTAIN] unconfirmed or conflicting_
+_Last updated: 2026-10-20 · Trust tags: [primary] read at source · [secondary] search/blog/forum · [measured] run here · [UNCERTAIN] unconfirmed or conflicting_
 
 Distilled from the topic files below. Decisions that follow from it are in [../docs/DECISIONS.md](../docs/DECISIONS.md).
+
+## Current task work (20 October)
+
+- [Hotel failure analysis and improvement backlog](29-task-completion-speed-and-accuracy.md): measured routing, date, candidate, progress and result-collection failures on the connected Pixel; the hotel task remains incomplete.
+- [Online use-case catalog](30-online-usecase-catalog.md) and [JSON specifications](online-usecases.json): 60 proposed cases across 8 domains, 12 initial acceptance cases, source links, typed handoffs and independent completion checks. These specifications have not been run.
+- [Cheap SLM text generation](31-slm-text-generation.md): Writer design, candidates and quality cases. The [implemented Writer and first live results](33-writer-live-tests.md) record actual outcomes separately from the plan.
+- [Hotel device walkthrough](32-hotel-device-walkthrough.md): observed checkpoints, guided versus autonomous actions, calendar target loss, and remaining date/guest/result checks.
+
+The historical measurements below retain their stated dates and hardware conditions.
 
 ## Answer in one screen
 
@@ -42,7 +51,7 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
    - **Quantization [measured, 06]:** dynamic int8 is 3.5× faster (677 ms) and 389 MB but **breaks the operation decision** (our measure + Laya's own 17% figure) — needs the op head kept fp32.
 6. **Text and app names need a "System 2"** [01, 03, 04].
    - **First choice:** rules plus Laya choosing among options. Use quoted spans in the goal for text, and installed-app labels for OPEN_APP, run as a short-list tournament.
-   - **Fallback:** a small local LLM, loaded only on those steps. On the Mac: Qwen3.5-4B. On the phone: Qwen3.5-0.8B or FunctionGemma 270M.
+   - **Text generation:** the first local Writer implementation uses LFM2.5-1.2B, with Qwen3.5-0.8B provisioned for comparison. [33](33-writer-live-tests.md) records live quality failures and refinement status; [31](31-slm-text-generation.md) retains the broader candidate plan.
    - **Gemini Nano is out:** the Pixel 8 is unsupported, and it only answers while the calling app is in the foreground [primary].
 7. **Browser.** Drive the user's own Chrome through the same accessibility path. It exposes page elements, keeps logins, and matches Laya-Android's training.
    - Chrome DevTools only works from a USB host.
@@ -96,6 +105,12 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 | [26-icon-classifier-experiments.md](26-icon-classifier-experiments.md) | The icon classifier's tasks, decisions and experiments: MobileNetV3-Small from scratch, 64×64 grey, UIST'18 + Material Symbols renders; E0 94.1% real top-1, 98.3% right / 92% named at threshold 0.7, 6.5 MB, ONNX parity 1e-6; E1 Optuna, ablations, on-phone checks |
 | [27-laya-at-scale.md](27-laya-at-scale.md) | Laya-Android on AndroidControl's 9,987 held-out test steps (rented 4090): published Type / Grounding reproduce (76.75 / 61.84); Friday's input format is a small net gain (target +1.2, operation −0.4; id labels pay, loose text needs system windows out); the target shortlist at k = 16 hides 17% of gold targets and costs 5 points on crowded taps (fewer options don't help Laya), cutting the operation row costs 1–2 points: raise k to 32 |
 | [28-laya-student.md](28-laya-student.md) | A smaller Laya: 11 of 22 layers distilled from Laya-Android (same inputs, only the model file changes); layer choice, loss, temperature, export like nb8, vocabulary-cut analysis |
+| [29-task-completion-speed-and-accuracy.md](29-task-completion-speed-and-accuracy.md) | Connected Pixel hotel diagnostic: measured failures, timing, every execution stage, completion checks and prioritized improvements |
+| [30-online-usecase-catalog.md](30-online-usecase-catalog.md) | 60 online-inspired test specifications across 8 domains; first 12 acceptance cases, cross-app mechanisms, fixtures, oracles and failure variants |
+| [online-usecases.json](online-usecases.json) | Machine-readable companion with stable T01–T60 IDs, setup, typed data, access, source links, expected outcomes and unrun status |
+| [31-slm-text-generation.md](31-slm-text-generation.md) | Cheap local Writer feasibility, 16 text-quality cases, output contracts, resource costs and candidate comparison plan |
+| [32-hotel-device-walkthrough.md](32-hotel-device-walkthrough.md) | Literal Pixel checkpoints and evidence: 31 calendar day nodes become zero date candidates; check-in selected, remaining stay details and results pending |
+| [33-writer-live-tests.md](33-writer-live-tests.md) | Writer implementation, Pixel build/deployment checks, initial 20-case results, observed quality failures and refinement status |
 
 
 

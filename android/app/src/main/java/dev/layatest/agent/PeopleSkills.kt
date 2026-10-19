@@ -60,27 +60,12 @@ object Message : Skill {
     override val id = "message"
 
     override fun run(ctx: SkillContext): String {
-        val (rule, body) = messageParts(taskPart(ctx.request))
-        if (isEmail(taskPart(ctx.request))) return email(ctx, rule, body)
-        val to = rule ?: pick(ctx) ?: return "Who should I message?"
-        val app = ctx.appFor(id) ?: return NO_APP
-        ctx.openAndWait(app)
-        // two sub-goals, because runLaya types the same text at every INPUT_TEXT
-        val chat = ctx.runLaya("open the chat with $to", typeText = to)
-        if (chat != Outcome.DONE || body == null) return outcome(chat, "The chat with $to is open — type your message")
-        return outcome(ctx.runLaya("type the message and send it", typeText = body), "Sent to $to")
-    }
-
-    /** The mail app's compose screen, filled in; the owner checks it and taps Send. */
-    private fun email(ctx: SkillContext, to: String?, body: String?): String {
-        val addr = to?.takeIf { '@' in it }.orEmpty() // a bare name isn't an address: the owner picks the contact
-        val ok = ctx.launch(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$addr"))
-            .putExtra(Intent.EXTRA_SUBJECT, emailSubject(taskPart(ctx.request))).putExtra(Intent.EXTRA_TEXT, body))
-        return when {
-            !ok -> "I couldn't open an email app"
-            to != null && addr.isEmpty() -> "Email ready — add $to, then tap Send"
-            else -> "Email ready — check it and tap Send"
-        }
+        val task = taskPart(ctx.request)
+        val (_, body) = messageParts(task)
+        val exact = exactDraftText(task)
+        val kind = if (isEmail(task)) "email" else "message"
+        if (exact == null && body.isNullOrBlank()) return "What should the ${if (kind == "email") "email" else "message"} say?"
+        return ctx.draft(kind, ctx.request, exact ?: body.orEmpty(), exact != null, emailSubject(task).orEmpty())
     }
 }
 
@@ -161,7 +146,7 @@ private val FILLERS = setOf("to", "my", "me", "the", "a", "an", "some", "our")
 /** Words between "to" and the place: "to go to X", "to get home", "to be at X". */
 private val DEST_LEAD = setOf("go", "get", "reach", "head", "drive", "walk", "be", "at", "to", "my")
 /** Where a name ends: a command or filler word, a greeting or a pronoun ("text mom I'm on my way"). */
-private val NAME_END = Slots.STOP + Slots.CUT + setOf("about", "you", "we", "hi", "hey", "hello", "good", "happy", "see", "can")
+private val NAME_END = Slots.STOP + Slots.CUT + setOf("about", "asking", "you", "we", "hi", "hey", "hello", "good", "happy", "see", "can")
 /** Words after a name that don't start a message: "message rahul on whatsapp", "email john about the trip". */
 private val LINKS = Slots.CUT + setOf("about", "to", "for", "from", "in", "at")
 private val SEARCH_CMD = Regex("^(please |can you |could you )?(search( the web| google| online)?( for)?|look up|google)\\b[\\s,:]*",
@@ -192,7 +177,32 @@ private fun dialable(slot: String) = slot.replace(Regex("[\\s()-]"), "").takeIf 
 private fun isEmail(request: String) = MSG_CMD.find(request)?.value?.endsWith("mail", ignoreCase = true) == true
 
 /** "email john about the trip saying …" -> "the trip". */
-private fun emailSubject(request: String) = Slots(request).after("about", cutAt = setOf("that", "saying"))
+internal fun emailSubject(request: String) = Slots(request).after("about", cutAt = setOf("that", "saying", "in", "on", "via", "using", "through"))
+
+internal fun exactDraftText(request: String): String? {
+    val start = request.indexOfFirst { it == '"' || it == '“' }
+    val composing = Regex("^(?:please\\s+)?(?:write|draft|compose|create|generate|suggest|polish|rewrite|rephrase)\\b", RegexOption.IGNORE_CASE)
+        .containsMatchIn(taskPart(request))
+    fun directiveAt(index: Int): Boolean {
+        val before = request.take(index)
+        val source = Regex("\\b(?:saying|that)\\s+", RegexOption.IGNORE_CASE).find(before)
+        val body = messageParts(request).second
+        val bodyAt = body?.let { request.indexOf(it) }?.takeIf { it >= 0 }
+        val inSource = (source != null && before.substring(source.range.last + 1).isNotBlank()) ||
+            (bodyAt != null && bodyAt < index && before.substring(bodyAt).isNotBlank())
+        return (start < 0 || index < start) && !inSource
+    }
+    Regex("\\b(?:verbatim|exactly)\\s*:\\s*(.+)", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+        .find(request)?.let { directive ->
+            if (directiveAt(directive.range.first)) return directive.groupValues[1]
+        }
+    val quotedDirective = if (start < 0) null else Regex("\\b(?:verbatim|exactly)\\s*$", RegexOption.IGNORE_CASE).find(request.take(start))
+    if (composing && (quotedDirective == null || !directiveAt(quotedDirective.range.first))) return null
+    if (start < 0) return null
+    val before = request.take(start)
+    if (messageParts(before).first == null && !Regex("\\b(?:saying|that)\\s*$", RegexOption.IGNORE_CASE).containsMatchIn(before)) return null
+    return Slots(request).quoted.firstOrNull()
+}
 
 /**
  * (recipient, message). "message rahul that I'll be late" -> ("rahul", "I'll be late"). With no quotes,
@@ -235,6 +245,10 @@ internal fun photoQuery(request: String): String? {
 
 /** Asserts for the people & places slot rules; wire into the "selfcheck" bridge command. */
 fun peopleSelfCheck(): String {
+    check(DraftHandoff.selfCheck() == "ok")
+    check(exactDraftText("write a WhatsApp message to Rahul saying The label reads exactly: Handle with care.") == null)
+    check(exactDraftText("write a WhatsApp message to Rahul exactly: Handle with care.") == "Handle with care.")
+    check(exactDraftText("message Rahul saying exactly: Handle with care.") == "Handle with care.")
     check(destination("navigate to MG road") == "MG road")
     check(destination("I want to go to Indiranagar") == "Indiranagar")
     check(destination("book a cab to the airport for 6 am") == "the airport")
@@ -256,6 +270,15 @@ fun peopleSelfCheck(): String {
     check(messageParts("send rahul a message") == (null to null))
     check(isEmail("send an email to john@example.com about the trip") && !isEmail("text mom that I sent the email"))
     check(messageParts("email john@example.com about the trip") == ("john@example.com" to null))
+    check(exactDraftText("write a polite WhatsApp message to Rahul saying \"cannot come\"") == null)
+    check(exactDraftText("write a WhatsApp message to Rahul saying exactly \"Keep ₹1,250.\"") == "Keep ₹1,250.")
+    check(exactDraftText("message Rahul verbatim: Don't change this.") == "Don't change this.")
+    check(exactDraftText("message Rahul saying I will be late") == null)
+    check(exactDraftText("write a message saying \"Keep this exact.\"") == null)
+    check(exactDraftText("message Rahul \"Keep this exact.\"") == "Keep this exact.")
+    check(messageParts("message Rahul on WhatsApp saying I will be 15 minutes late").second == "I will be 15 minutes late")
+    check(messageParts("email alex@example.test in Gmail saying I will review the plan").second == "I will review the plan")
+    check(exactDraftText("email alex@example.test in Gmail saying I will review the plan") == null)
     check(emailSubject("email john about the trip saying tickets are booked") == "the trip")
     check(shoppingItem("order some milk from blinkit") == "milk")
     check(isTracking("track my amazon order") && !isTracking("order milk"))
