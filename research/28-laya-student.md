@@ -431,7 +431,12 @@ encoder lr 1e-5, embeddings frozen.
   99/100 operations (the one flip at a PyTorch margin of 0.047) and 48/48 targets, max |Δp| 0.086 / 0.091.
   English-only cut (v2 vocabulary, E4): 198.8 MB plus a 5.7 MB map; 50/50 decisions unchanged, max |Δp| 0.0 against
   the uncut file on re-spelt input. Fixtures `fixture-s11f.json` and `fixture-s11f-en.json` written for the phone
-  bench. The nb8 file itself on 1,000 test steps: [pending, `onnx-eval`].
+  bench.
+- **The nb8 file itself, scored like PyTorch** (`onnx-eval`: laya's ONNX agent on 1,000 random test steps, x86 CPU
+  kernels, 811 s): Policy Joint 0.5868 against 0.5868 for the bf16 PyTorch run on the same steps; operation 0.716 vs
+  0.715, target top-1 0.657 vs 0.659; the two agree on 987/1,000 operations and 462/475 targets; Type 72.87 both,
+  Grounding 59.68 vs 60.47. The 8-bit file loses nothing measurable, so the gate numbers above stand for the phone's
+  file too.
 
 ### E6 — Friday's other questions: skill routing and slot picks [measured, PyTorch fp32 on the box's CPU]
 The same model file also routes requests (`Skills.kt route()`: 16 skills, act at confidence ≥ 0.7, else ask the owner)
@@ -450,7 +455,7 @@ The same on the **English-only cut files, with the request re-spelt as the phone
 
 | | routing accuracy (seen / paraphrases) | at confidence ≥ 0.7: share / right | slot: exact / overlap |
 |---|---|---|---|
-| teacher, cut | [running] | | |
+| teacher, cut | 0.80 (0.79 / 0.81) | 58% / 93.1% | 0.77 / 0.96 |
 | S11, cut | 0.40 (0.56 / 0.06) | 58% / 37.9% | 0.62 / 0.89 |
 | S11-F, cut | **0.78** (0.82 / 0.69) | 32% / **100%** | 0.73 / 0.92 |
 
@@ -464,9 +469,10 @@ The same on the **English-only cut files, with the request re-spelt as the phone
   soft targets in one epoch, bring S11-F to the teacher's accuracy. The 50 cases above are not among them. S11-F is
   **less often confident** (38% of requests at ≥ 0.7 against the teacher's 60%), so Friday would ask the owner to
   confirm the skill more often; what it is confident about is right.
-- **The English cut costs routing:** S11-F 0.82 → 0.78, and the confident share 38% → 32%. The 50 requests are the
-  owner's phrasing, and words outside AndroidControl's vocabulary are re-spelt into pieces. Before a cut file ships,
-  the kept list should also cover the words of the owner's own request log (E4's recipe takes any extra ids).
+- **The English cut costs routing:** the teacher 0.82 → 0.80, S11-F 0.82 → 0.78 with its confident share 38% → 32%;
+  slots unchanged. The 50 requests are the owner's phrasing, and words outside AndroidControl's vocabulary are
+  re-spelt into pieces. Before a cut file ships, the kept list should also cover the words of the owner's own request
+  log (E4's recipe takes any extra ids).
 
 ### E7 — S11-A: S11 plus the routing/slot answers, no format rows [running, 2026-10-19]
 E5 showed the Friday-format rows bought nothing on the step questions and cost 0.9 points on the trained format,
