@@ -322,6 +322,36 @@ over a 5-step task that compounds (research/01 §4). The input pipeline is not w
 5. **If the target shortlist stays,** train target rows on shortlists too, so Laya learns the shortlist's shape. It
    can't fix recall: a missing gold stays missing.
 
+### Step 1 done: data built [measured, 2026-10-19, CPU only, while the student's S8 run had the GPU]
+- **What:** `training/laya-scale/friday_data.py` streamed the 20 shards again (nothing raw on disk) on 20 CPU workers
+  in 10 minutes. It rendered every step with Friday's builder, all four changes on; the icon classifier ran on the
+  CPU per screenshot, keeping only names. The target shortlist is the phone's new default, k = 32 (D-060). Output:
+  `/root/friday-laya/laya/data/friday_{train,val,test}.jsonl` + `FORMAT_FRIDAY.md`, then `READY_FRIDAY` at 11:41
+  (box time). 0.78 GB.
+- **Decisions:**
+  - **Golds:** the repo's grounding rule on Friday's list, kept only when it lands on the trained gold's own element
+    (same box). Otherwise the step is dropped and later history says `CLICK (unlabeled)`, as the repo writes an
+    ungroundable tap. Why: a tap on a system-window element would otherwise re-ground onto whatever app element lies
+    under it, a wrong label.
+  - **Shortlist:** on a groundable tap with more than 32 elements, the step becomes an operation line on every element
+    plus a target line on the shortlist (both states as `LayaEngine.step` builds them); no target line when the
+    shortlist misses the gold. Both are marked (`row`, `shortlist`).
+  - **Same line format** as `ac_*.jsonl`; `laya.train.items_from_rows` read val (858 rows → 1,220 items) and 3,000
+    train rows (→ 4,239 items) with nothing skipped.
+
+| Split | Steps | Dropped (no counterpart) | Gained (tap now on loose text) | Cut at k = 32 | Shortlist missed the gold | Lines | Icons named |
+|---|---|---|---|---|---|---|---|
+| train | 88,308 | 110 | 77 | 4,746 | 550 (11.6%) | 92,394 | 22,749 |
+| val | 827 | 0 | 0 | 39 | 8 | 858 | 190 |
+| test | 9,987 | 15 | 19 | 401 | 37 (9.2%) | 10,336 | 2,186 |
+
+- **Check:** friday_test equals L2's "all" variant (rebuilt from the stored test forests and icon classes, not
+  streamed) plus the k = 32 cut on **9,986 of 9,987 steps**. The one difference is the drop rule at work: episode
+  13436 step 1 taps "Snooze" in a notification; without system windows the tap lands on the home screen's weather
+  widget, which L2 took as the gold. Here the step is dropped. So L2's "all" had 1 wrong gold in 4,761 (no effect on
+  its numbers).
+- Test's 401 cut steps and 37 misses match L3's k = 32 row (recall 90.8%).
+
 ## 8. Dead ends and caveats
 - **Full reruns for every variant.** The first L2 pass reran all 9,987 steps per variant (~3 min each on the shared
   GPU). Batching noise turned out tiny (above), so this only cost time; unchanged steps now reuse L1's predictions.
@@ -343,14 +373,15 @@ over a 5-step task that compounds (research/01 §4). The input pipeline is not w
   - The GPU was shared with the student agent; that affects speed only, not results.
 
 ## 9. Reproducing, and what is on the box
-- **Code** (`training/laya-scale/`): `ac_data.py` (L0), `ac_eval.py l1 | l2 | l3 | l3op`; the switches and the
-  shortlist port in `scripts/laya_android.py`. The repo's own L1 commands:
+- **Code** (`training/laya-scale/`): `ac_data.py` (L0), `ac_eval.py l1 | l2 | l3 | l3op`, `friday_data.py` (§7 step
+  1, and `--check`); the switches and the shortlist port in `scripts/laya_android.py`. The repo's own L1 commands:
   `eval_laya_android.py --model <snapshot> --splits test_idd,test_app_unseen,test_task_unseen,test_category_unseen
   --out results/test/internal_laya_android.json --preds-dir results/test/raw/laya_android`, then
   `evaluate_androidcontrol.py --model laya_android --out results/test/final_metrics.json --preds-out
   results/test/final_predictions.jsonl.gz`, with `LAYA_ANDROID_DATA=/root/friday-laya/laya/ac`.
-- **On the box** (`/root/friday-laya/laya`, 8.7 GB): the venv (6.5 GB), `ac/` (repo-format items 0.6 GB, test
-  forests + icon classes 1 GB, cached predictions 8 MB, splits and the InfiGUI reference), `data/` (hand-off, 0.7 GB),
+- **On the box** (`/root/friday-laya/laya`, 9.5 GB): the venv (6.5 GB), `ac/` (repo-format items 0.6 GB, test
+  forests + icon classes 1 GB, cached predictions 8 MB, splits and the InfiGUI reference), `data/` (hand-off: ac_*
+  0.7 GB, friday_* 0.78 GB),
   `results/l2.json`, `l3.json`, `l3op.json`, logs; the model in the shared `/root/friday-laya/hf` (0.65 GB). No raw
   shards. Nothing of mine is running. The box's laya-android clone has our L1 run in `results/test/` (its published
   files are in the clone's git HEAD, which `ac_eval.py l1` compares against).
