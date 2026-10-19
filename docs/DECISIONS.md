@@ -586,3 +586,20 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   memory: most of Laya's 256k-token multilingual vocabulary (196M of its 322M parameters) is never used by English UI
   text, so research/28's vocabulary trim can keep only English tokens plus byte fallback.
 - **Who / status:** owner · **in force.** research/28 was told mid-run; the app's code needed no change.
+
+### D-059 — Fixes from the 2026-10-19 suite runs
+- **Decision:**
+  - **Order reads wait for the orders page and scroll for the count asked.** This is the money reader's loop, now
+    shared as `readList`. "show me last 5 orders in amazon": "orders are on screen" → 5 orders read, 11 s.
+  - **A remembered step waits up to 8 s (was 4 s) for its element.**
+    - On a warm phone Amazon's "See all orders" came later than 4 s.
+    - The Laya step that then found the same element took 30 s.
+    - amazon-orders: 42 s → 8.5 s, with no Laya steps.
+  - **The task suite waits while the phone is hot** (thermal status ≥ 3), up to 10 min, then stops.
+- **Suite now (memory on, read only):** 23/25, median 6.3 s. Only Photos (no search intent; Laya taps a photo) and
+  Swiggy (no accessibility candidates) fail.
+- **Not changed, for the owner to decide:** risky words are matched anywhere in a label. A container's label includes
+  its children's text, so Spotify's playlist row "… Add … to My Library" asks the owner (the unattended suite skips it).
+  - Narrowing the rule (first words only, or short labels only) could let a container labelled
+    "₹1,249 Total Place order" through, so it stays as is.
+- **Who / status:** Claude, from the suite (the owner's standing ask: reliable and fast) · **shipped.**

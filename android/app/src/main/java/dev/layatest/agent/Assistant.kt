@@ -394,8 +394,9 @@ class Assistant(private val svc: AgentService, override val request: String, pri
             val t0 = SystemClock.elapsedRealtime()
             var scr = screen()
             // a remembered element can take a moment to appear: Amazon's You page loads after the tap, and the
-            // replay gave up 1.3 s in and handed a wrong "See all" to Laya (2026-10-18)
-            if (st.targeted && st.find(scr) == null) waitUntil(4000) { screen().also { scr = it }.let(st::find) != null }
+            // replay gave up 1.3 s in and handed a wrong "See all" to Laya (2026-10-18); on a warm phone 4 s wasn't
+            // enough either, and the Laya step that found the same element took 30 s (suite, 2026-10-19)
+            if (st.targeted && st.find(scr) == null) waitUntil(8000) { screen().also { scr = it }.let(st::find) != null }
             val target = if (!st.targeted) null else st.find(scr) ?: run {
                 trace += "memory step ${i + 1}: \"${st.label}\" isn't on this screen -> Laya"
                 return null
