@@ -296,3 +296,12 @@ only, not kept).
   - That points icon v2 at "other": photos, banners, logos and thumbnails.
   - The planned 100–200-icon collection needs deeper screens, from an exploration walk. Not done.
   - E5 (the suite, on vs off) decides whether it stays on.
+
+**E5 — the gate: the task suite with icon names on [measured, Pixel 8, 2026-10-19].**
+- **Result: 20/25**, the same as the last run without the model (20/25 once the dropped Zepto task is taken out).
+- **Icon naming fired once in the whole suite:** Spotify, "share" (1 of 2 icons, 303 ms). That task passed.
+- **One new failure is unrelated: maps-search.** It took the same 4 Laya steps as both passing runs (and no icon was
+  named); only its final screen differed, so the check is flaky. D-057 now answers that task in one launch.
+- **Verdict: the gate passes,** and the classifier stays on. In the owner's apps it rarely has anything to name
+  (E4, E5). The next useful step is v2's wider "other" class (photos, banners, logos), not more classes.
+

@@ -528,7 +528,7 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - Porting the UIST'18 network (147 MB fp32).
   - COALA's GPL classifier; captioners (0.7–1.9 GB).
   - int8 MobileNetV3: hard-swish and squeeze-excite lose accuracy under ORT int8.
-- **Who / status:** owner (approved; rented an RTX 4090, 2026-10-19) · Claude · **E0 trained (research/26 §6):** 94.1% real top-1, 98.3% right / 92% named at the shipped threshold 0.7, 6.53 MB, ONNX parity 1e-6. **Shipped E0b** (E1's settings): 94.07% real top-1, threshold 0.90 (99.2% right, 86% named, 5% of unseen icons wrongly named). **E4 on the phone:** only 7 unnamed icons on the first screens of 10 everyday apps, mostly photos and logos; 1 named, wrongly (a plus-shaped logo as "add"). E5 (task suite) pending.
+- **Who / status:** owner (approved; rented an RTX 4090, 2026-10-19) · Claude · **E0 trained (research/26 §6):** 94.1% real top-1, 98.3% right / 92% named at the shipped threshold 0.7, 6.53 MB, ONNX parity 1e-6. **Shipped E0b** (E1's settings): 94.07% real top-1, threshold 0.90 (99.2% right, 86% named, 5% of unseen icons wrongly named). **E4 on the phone:** only 7 unnamed icons on the first screens of 10 everyday apps, mostly photos and logos; 1 named, wrongly (a plus-shaped logo as "add"). **E5 passed:** suite 20/25 as before, naming fired once (Spotify "share").
 
 ### D-056 — Use the rented GPU for Laya at scale: AndroidControl evaluation of Friday's input, and a half-depth student
 - **Decision:** two experiments run in parallel on the rented RTX 4090. Each has its own folder and venv.
@@ -551,4 +551,30 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - A VLM labelling the owner's screens: needs exploration screenshots first.
   - A full fine-tune on Friday's format: waits for research/27 to show which changes matter.
 - **Who / status:** owner (asked) · Claude (chose the experiments; two agents run them) · **running**.
+
+### D-057 — "Open X and search for Y" uses the app's own search before Laya
+- **Decision:** when the task card's task is a search ("search for", "look for/up", "find") and the request names the
+  app, Friday tries the app's own search in one launch:
+  - a store's `market://search?q=`;
+  - a map's `geo:0,0?q=`;
+  - Android's search request (`ACTION_SEARCH` + `SearchManager.QUERY`).
+  - It keeps the result only if the app is in front and its screen shows the query's words within 5 s. Otherwise it
+    restarts the app and Laya does the task as before.
+  - Skills can now read the task card (`SkillContext.card`); this is D-051 step (b)'s first use.
+- **Why:** the suite's searches took 3–4 Laya steps of ~10 s each, and Maps failed once (2026-10-19).
+  - Measured after the change:
+    - Play Store 32–40 s → 2.7 s;
+    - YouTube 28 s → 1.9 s;
+    - Maps 47 s (failed) → 4.0 s (passes).
+  - 39 apps on the owner's phone declare a search activity (Gmail, Meesho, Spotify, Keep, Contacts…). These are
+    platform contracts, not per-app guesses.
+- **Rejected:**
+  - Per-app web search URLs (e.g. Photos' `photos.google.com/search/…` opened a results page, but not clearly for the
+    query).
+  - Tapping a "Search" element without Laya: kept as an idea for apps without a search intent (Photos), not built.
+- **Not fixed:**
+  - Photos: no search intent; Laya taps a photo on a 43-element screen.
+  - Swiggy: its screens show no tappable elements to accessibility (0 candidates), so Laya can't work there at all.
+- **Who / status:** Claude, from the suite's failures (the owner's standing ask: make Friday fast and reliable) ·
+  **shipped, verified on the 3 suite tasks.**
 
