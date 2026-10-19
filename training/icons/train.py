@@ -45,12 +45,12 @@ class Probs(nn.Module):  # what ships: softmax inside the graph
 
 
 class Icons(Dataset):
-    def __init__(self, x, y, train):
+    def __init__(self, x, y, train, crop_min=0.7, blur=0.2):
         self.x, self.y = torch.from_numpy(x), torch.from_numpy(y)
         # app icons come light or dark, padded or tight, sharp or soft
-        self.aug = T.Compose([T.RandomResizedCrop(64, scale=(0.7, 1.0), ratio=(0.85, 1.15), antialias=True),
+        self.aug = T.Compose([T.RandomResizedCrop(64, scale=(crop_min, 1.0), ratio=(0.85, 1.15), antialias=True),
                               T.RandomInvert(0.5), T.ColorJitter(brightness=0.3, contrast=0.3),
-                              T.RandomApply([T.GaussianBlur(3, (0.1, 1.0))], p=0.2)]) if train else None
+                              T.RandomApply([T.GaussianBlur(3, (0.1, 1.0))], p=blur)]) if train else None
 
     def __len__(self):
         return len(self.y)
@@ -74,6 +74,11 @@ def main():
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--batch", type=int, default=512)
     ap.add_argument("--lr", type=float, default=3e-3)
+    # E1's search space (tune.py); the defaults are E0's recipe (research/26 §3.5)
+    ap.add_argument("--wd", type=float, default=0.05)
+    ap.add_argument("--smooth", type=float, default=0.1)
+    ap.add_argument("--crop-min", type=float, default=0.7)
+    ap.add_argument("--blur", type=float, default=0.2)
     ap.add_argument("--eval-only", action="store_true", help="skip training: threshold, export and checks from out/best.pt")
     a = ap.parse_args()
     OUT.mkdir(exist_ok=True)
@@ -91,12 +96,12 @@ def main():
 
 def fit(model, d, a, dev):
     assert dev == "cuda", "no CUDA: this PyTorch build doesn't match the driver (setup.sh picks the build)"
-    dl = DataLoader(Icons(d["x_train"], d["y_train"], True), batch_size=a.batch, shuffle=True, num_workers=8,
+    dl = DataLoader(Icons(d["x_train"], d["y_train"], True, a.crop_min, a.blur), batch_size=a.batch, shuffle=True, num_workers=8,
                     drop_last=True, persistent_workers=True)
-    opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=0.05)
+    opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=a.wd)
     steps = a.epochs * len(dl)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=a.lr, total_steps=steps, pct_start=0.05)
-    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
+    loss_fn = nn.CrossEntropyLoss(label_smoothing=a.smooth)
     best, t0 = -1.0, time.time()
     for ep in range(a.epochs):
         model.train()

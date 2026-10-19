@@ -217,5 +217,22 @@ The task suite (D-049) with icon names on vs off. No task may get worse. Then th
 4. **`setup.sh` CUDA cutoff.** PyTorch 2.14's default build is for CUDA 13.0, so the cutoff is now 13.0. This box was
    unaffected (driver 12.7 → cu126). `train.py` now refuses to train on the CPU.
 
+**E1 — Optuna, 12 trials, 25 epochs each, median pruner [measured, 2026-10-19, 30 min, ~$0.21].** The score is
+macro-averaged accuracy on a 6,545-image validation split cut by unique image. It is lower than the test top-1 because
+every class weighs the same.
+| Trial | lr | wd | smoothing | crop min | blur | width | Validation | State |
+|---|---|---|---|---|---|---|---|---|
+| **1** | **0.0078** | **0.092** | **0.077** | **0.82** | **0.21** | **1.0** | **0.881** | complete (best) |
+| 8 | — | — | — | — | — | 1.0 | 0.877 | complete |
+| 6 | 0.0050 | 0.011 | 0.133 | 0.77 | 0.08 | 1.0 | 0.867 | complete |
+| 0 | 0.0035 | 0.052 | 0.121 | 0.72 | 0.17 | 0.75 | 0.857 | complete |
+| 2 | 0.0012 | 0.012 | 0.004 | 0.83 | 0.31 | 1.0 | 0.846 | complete |
+| 3, 4, 5, 7, 9, 10, 11 | | | | | | | 0.58–0.84 | pruned |
+
+- **Learning rate and weight decay.** A higher lr (~0.008) with stronger weight decay (~0.09) is best. A low lr
+  (0.0012) is clearly worse.
+- **Width 0.75 lost every time** (trials 0, 4, 7). The full-width model stays; this answers ablation A4.
+- **Small gain.** About 1–2 points over the configuration nearest E0's, so E0 was already near a good optimum.
+
 **The final model is E0b:** the fixed data, plus E1's best settings if they beat E0 on the unique-image validation
 split. It is re-thresholded with the unseen-"other" set counted. E0 above is superseded by it.
