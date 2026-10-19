@@ -90,6 +90,7 @@ def main():
 
 
 def fit(model, d, a, dev):
+    assert dev == "cuda", "no CUDA: this PyTorch build doesn't match the driver (setup.sh picks the build)"
     dl = DataLoader(Icons(d["x_train"], d["y_train"], True), batch_size=a.batch, shuffle=True, num_workers=8,
                     drop_last=True, persistent_workers=True)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=0.05)
@@ -118,9 +119,12 @@ def fit(model, d, a, dev):
 def evaluate(model, d, meta, dev):
     classes, other = meta["classes"], meta["classes"].index("other")
     model.load_state_dict(torch.load(OUT / "best.pt", map_location=dev))
-    # the threshold: the lowest confidence at which named (non-"other") icons are >= 95% right, on both test sets
-    p = np.concatenate([predict(model, d["x_test_real"], dev), predict(model, d["x_test_render"], dev)])
-    y = np.concatenate([d["y_test_real"], d["y_test_render"]])
+    # the threshold: the lowest confidence at which named (non-"other") icons are >= 95% right over the real, render and
+    # unseen-"other" test sets -- a name given to an icon from outside the list it never saw counts as wrong
+    has_other = "x_test_other" in d.files
+    p = np.concatenate([predict(model, d["x_test_real"], dev), predict(model, d["x_test_render"], dev)] +
+                       ([predict(model, d["x_test_other"], dev)] if has_other else []))
+    y = np.concatenate([d["y_test_real"], d["y_test_render"]] + ([d["y_test_other"]] if has_other else []))
     pred, conf = p.argmax(1), p.max(1)
     named = pred != other
     threshold = 1.0
@@ -137,6 +141,11 @@ def evaluate(model, d, meta, dev):
                "render_top1": float((pred[real_n:] == d["y_test_render"]).mean()),
                "threshold": threshold, "precision_at_threshold": float((pred[keep] == y[keep]).mean()),
                "named_share_at_threshold": float(keep.mean()), "per_class_real": per_class}
+    if has_other:  # how often an unseen icon from outside the list still gets a name
+        tail = slice(len(y) - len(d["y_test_other"]), None)
+        metrics["unseen_other_named"] = float(keep[tail].mean())
+        metrics["unseen_other_named_by_threshold"] = {f"{t:.1f}": float(((pred[tail] != other) & (conf[tail] >= t)).mean())
+                                                      for t in (0.3, 0.5, 0.7, 0.9)}
 
     # export what the phone runs, then check ONNX Runtime agrees with PyTorch. The wrapper is put in eval mode first:
     # export restores a module's previous mode afterwards, and a fresh wrapper's "train" flipped BatchNorm back to

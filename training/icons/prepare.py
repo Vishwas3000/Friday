@@ -11,6 +11,7 @@
 import io
 import json
 import random
+import re
 import shutil
 import urllib.request
 import zipfile
@@ -73,6 +74,11 @@ ALSO = {"search": ["search"], "menu": ["menu"], "settings": ["settings"], "share
         "minus": ["remove"], "follow": ["person_add"], "swap": ["swap_horiz"]}
 OTHER_TEXT = ("Sign in|Buy now|Add to cart|Continue|Cancel|OK|Next|Skip|Done|Apply|View all|See more|Hello|Offers|"
               "Today|New|Free|50% off|4.3|12:45|Rs 299|Order|Pay|Track|Help|Ab|Q|Hi").split("|")
+TEST_TEXT = ["Login", "Details", "Rs 149", "3.9"]  # never in training: the unseen-"other" test
+# Not "other": a named class's picture under another name ("clear" is "close", "email" is "mail") or a near copy
+# (review, 2026-10-19: ~60 contradictory images)
+NEAR = re.compile(r"cancel|highlight_off|done.*|check_circle.*|task_alt|.*phone.*|translate_.*|chevron_.*|navigate_(before|next)|"
+                  r"arrow_.*|keyboard_arrow_.*|keyboard_backspace|west|east|north|south|.*_(outline|outlined|border|filled|off)")
 
 
 def fetch(url, path):
@@ -169,11 +175,16 @@ def main():
         for _ in range(n // max(1, sum(1 for c2, _, _ in plan if c2 == c))):
             rx.append(render_glyph(rng.choice(fonts), cps[g], rng))
             ry.append(idx[c])
-    others = rng.sample(sorted(set(cps) - used), 600)
+    used_cp = {cps[g] for g in used if g in cps}
+    pool = sorted(n for n in set(cps) - used if cps[n] not in used_cp and not NEAR.fullmatch(n))
+    picked = rng.sample(pool, 660)
+    others, unseen = picked[:600], picked[600:]  # 60 "other" icons held out whole, so the threshold meets icons it never saw
     for g in others:
         for _ in range(4):
             rx.append(render_glyph(rng.choice(fonts), cps[g], rng))
             ry.append(idx["other"])
+    ux = [render_glyph(rng.choice(fonts), cps[g], rng) for g in unseen for _ in range(4)]
+    ux += [render_text(t, rng) for t in TEST_TEXT for _ in range(10)]
     for _ in range(1200):
         rx.append(render_text(rng.choice(OTHER_TEXT), rng))
         ry.append(idx["other"])
@@ -182,9 +193,11 @@ def main():
     held = order[: len(rx) // 10]
     keep = order[len(rx) // 10:]
     np.savez_compressed(D / "icons.npz", x_train=np.concatenate([x_tr, rx[keep]]), y_train=np.concatenate([y_tr, ry[keep]]),
-                        x_test_real=x_te, y_test_real=y_te, x_test_render=rx[held], y_test_render=ry[held])
+                        x_test_real=x_te, y_test_real=y_te, x_test_render=rx[held], y_test_render=ry[held],
+                        x_test_other=np.stack(ux), y_test_other=np.full(len(ux), idx["other"], np.int64))
     (D / "classes.json").write_text(json.dumps({"classes": classes, "words": [WORDS.get(c, c.replace("_", " ")) for c in classes]}))
-    print("classes", len(classes), "| train", len(x_tr) + len(keep), "| test real", len(x_te), "| test renders", len(held), flush=True)
+    print("classes", len(classes), "| train", len(x_tr) + len(keep), "| test real", len(x_te), "| test renders", len(held),
+          "| test unseen other", len(ux), flush=True)
 
 
 if __name__ == "__main__":

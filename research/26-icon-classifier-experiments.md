@@ -202,3 +202,20 @@ The task suite (D-049) with icon names on vs off. No task may get worse. Then th
   statistics, so PyTorch in train mode was compared with ONNX in eval mode. The ONNX file itself was right: 1.6e-6 on
   512 icons, the same top-1 on all. Fixed in `train.py`, which now also has `--eval-only`.
 - **E1 started** (Optuna, 12 trials): validation 6,545 images by unique image (56,017 unique).
+
+**Independent review of the run-pack** (a separate agent, read only, 2026-10-19). Nothing blocked the run. Findings:
+1. **The parity check ran PyTorch in train mode.** Found and fixed above.
+2. **The threshold never met an "other" icon it hadn't seen.** Renders were held out one image at a time, so the test
+   set's "other" icons also appeared in training. The phone's likeliest mistake, confidently naming an unfamiliar
+   icon, went unmeasured. **Fix:** 60 whole "other" icons plus 4 text strings, never trained on, form
+   `x_test_other`. A name given to one of them counts as wrong when the threshold is set, and `metrics.json` reports
+   how many get named.
+3. **About 60 "other" training images were named icons in disguise.** In Material Symbols, `clear` is the same
+   picture as close, `email` as mail, and so on: 80 such names in all. **Fix:** exclude any name that shares a
+   picture with a named class, plus near-copies (cancel, check_circle, `*_off`, outline variants, chevrons, iOS
+   arrows). That leaves 3,812 names to draw 660 from.
+4. **`setup.sh` CUDA cutoff.** PyTorch 2.14's default build is for CUDA 13.0, so the cutoff is now 13.0. This box was
+   unaffected (driver 12.7 → cu126). `train.py` now refuses to train on the CPU.
+
+**The final model is E0b:** the fixed data, plus E1's best settings if they beat E0 on the unique-image validation
+split. It is re-thresholded with the unseen-"other" set counted. E0 above is superseded by it.

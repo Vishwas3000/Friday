@@ -17,10 +17,10 @@ df -h "$W" | tail -1
 free -g | head -2
 
 echo "== venv"
-# PyTorch's default Linux build needs a driver for CUDA >= 12.8; an older driver (e.g. "Max CUDA 12.6") gets the 12.6 build
+# PyTorch 2.14's default Linux build is for CUDA 13.0 (review, 2026-10-19); an older driver gets the 12.6 build
 CUDA=$(nvidia-smi | sed -n 's/.*CUDA Version: \([0-9]*\)\.\([0-9]*\).*/\1\2/p' | head -1)
 TORCH_INDEX=()
-[ -n "$CUDA" ] && [ "$CUDA" -lt 128 ] && TORCH_INDEX=(--index-url https://download.pytorch.org/whl/cu126) && echo "driver CUDA ${CUDA}: using the cu126 build"
+[ -n "$CUDA" ] && [ "$CUDA" -lt 130 ] && TORCH_INDEX=(--index-url https://download.pytorch.org/whl/cu126) && echo "driver CUDA ${CUDA}: using the cu126 build"
 # no uv and no python3-venv (some Ubuntu images): fetch uv into this folder only, never system-wide
 if ! command -v uv >/dev/null && ! python3 -c "import ensurepip" 2>/dev/null; then
   python3 -m pip install -q --target "$W/.tools" uv && export PATH="$W/.tools/bin:$PATH"
