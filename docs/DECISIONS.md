@@ -550,7 +550,16 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - A custom wake-word model: off by default, and the bubble (D-053) replaced it.
   - A VLM labelling the owner's screens: needs exploration screenshots first.
   - A full fine-tune on Friday's format: waits for research/27 to show which changes matter.
-- **Who / status:** owner (asked) · Claude (chose the experiments; two agents run them) · **running**.
+- **Who / status:** owner (asked) · Claude (chose the experiments; two agents run them).
+  - **research/27 done (2026-10-19), all [measured]:**
+    - The published numbers reproduce: Type 76.75, Grounding 61.84.
+    - Friday's format is a small net gain: target +1.2, operation −0.4, joint the same. Keep id labels, icon names
+      and system windows out; keep loose text only together with system windows out.
+    - **The k = 16 target shortlist hides 17% of gold targets.** It costs 5 points on 41% of taps, and fewer options
+      don't help Laya choose. k = 32 costs 0.2 overall (not significant). Raising k is being measured on the phone.
+    - Don't cut the operation row (−1–2 points).
+    - The model itself gets about 61% of held-out steps right. The input pipeline moves that by ±1–2 points.
+  - research/28 (student) is running.
 
 ### D-057 — "Open X and search for Y" uses the app's own search before Laya
 - **Decision:** when the task card's task is a search ("search for", "look for/up", "find") and the request names the

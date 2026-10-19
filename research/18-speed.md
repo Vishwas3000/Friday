@@ -376,6 +376,27 @@ The result keeps screen order.
   - no setting makes a step faster; only less work does: a shorter operation row, skipping Laya via memory/Teach/the map, a smaller student;
   - every Laya step's trace now logs `heat status S, headroom H` from `PowerManager`.
 
+## 11. Why live steps are slower than the bench: not swap [measured, Pixel 8, 2026-10-19]
+- **Swap was the suspect.** With Photos in front, Friday's process had **530 MB in swap** (zram) and only 330 MB
+  resident (`/proc/<pid>/status`).
+- **Swap is not the cause.** Across a Photos request with a 20.8 s Laya step (1,571 tokens), the process took only
+  **3,002 major page faults (~12 MB)**, and VmSwap stayed at ~530 MB. The swapped memory is cold: most likely the
+  256k-row embedding table, whose unused rows are never read [inferred]. The encoder weights stay resident.
+  - The vocabulary trim (D-058, research/28) shrinks that cold memory. It saves RAM, not time.
+- **The process gets cores 0–7** in the `foreground` cpuset (oom adj 100, procState 5). Only the prime core (8) is
+  reserved for the app in front, so a restricted cpuset is ruled out too.
+- **Where the time does go [inferred]:**
+  - **Heat while charging:** thermal headroom was 0.86–0.91 (1.0 = throttling) at status 1.
+  - **The app in front competing for the cores.**
+  - **Longer inputs.** The step ran at ~9 ms per token over its two passes, against 2.8 ms on the bench, which runs
+    passes back to back on a fresh session.
+- **The levers left:** fewer layers (research/28), fewer tokens per pass, and running unplugged or cool.
+- **Shortlist 32 vs 16 on the phone** (suite, memory on, 2026-10-19):
+  - Laya time was **+19%** (231 s vs 193 s), nearly all on two crowded screens: Photos 39 → 65 s, Spotify 63 → 103 s.
+  - Pass rate was 22/25 vs 23/25. Spotify's failure came from the safety rule (its suggestion rows contain "Add
+    suggestion" and were skipped), not from k.
+  - Accuracy at scale is research/27 L3.
+
 ## Open
 - Re-check nb8 on more screens once Teach/run rows exist (research/14). 52 pairs can't show a 1% flip rate.
 - The embedding is now the largest part of nb8 (393 MB as fp16). An 8-bit `GatherBlockQuantized` in a newer ORT could
