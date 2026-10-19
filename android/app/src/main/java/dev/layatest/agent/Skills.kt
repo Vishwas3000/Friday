@@ -1,7 +1,9 @@
 package dev.layatest.agent
 
+import android.app.SearchManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 
 /** How a UI run ended. */
 enum class Outcome { DONE, STOPPED, STUCK, MAX_STEPS }
@@ -27,6 +29,8 @@ interface SkillContext {
     val slots: Slots
     val apps: AppResolver
     val stopped: Boolean
+    /** The request read once (D-051); skills move from re-parsing to this one by one (step b). */
+    val card: TaskCard
 
     /** App for [skill]: one named in the request, the only candidate, the owner's remembered pick, or asked once. */
     fun appFor(skill: String): AppInfo?
@@ -138,6 +142,17 @@ private val DEEP_LINKS: List<Triple<String, Regex, String>> = listOf(
 fun deepLink(pkg: String, request: String): Intent? =
     DEEP_LINKS.firstOrNull { (p, re, _) -> p == pkg && re.containsMatchIn(request) }?.let { Intent(it.third).setPackage(pkg) }
 
+private val SEARCH_TASK = Regex("^(?:search|look (?:for|up)|find)\\b", RegexOption.IGNORE_CASE)
+
+/** The app's own search for [q]: a store's market: or a map's geo: query, else Android's search request (39 apps on the
+ *  owner's phone: YouTube, Meesho, Spotify, Gmail…; the Play Store's opened without results). launch() skips what the
+ *  app doesn't handle. */
+fun searchIntents(pkg: String, q: String) = listOf(
+    Intent(Intent.ACTION_VIEW, Uri.parse("market://search?q=" + Uri.encode(q))).setPackage(pkg),
+    Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(q))).setPackage(pkg),
+    Intent(Intent.ACTION_SEARCH).setPackage(pkg).putExtra(SearchManager.QUERY, q),
+)
+
 /** Money questions: when Laya reaches the screen, Friday reads the amounts out instead of saying "Done". */
 internal val READ_SKILLS = setOf("spend_query", "balance_query", "bill_query")
 /** "last 10 transactions", "5 payments": how many to read. */
@@ -201,6 +216,8 @@ fun routingSelfCheck(): String {
         bareTimer("set an alarm for 5", 5 to 0) == null && bareTimer("set a timer for 5 pm", 17 to 0) == null)
     check(deepLink("com.android.vending", "open the play store and show app updates") != null &&
         deepLink("com.android.vending", "open the play store and search for whatsapp") == null)
+    check(SEARCH_TASK.containsMatchIn("search for coffee") && !SEARCH_TASK.containsMatchIn("show my orders") &&
+        searchIntents("p", "lofi music")[1].data.toString() == "geo:0,0?q=lofi%20music")
     val t = listOf("Paid to", "Ravi Kumar", "₹250", "16 Oct").map { ScreenText(it, intArrayOf(0, 0, 1, 1)) }
     check(readAmounts(t) == "Ravi Kumar · ₹250 · 16 Oct")
     val promo = listOf("Personal loan", "Up to ₹40 lakh", "Check details", "Ravi Kumar", "₹250 debited", "16 October")
@@ -243,6 +260,13 @@ class GenericSkill(override val id: String) : Skill {
             if (ctx.launch(i)) return "Here it is in ${app.label}"
         }
         if (app != null) {
+            // "search for X": the app's own search opens on X's results in one launch, where Laya took 3-4 steps of
+            // ~10 s and Maps failed once (suite, 2026-10-19); kept only when the results show X
+            ctx.card.query?.takeIf { SEARCH_TASK.containsMatchIn(ctx.card.task) }?.let { q ->
+                val words = Routes.contentWords(q)
+                val shown = { ctx.foreground() == app.pkg && Routes.contentWords(ctx.screen().texts.joinToString(" ") { it.text }).containsAll(words) }
+                if (searchIntents(app.pkg, q).any { ctx.launch(it) && ctx.waitUntil(5000, shown) }) return "Here's $q in ${app.label}"
+            }
             ctx.say("Opening ${app.label}…")
             // a task in the app starts from its home screen: GPay reopened on the page the last run left, so the
             // remembered step wasn't there and Laya wandered into a loans page (2026-10-17); "open X" alone resumes

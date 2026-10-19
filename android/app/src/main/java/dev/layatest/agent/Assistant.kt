@@ -25,6 +25,8 @@ class Assistant(private val svc: AgentService, override val request: String, pri
     override val android: Context get() = svc
     override val slots = Slots(taskPart(request))
     override val apps = AppResolver(svc)
+    /** The task card (D-051); run() fills in the skill when Laya or the owner routes. */
+    override var card = understand(request, apps::named)
     override val stopped get() = banner.stopped
 
     private val overlay = Overlay(svc)
@@ -51,7 +53,6 @@ class Assistant(private val svc: AgentService, override val request: String, pri
     fun run(): String {
         val t0 = SystemClock.elapsedRealtime()
         svc.bubble?.hide()
-        var card = understand(request, apps::named)  // the task card (D-051 step a): logged, not yet read by the skills
         val said = try {
             banner.say("Understanding…")
             val skill = route(request, { laya }) { q, options -> ask(q, options) }
