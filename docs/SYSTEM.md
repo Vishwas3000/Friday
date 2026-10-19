@@ -1,7 +1,7 @@
 # Friday: the system as it is today
 
-_Snapshot 2026-10-18. One page to bring someone (or another AI) up to speed. Details live in `research/` (01–23) and
-`docs/DECISIONS.md` (D-001–D-051). Numbers are measured on the owner's phone unless marked "estimate"._
+_Snapshot 2026-10-19. One page to bring someone (or another AI) up to speed. Details live in `research/` (01–28) and
+`docs/DECISIONS.md` (D-001–D-056). Numbers are measured on the owner's phone unless marked "estimate"._
 
 ## 1. What Friday is
 - **An assistant that operates the owner's Android phone by itself, fully on the phone.** You type a request ("open
@@ -13,11 +13,11 @@ _Snapshot 2026-10-18. One page to bring someone (or another AI) up to speed. Det
 - **Phone:** Pixel 8 (Tensor G3, 8 GB RAM), Android 16, not rooted.
 - **Other machines:**
   - a Mac (16 GB) for development; at most one model job at a time;
-  - a rented GPU box for all training (currently unreachable: its SSH port changed).
+  - a rented GPU box (Vast, RTX 4090, billed hourly) for all training; its address changes when it restarts.
 
 ## 2. How a request flows
 ```
-typed request (or "Hey Friday" while charging)
+typed request, or spoken to the floating bubble (tap, speak, tap), or "Hey Friday" while charging
   │
   ├─ 1. ROUTE      rules (regex) → else Laya picks one of 16 skills (≥ 0.7 confidence) → else ask the owner
   │
@@ -59,6 +59,9 @@ typed request (or "Hey Friday" while charging)
 | `Teach.kt` | The owner demonstrates a task; it is saved as a path and as training rows |
 | `Safety.kt` | Per-action verdicts |
 | `WakeWord.kt` | "Hey Friday" / "Hi Friday" (openWakeWord models on ONNX Runtime) |
+| `Bubble` | A floating bubble over every app: tap to listen (Android's on-device recognizer only), tap again to run; long-press for a text box (D-053) |
+| `IconNamer` | Names unlabelled icons from a screenshot with a 6.5 MB classifier (D-055); results cached per app |
+| `Card.kt` | The task card (D-051): the request read once into skill, app, about-words, slots, read-or-act. Built and logged; not yet used by the skills |
 | `AppResolver`, `AppProfiler` | Installed apps, which app does what, aliases, money apps |
 
 ### 3.2 What Laya sees: the candidate list
@@ -67,8 +70,14 @@ typed request (or "Hey Friday" while charging)
 - **Label:** its own text, else its content description, else its hint, else its children's text (60 characters).
 - **Order and duplicates:** de-duplicated by (box, label); ordered top to bottom, then left to right.
 - **Rendering:** `[i] <label, first 40 chars> (<Class>) <flags>`, e.g. `[3] See transaction history (Button)`.
-- **Unlabelled icons** show as `- (ImageView)`. Resource ids are kept (for memory and the shortlist) but never shown to
-  Laya.
+- **Not candidates:** system windows (status bar, navigation bar, shade).
+- **Extra labels, in order (D-052–D-055):**
+  - words from the resource id (`send_button` → "send");
+  - a name learned from where the element led last time (`Meanings`);
+  - the icon classifier's name, at ≥ 0.90 confidence.
+  - Still-unlabelled icons show as `- (ImageView)`.
+- **Loose text:** text that isn't tappable joins the list when it outnumbers the tappable elements 2 to 1 (first 30
+  by position).
 
 ### 3.3 Laya-Android (the model)
 - **What it is:** `ByunByun/laya-android`, a fine-tune of Convai's Laya on AndroidControl: 88k steps from 15,283
@@ -122,7 +131,7 @@ typed request (or "Hey Friday" while charging)
 | Tool | Purpose |
 |---|---|
 | Request log (`files/requests.jsonl` on the phone; `scripts/requests_log.py`) | Every request: answer, total time, timeline ("+3.2s step 2 …, laya 3130 ms: 20 cands, 733 tokens") |
-| `task_suite.py` + `suite_tasks.json` | 26 real tasks with automatic checks (app in front, screen words, selected tab, answer, media playing, a setting). Unattended, muted, memory off; runs saved and comparable. **Built, no baseline run yet** |
+| `task_suite.py` + `suite_tasks.json` | Real tasks with automatic checks (app in front, screen words, selected tab, answer, media playing, a setting). Unattended, muted, memory off; waits while the phone is hot; runs saved and comparable. **15/26 → 20/26 after D-052's fixes (2026-10-18)** |
 | `shortlist_eval.py`, `speed_eval.py`, `bench_device.py` | Decision-agreement and speed checks on 52 recorded screens; on-phone benchmark |
 | Bridge commands | `ask`, `state`, `routes`, `requests`, `selfcheck`, `bench`, `teach`… for testing from the Mac |
 
@@ -162,14 +171,20 @@ typed request (or "Hey Friday" while charging)
 4. **Unlabelled icons are invisible** to a text-only model.
 5. **Slow on crowded screens and on a hot phone.**
 
-## 6. Built but not yet verified on the phone (uncommitted at the time of writing)
-- Taps click the element through accessibility (`ACTION_CLICK` on the live node, re-found just before acting), with a
-  finger tap as fallback. Meant to stop taps landing on overlays such as GPay's Scan QR.
-- Money reads wait up to 5 s for the list to load before reading.
+## 6. Since that table (2026-10-18/19)
+- **Fixed and verified on the phone:**
+  - taps click the element through accessibility (`ACTION_CLICK` on the live node, re-found just before acting), so
+    GPay's Scan QR no longer catches them;
+  - a named app wins over the skill's default (Bistro);
+  - Amazon orders through a taught path;
+  - Play Store updates through a deep link.
+- **On the phone, under test:**
+  - icon names: E4 found only 7 unnamed icons on 10 apps' first screens; E5, the suite on vs off, is pending;
+  - the task card, built and logged only.
 
 ## 7. Planned (in order)
-1. **Baseline the task suite**, then fix failures one at a time until the owner's top tasks pass. The phone must be
-   connected over USB.
+1. **The task suite:** baselined (20/26). Fix failures one at a time until the owner's top tasks pass. The phone must
+   be connected over USB.
 2. **Task card (D-051, research/23):** read each request once into one structured card (skill, app, about-words,
    query and slots, read or act, risk, done-check), used by every stage. Rules fill it; a small on-phone text LLM
    (the "Writer", LFM2.5-1.2B in llama.cpp, D-041, not built) fills it when rules can't.
@@ -182,6 +197,9 @@ typed request (or "Hey Friday" while charging)
    - training data: corrections, Teach demos and verified runs, plus public AndroidControl data replayed;
    - a smaller student: the vocabulary cut to the words UI text uses, and fewer layers;
    - ship only if it beats the current model on the task suite.
+   - **Running (D-056):**
+     - research/27: Laya on thousands of AndroidControl test steps with Friday's input changes and the shortlist;
+     - research/28: a half-depth student distilled from Laya-Android.
 
 ## 8. Rules and constraints
 - **Everything runs on the phone.** No network permission. Training happens only on the GPU box, never the Mac; the
@@ -193,7 +211,8 @@ typed request (or "Hey Friday" while charging)
 
 ## 9. Where things are
 - **Code:** `android/app/src/main/java/dev/layatest/agent/` (app), `scripts/` (Python tools).
-- **Models:** `models/` (git-ignored): `laya-android.nb8-h-e16.onnx` (shipping), `.fp16.onnx` (rollback), `tokenizer.json`.
+- **Models:** `models/` (git-ignored): `laya-android.nb8-h-e16.onnx` (shipping), `.fp16.onnx` (rollback), `tokenizer.json`,
+  `icons/` (icon classifier). Training run-packs: `training/`.
 - **Research notes:**
   - 01 Laya and Laya-Android
   - 06 ONNX export
@@ -206,6 +225,10 @@ typed request (or "Hey Friday" while charging)
   - 22 training plan
   - 23 task card
   - 24 app maps and exploration (prior art)
+  - 25–26 icon classifier
+  - 27 Laya at scale (AndroidControl)
+  - 28 a smaller student Laya
 - **Decisions:** D-016 load on demand, D-025/026 safety, D-033 Teach, D-040 memory, D-041 Writer, D-042 compute rule,
   D-046 no always-on mic, D-047 faster steps and the 8-bit model, D-048 learning loops, D-049 task suite and shortlist,
-  D-050 fixes from failed requests, D-051 task card.
+  D-050 fixes from failed requests, D-051 task card, D-052 suite fixes and icon labels, D-053 bubble, D-054 understanding
+  fixes, D-055 icon classifier, D-056 Laya at scale and the student.

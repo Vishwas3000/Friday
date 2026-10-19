@@ -86,6 +86,11 @@ def check(c, answer):
     return fails
 
 
+def heat():
+    m = re.search(r"Thermal Status: (\d)", sh("dumpsys thermalservice"))
+    return int(m[1]) if m else 0
+
+
 def run(task, a):
     sh("input keyevent KEYCODE_HOME")
     time.sleep(1.5)
@@ -144,6 +149,10 @@ def main():
     results = []
     try:
         for t in tasks:
+            # a hot phone runs Laya 1.5-1.8x slower and status 4 throttles hard (research/18 §10): wait up to 10 min
+            if heat() >= 3 and not any(time.sleep(30) or heat() < 3 for _ in range(20)):
+                print("phone too hot (thermal status >= 3 for 10 min): stopped", flush=True)
+                break
             try:
                 results.append(run(t, a))
             except (OSError, ValueError) as e:  # the bridge went away (app restarted?): note it, go on
