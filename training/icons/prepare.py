@@ -100,7 +100,8 @@ def real_icons():
             x = x.reshape(len(x), 32, 32).astype(np.float32)
             x = x * 255 if x.max() <= 1.5 else x
             big = F.interpolate(torch.from_numpy(x)[:, None], size=SIZE, mode="bilinear", align_corners=False)[:, 0]
-            y = y.argmax(1) if y.ndim == 2 else y
+            # labels are a float column (N, 1) of class indices; one-hot only if wider (dry run, 2026-10-19)
+            y = y.argmax(1) if y.ndim == 2 and y.shape[1] > 1 else y.reshape(-1)
             out += [big.clamp(0, 255).round().to(torch.uint8).numpy(), y.astype(np.int64)]
             print("real", xs, out[-2].shape, flush=True)
     return out
