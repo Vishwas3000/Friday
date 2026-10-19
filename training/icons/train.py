@@ -74,6 +74,7 @@ def main():
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--batch", type=int, default=512)
     ap.add_argument("--lr", type=float, default=3e-3)
+    ap.add_argument("--eval-only", action="store_true", help="skip training: threshold, export and checks from out/best.pt")
     a = ap.parse_args()
     OUT.mkdir(exist_ok=True)
     d = np.load("data/icons.npz")
@@ -83,6 +84,12 @@ def main():
     torch.manual_seed(0)
     model = Net(len(classes)).to(dev)
     print("parameters %.2fM | train %d | device %s" % (sum(p.numel() for p in model.parameters()) / 1e6, len(d["y_train"]), dev), flush=True)
+    if not a.eval_only:
+        fit(model, d, a, dev)
+    evaluate(model, d, meta, dev)
+
+
+def fit(model, d, a, dev):
     dl = DataLoader(Icons(d["x_train"], d["y_train"], True), batch_size=a.batch, shuffle=True, num_workers=8,
                     drop_last=True, persistent_workers=True)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=0.05)
@@ -107,14 +114,17 @@ def main():
             best = real + rend
             torch.save(model.state_dict(), OUT / "best.pt")
 
-    model.load_state_dict(torch.load(OUT / "best.pt"))
+
+def evaluate(model, d, meta, dev):
+    classes, other = meta["classes"], meta["classes"].index("other")
+    model.load_state_dict(torch.load(OUT / "best.pt", map_location=dev))
     # the threshold: the lowest confidence at which named (non-"other") icons are >= 95% right, on both test sets
     p = np.concatenate([predict(model, d["x_test_real"], dev), predict(model, d["x_test_render"], dev)])
     y = np.concatenate([d["y_test_real"], d["y_test_render"]])
     pred, conf = p.argmax(1), p.max(1)
     named = pred != other
     threshold = 1.0
-    for t in np.arange(0.30, 1.0, 0.01):
+    for t in np.arange(0.05, 1.0, 0.01):
         keep = named & (conf >= t)
         if keep.sum() and (pred[keep] == y[keep]).mean() >= 0.95:
             threshold = round(float(t), 2)
@@ -128,14 +138,16 @@ def main():
                "threshold": threshold, "precision_at_threshold": float((pred[keep] == y[keep]).mean()),
                "named_share_at_threshold": float(keep.mean()), "per_class_real": per_class}
 
-    # export what the phone runs, then check ONNX Runtime agrees with PyTorch
-    model.cpu().eval()
-    onnx_path = OUT / "icons.onnx"
-    torch.onnx.export(Probs(model), torch.zeros(1, 1, 64, 64), str(onnx_path), input_names=["image"], output_names=["probs"],
-                      dynamic_axes={"image": {0: "n"}, "probs": {0: "n"}}, opset_version=17, dynamo=False)
+    # export what the phone runs, then check ONNX Runtime agrees with PyTorch. The wrapper is put in eval mode first:
+    # export restores a module's previous mode afterwards, and a fresh wrapper's "train" flipped BatchNorm back to
+    # batch statistics, so the first run's check compared train-mode PyTorch with eval-mode ONNX (diff 0.85; E0)
+    w = Probs(model.cpu()).eval()
     sample = d["x_test_real"][:64][:, None].astype(np.float32) / 255
     with torch.no_grad():
-        ref = Probs(model)(torch.from_numpy(sample)).numpy()
+        ref = w(torch.from_numpy(sample)).numpy()
+    onnx_path = OUT / "icons.onnx"
+    torch.onnx.export(w, torch.zeros(1, 1, 64, 64), str(onnx_path), input_names=["image"], output_names=["probs"],
+                      dynamic_axes={"image": {0: "n"}, "probs": {0: "n"}}, opset_version=17, dynamo=False)
     got = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"]).run(None, {"image": sample})[0]
     metrics["onnx_max_diff"] = float(np.abs(ref - got).max())
     metrics["onnx_mb"] = round(onnx_path.stat().st_size / 1e6, 2)

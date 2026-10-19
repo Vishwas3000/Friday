@@ -528,4 +528,4 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - Porting the UIST'18 network (147 MB fp32).
   - COALA's GPL classifier; captioners (0.7–1.9 GB).
   - int8 MobileNetV3: hard-swish and squeeze-excite lose accuracy under ORT int8.
-- **Who / status:** owner (approved) · Claude · Run-pack written and syntax-checked; waiting for the box's current SSH port.
+- **Who / status:** owner (approved; rented an RTX 4090, 2026-10-19) · Claude · **E0 trained (research/26 §6):** 94.1% real top-1, 98.3% right / 92% named at the shipped threshold 0.7, 6.53 MB, ONNX parity 1e-6. E1 (Optuna) is running; the phone integration is being built.

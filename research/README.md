@@ -93,6 +93,7 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 | [23-task-card.md](23-task-card.md) | The task card: one structured reading of each request (skill, app, slots, read/act, risk, done-check), made once and read by every stage; ten parsing bugs found in today's code; four-step migration |
 | [24-ui-exploration-prior-art.md](24-ui-exploration-prior-art.md) | Prior art for app maps and exploration: maps help small models most; screen identity by activity + (class, id, action flags), no model; watching can't rely on click events; no safe exploration of a logged-in phone exists yet; datasets (MobileViews, AMEX); tiny rankers; vocabulary trimming could roughly halve Laya's file |
 | [25-icon-classifier.md](25-icon-classifier.md) | A tiny icon classifier for unlabelled icons: no released model fits (the UIST'18 one is 294 MB / 38.5M params); train MobileNetV3-Small (~6.5 MB fp32, a few ms per icon) on the box from UIST'18 crops plus rendered icon sets; cropping from takeScreenshot; Rico licence risk |
+| [26-icon-classifier-experiments.md](26-icon-classifier-experiments.md) | The icon classifier's tasks, decisions and experiments: MobileNetV3-Small from scratch, 64×64 grey, UIST'18 + Material Symbols renders; E0 94.1% real top-1, 98.3% right / 92% named at threshold 0.7, 6.5 MB, ONNX parity 1e-6; E1 Optuna, ablations, on-phone checks |
 
 
 
