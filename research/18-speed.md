@@ -419,6 +419,20 @@ Bench: `bench_device.py`, 636-token fixture, 4 threads, 10 passes. The phone was
 - **How memory was measured:** each figure is the process PSS minus the app's idle PSS (~130 MB). Friday's warm Laya
   copy, when loaded, adds ~650 MB to the process (the first runs read 1.43 GB).
 
+**S11-A English (research/28 E7, the phone candidate), evening of 2026-10-19, same session as a teacher run** [measured]:
+the phone was throttled (thermal status 2 after a spell at 3, swap had been full, charging), so only the ratio holds:
+
+| Model | Median pass | p90 | min | Session load | Peak PSS | Decisions vs the Mac |
+|---|---|---|---|---|---|---|
+| Shipped teacher | 8,284 ms | 8,707 | 7,009 | 7.8 s | 689 MB | same (max logit diff 0.18) |
+| **S11-A English** | **2,821 ms** | 2,866 | 2,725 | **3.2 s** | **318 MB** | same (0.15) |
+
+- **2.9× faster and 2.2× lighter in the same throttled session.** On the cool phone of the morning run the teacher did
+  2,271 ms and S11 1,256 ms, so expect ~1.0 s per S11-A pass once the phone is cool; the student loses less to the
+  throttling than the teacher does (memory-bound, 689 MB against 318 MB on a phone with no swap left).
+- Before any bench today the phone had 235 MB free and its 3.9 GB swap fully used (Instagram alone held 359 MB in
+  the background); `am kill-all` freed 1.2 GB of swap. Check `/proc/meminfo` before a bench, not only the heat.
+
 ## Open
 - Re-check nb8 on more screens once Teach/run rows exist (research/14). 52 pairs can't show a 1% flip rate.
 - The embedding is now the largest part of nb8 (393 MB as fp16). An 8-bit `GatherBlockQuantized` in a newer ORT could

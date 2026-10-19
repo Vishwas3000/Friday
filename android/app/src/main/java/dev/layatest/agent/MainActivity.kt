@@ -19,10 +19,18 @@ class MainActivity : Activity() {
     private lateinit var goal: EditText
     private lateinit var listen: Switch
     private lateinit var bubble: Switch
+    private lateinit var stats: TextView
+    private val sampler = object : Runnable {  // live use of the phone, once a second while this screen is in front
+        override fun run() {
+            stats.text = runCatching { Stats.sample(this@MainActivity) }.getOrElse { "stats: ${it.message}" }
+            stats.postDelayed(this, 1000)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         status = TextView(this).apply { textSize = 18f; setPadding(48, 140, 48, 16) }
+        stats = TextView(this).apply { textSize = 12f; typeface = android.graphics.Typeface.MONOSPACE; setPadding(48, 24, 48, 16) }
         goal = EditText(this).apply {
             hint = "Goal, e.g. Open Settings and turn on Wi-Fi"
             setPadding(48, 16, 48, 16)
@@ -82,6 +90,7 @@ class MainActivity : Activity() {
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(status); addView(goal); addView(run); addView(teach); addView(wipe); addView(open); addView(listen); addView(bubble)
+            addView(stats)
         })
         // every launch (icon, "Hey Google, open Friday", Quick Tap, the wake word) opens ready to type; the
         // manifest's stateAlwaysVisible brings the keyboard up whenever this window gets focus
@@ -118,11 +127,17 @@ class MainActivity : Activity() {
         listen.isChecked = WakeWord.isOn(this)
         bubble.isChecked = Bubble.isOn(this)
         AgentService.instance?.wake?.update()  // picks up a mic grant made outside the app (setup_phone.py, Settings)
+        stats.removeCallbacks(sampler); stats.post(sampler)
         status.text = if (AgentService.instance != null) {
             "Friday: ON\n\nType a goal below and tap Run — Laya decides on this phone and asks before each step."
         } else {
             "Friday: OFF\n\nTurn on \"Friday\" under Accessibility → Downloaded apps."
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        stats.removeCallbacks(sampler)
     }
 
     private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
