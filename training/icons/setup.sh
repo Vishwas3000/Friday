@@ -21,6 +21,10 @@ echo "== venv"
 CUDA=$(nvidia-smi | sed -n 's/.*CUDA Version: \([0-9]*\)\.\([0-9]*\).*/\1\2/p' | head -1)
 TORCH_INDEX=()
 [ -n "$CUDA" ] && [ "$CUDA" -lt 128 ] && TORCH_INDEX=(--index-url https://download.pytorch.org/whl/cu126) && echo "driver CUDA ${CUDA}: using the cu126 build"
+# no uv and no python3-venv (some Ubuntu images): fetch uv into this folder only, never system-wide
+if ! command -v uv >/dev/null && ! python3 -c "import ensurepip" 2>/dev/null; then
+  python3 -m pip install -q --target "$W/.tools" uv && export PATH="$W/.tools/bin:$PATH"
+fi
 if command -v uv >/dev/null; then
   [ -d .venv ] || uv venv .venv --python 3.11
   . .venv/bin/activate
