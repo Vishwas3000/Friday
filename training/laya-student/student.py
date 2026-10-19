@@ -12,6 +12,8 @@
     python student.py vocab-eval --model teacher --name teacher-en   # T7: what the English-only cut costs [estimate]
     python student.py trim --model ckpt/s11 --onnx out/laya-android-s11.nb8-h-e16.onnx --name s11  # T7: cut file + map
     python student.py fixture --onnx out/laya-android-s11.nb8-h-e16.onnx --name s11   # phone-bench fixture logits
+    python student.py assistant --model ckpt/s11 --name s11     # skill routing + slot picks (eval_assistant's cases)
+    python student.py onnx-eval --model ckpt/s11 --onnx out/laya-android-s11.nb8-h-e16.onnx --name s11-nb8 --torch-name s11
     python student.py smoke                                     # synthetic rows for a dry run (STUDENT_DATA=smoke)
 
 Runs on the GPU box only (D-042). Reuses laya's own training loop and laya-android's own evaluation harness; the
@@ -19,6 +21,7 @@ export imports the repo's scripts/export_onnx.py and scripts/speed_eval.py (copi
 """
 import argparse
 import gzip
+import hashlib
 import json
 import os
 import random
@@ -160,6 +163,48 @@ def cache(batch_tokens=24576):
         len(logits), len(rows), time.time() - t0, CACHE))
 
 
+ASSIST_CACHE = HERE / "cache" / "assist_teacher.pt"
+
+
+@torch.no_grad()
+def cache_assist(n_instructions=13600, batch=64):
+    """Teacher answers to Friday's own routing and slot questions (Skills.kt) over AndroidControl train requests: every
+    unique goal, plus a sample of step instructions for routing; the goals' trimmed spans for the slot. S11 lost
+    routing (E6), so S11-F learns the teacher's answers here, as it replays the trained format (research/28 E5)."""
+    import eval_assistant as A
+    model, tok, _ = E.load(str(teacher_dir()))
+    ac = steps("train")
+    goals = sorted({it["goal"] for it in ac})
+    ins = sorted({it["step_instruction"] for it in ac if it.get("step_instruction")} - set(goals))
+    ins = random.Random(0).sample(ins, min(n_instructions, len(ins)))
+    rows = [{"state": {"goal": g}, "questions": {"skill": {"type": "choice", "instructions": ROUTE_Q,
+                                                           "criteria": A.SKILLS}}} for g in goals + ins]
+    for g in goals:
+        sp = A.spans(g, True)
+        if len(sp) >= 2:
+            rows.append({"state": {"goal": g}, "questions": {"slot": {
+                "type": "choice", "instructions": SLOT_Q, "criteria": {str(i): x for i, x in enumerate(sp[:64])}}}})
+    flat = []
+    for i, r in enumerate(rows):
+        state_ids = LT.encode_state(tok, r["state"], MAX_LEN)
+        for qid, q in r["questions"].items():
+            qi = LT.to_internal(qid, q)
+            item, _ = LT.make_item(tok, qi, [1.0] + [0.0] * (len(q["criteria"]) - 1), state_ids, HEAD_MAX_LEN, MAX_LEN)
+            if item:
+                flat.append((i, qid, LT.encode_item(tok, item, MAX_LEN, HEAD_MAX_LEN)))
+    logits = {}
+    for s0 in range(0, len(flat), batch):
+        chunk = flat[s0:s0 + batch]
+        for (i, qid, enc), row in zip(chunk, E.logits_for(model, tok, [c[2] for c in chunk])):
+            logits[(i, qid)] = row[:len(enc["markers"])].astype(np.float32)
+    for i, r in enumerate(rows):  # the teacher's pick stands in for the gold (alpha = 1 uses only the distribution)
+        r["questions"] = {q: v for q, v in r["questions"].items() if (i, q) in logits}
+        r["expected"] = {q: list(v["criteria"])[int(np.argmax(logits[(i, q)]))] for q, v in r["questions"].items()}
+    torch.save({"rows": rows, "logits": logits}, ASSIST_CACHE)
+    print("assist cache: %d rows (%d routing, %d slot), %d teacher answers -> %s" % (
+        len(rows), len(goals) + len(ins), len(rows) - len(goals) - len(ins), len(logits), ASSIST_CACHE))
+
+
 # ---------------------------------------------------------------------------------------------------- T4: train
 def _forward_bf16(model, batch, device, amp, detach_encoder):
     """laya-android's patch: bf16 autocast instead of laya's hard-coded fp16 (train_laya_android.py)."""
@@ -197,7 +242,7 @@ def distil_items(tok, rows, teacher, alpha, tau, idx=None):
 
 
 def train(init, out, alpha, tau, epochs, limit, train_file="train", val_file="val", replay=0.0, encoder_lr=2.5e-5,
-          freeze_emb=False, wait_for=None):
+          freeze_emb=False, wait_for=None, assist=False):
     """Distil (trained format, the defaults), or fine-tune on another format's rows with hard labels plus a `replay`
     share of each epoch drawn from trained-format train steps with the teacher mix (S11-F, research/28 E5)."""
     from laya.calibrate import fit_temperature_map
@@ -227,6 +272,11 @@ def train(init, out, alpha, tau, epochs, limit, train_file="train", val_file="va
         replayed, _ = distil_items(tok, [ac[i] for i in pick], teacher["logits"], alpha, tau, idx=pick)
         skipped["replay_items"] = len(replayed)
         items += replayed
+    if assist:  # Friday's routing and slot questions, the teacher's answers as targets (cache_assist)
+        ast = torch.load(ASSIST_CACHE, weights_only=False)
+        extra, _ = distil_items(tok, ast["rows"], ast["logits"], 1.0, 1.0)
+        skipped["assist_items"] = len(extra)
+        items += extra
     if freeze_emb:  # research/15: a fine-tune of a trained model keeps the embedding table frozen
         model.encoder.embeddings.tok_embeddings.weight.requires_grad_(False)
     print("train steps %d, items %d, skipped %s" % (len(rows), len(items), skipped), flush=True)
@@ -237,7 +287,7 @@ def train(init, out, alpha, tau, epochs, limit, train_file="train", val_file="va
                         max_len=MAX_LEN, head_max_len=HEAD_MAX_LEN)
     val_path = str(data_path(val_file))
     log = {"init": str(init), "alpha": alpha, "tau": tau, "train_file": train_file, "val_file": val_file,
-           "replay": replay, "encoder_lr": encoder_lr, "freeze_emb": freeze_emb, "train_steps": len(rows),
+           "replay": replay, "encoder_lr": encoder_lr, "freeze_emb": freeze_emb, "assist": assist, "train_steps": len(rows),
            "train_items": len(items), "skipped": skipped, "epochs": []}
     best = {"joint": -1.0}
     out.mkdir(parents=True, exist_ok=True)
@@ -490,7 +540,63 @@ def ort_version():
     return onnxruntime.__version__
 
 
+def onnx_eval(model, onnx_path, name, torch_name, sample=None, threads=8):
+    """The phone's file itself on test: laya's ONNXAgent on an nb8 file (x86 CPU, phone-like kernels), scored like
+    `evaluate`, and paired with the PyTorch run `torch_name` on the same steps (review: the gate numbers are bf16)."""
+    import laya
+    import onnxruntime as ort
+    agent = laya.load(str(resolve(model)), backend="onnx", onnx_path=str(onnx_path))
+    so = ort.SessionOptions()
+    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    so.intra_op_num_threads = threads
+    so.add_session_config_entry("mlas.disable_kleidiai", "1")
+    agent.session = ort.InferenceSession(str(onnx_path), sess_options=so, providers=["CPUExecutionProvider"])
+    rows = steps("test")
+    idx = sorted(random.Random(0).sample(range(len(rows)), sample)) if sample else list(range(len(rows)))
+    ops, preds, t0 = list(S.OP_DESC), [], time.time()
+    for n, i in enumerate(idx):
+        r = S.row(rows[i])
+        a = agent.system_one(r["state"], r["questions"], max_len=MAX_LEN, head_max_len=HEAD_MAX_LEN)["answers"]
+        preds.append((np.array([a["operation"]["probabilities"][o] for o in ops]),
+                      np.array(list(a["target"]["probabilities"].values())) if "target" in a else None))
+        if n % 500 == 0:
+            print("%d/%d steps, %.0f s" % (n, len(idx), time.time() - t0), flush=True)
+    sub = [rows[i] for i in idx]
+    with gzip.open(OUT / ("%s.test.preds.jsonl.gz" % torch_name), "rt", encoding="utf8") as f:
+        tp = [json.loads(line) for line in f]
+    torch_preds = [(np.array(list(tp[i]["operation_probs"].values())),
+                    None if tp[i]["target_probs"] is None else np.array(tp[i]["target_probs"])) for i in idx]
+    same_op = sum(int(np.argmax(a[0])) == int(np.argmax(b[0])) for a, b in zip(preds, torch_preds))
+    tq = [(a[1], b[1]) for a, b in zip(preds, torch_preds) if a[1] is not None and b[1] is not None]
+    same_t = sum(int(np.argmax(a)) == int(np.argmax(b)) for a, b in tq)
+    rep = {"model": str(model), "onnx": str(onnx_path), "steps": len(idx), "sample": sample, "threads": threads,
+           "seconds": round(time.time() - t0), "nb8": score(sub, preds), "torch_same_steps": score(sub, torch_preds),
+           "agreement_with_torch": {"operation": "%d/%d" % (same_op, len(idx)), "target": "%d/%d" % (same_t, len(tq))},
+           "nb8_op_recall": op_recall(sub, preds)}
+    ref = reference_scores(sub, preds)
+    if ref:
+        rep["nb8_reference"] = ref["all"]
+        rep["torch_reference_same_steps"] = reference_scores(sub, torch_preds)["all"]
+    (OUT / ("%s.onnx-eval.json" % name)).write_text(json.dumps(rep, indent=1))
+    print(json.dumps(rep, indent=1))
+
+
 # ---------------------------------------------------------------------------------------------------- T7: vocab
+SLOT_Q = "Which words in the request name the song, artist, show, person, place or item?"  # Skills.kt
+ROUTE_Q = "What does the user want Friday to do?"  # Skills.kt route()
+
+
+def app_template_ids(tok):
+    """Token ids of Friday's own fixed questions on this model (Skills.kt): routing over the 16 skills, the slot
+    question, LayaEngine's warm-up. Their text must never be re-spelt."""
+    from eval_assistant import SKILLS  # the same 16 (key, text) pairs as Skills.kt SKILLS
+    rows = [{"state": {"goal": ""}, "questions": {"q": {"type": "choice", "instructions": ins, "criteria": crit}},
+             "expected": {"q": next(iter(crit))}}
+            for ins, crit in ((ROUTE_Q, SKILLS), (SLOT_Q, {"0": "x"}), ("Pick one.", {"a": "yes", "b": "no"}))]
+    items, _ = LT.items_from_rows(tok, rows, MAX_LEN, HEAD_MAX_LEN)
+    return {i for it in items for i in LT.encode_item(tok, it, MAX_LEN, HEAD_MAX_LEN)["ids"]}
+
+
 def vocab():
     """Token ids in the sequences the model reads (question, options, state), train vs test (research/28 E4)."""
     from transformers import AutoTokenizer
@@ -507,8 +613,10 @@ def vocab():
            "candidates": [{"label": "", "class": "View", "editable": False, "long_clickable": False, "clickable": True,
                            "scrollable": False, "checked": False, "selected": False, "enabled": True}] * 300}
     templates = {i for _, _, enc in flat_items(tok, [one]) for i in enc["ids"]}
+    tabs = {i for t, i in tok.get_vocab().items() if "\t" in t}  # Gemma has no <0x09> byte token (review)
+    app = app_template_ids(tok)
     unseen = Counter({i: n for i, n in counts["test"].items() if i not in train_ids})
-    keep = train_ids | special | byte_ids | templates
+    keep = train_ids | special | byte_ids | templates | tabs | app
     differ = {(i, q) for i, q, enc in flat["test"] if any(t not in keep for t in enc["ids"])}
     emb_mb = lambda rows: round(rows * 768 * 2 / 1e6, 1)  # noqa: E731  fp16 table, as in nb8-h-e16
     report = {
@@ -518,7 +626,8 @@ def vocab():
         "test_unique_ids_unseen_in_train": len(unseen),
         "test_rows_with_an_unseen_token": len(differ), "test_rows": len(seqs["test"]),
         "test_steps_with_an_unseen_token": len({i for i, _ in differ}), "test_steps": len(steps("test")),
-        "templates_outside_train": len(templates - train_ids),
+        "templates_outside_train": len(templates - train_ids), "tab_ids": len(tabs),
+        "app_templates_outside_train": len(app - train_ids),
         "kept_rows_train_special_bytes": len(keep), "special_ids": sorted(special), "byte_fallback_ids": len(byte_ids),
         "embedding_mb_fp16": {"full": emb_mb(len(tok)), "kept": emb_mb(len(keep))},
         "most_common_unseen": [[tok.convert_ids_to_tokens(i), n] for i, n in unseen.most_common(25)],
@@ -592,9 +701,12 @@ def trim(model, onnx_path, name, n_check=50):
     from speed_eval import EMB_W
     keep = np.load(OUT / "vocab_train_ids.npy")
     assert list(keep[:5]) == [0, 1, 2, 3, 4], keep[:5]  # pad/eos/bos/unk/mask keep their ids (hard-coded in Kotlin)
+    kept_hash = hashlib.sha256(np.ascontiguousarray(keep, dtype=np.int32).tobytes()).hexdigest()[:16]
     m = onnx.load(str(onnx_path))
     w = next(t for t in m.graph.initializer if t.name == EMB_W)
     w.CopyFrom(numpy_helper.from_array(numpy_helper.to_array(w)[keep], EMB_W))
+    # the phone can refuse a map that doesn't match the file (review)
+    onnx.helper.set_model_props(m, {"friday.vocab_kept": str(len(keep)), "friday.vocab_kept_sha256": kept_hash})
     out = OUT / ("laya-android-%s-en.nb8-h-e16.onnx" % name)
     onnx.save(m, str(out))
     del m
@@ -604,7 +716,9 @@ def trim(model, onnx_path, name, n_check=50):
     to_new = {int(o): n for n, o in enumerate(keep)}
     vmap = {"about": "research/28 E4. new id = position in `kept`; any other old id becomes the new ids in `respell`. "
                      "Apply right after the tokenizer, before laya's 48-token option cap and max_len clamp.",
-            "old_vocab": len(tok), "new_vocab": len(keep), "kept": keep.tolist(),
+            "old_vocab": len(tok), "new_vocab": len(keep), "kept_sha256": kept_hash,
+            "kept_sha256_of": "the kept ids as little-endian int32, first 16 hex chars; equals the ONNX metadata",
+            "kept": keep.tolist(),
             "respell": {str(i): [to_new[j] for j in respell(i)] for i in range(len(tok)) if i not in kept}}
     map_path = OUT / ("laya-android-%s-en.vocab-map.json" % name)
     map_path.write_text(json.dumps(vmap, separators=(",", ":")))
@@ -653,6 +767,48 @@ def fixture(onnx_path, name, vmap=None):
         np.abs(logits - old).max()))
 
 
+def assistant(model, name, onnx_path=None, respell=False):
+    """Friday's other questions on the same file (scripts/eval_assistant.py's 50 cases, research/09): skill routing over
+    the 16 skills and the slot pick, with coverage and accuracy at the app's confidence floor (Skills.kt CONFIDENT).
+    The app-choice part needs the owner's app list, which stays on the Mac."""
+    import laya
+    import eval_assistant as A
+    if respell:  # the English-only cut, re-spelt as the -en file would see it
+        from transformers import AutoTokenizer
+        tok = AutoTokenizer.from_pretrained(str(teacher_dir() / "tokenizer"))
+        patch_tokenizer(make_respell(tok, set(np.load(OUT / "vocab_train_ids.npy").tolist())))
+    agent = (laya.load(str(resolve(model)), backend="onnx", onnx_path=str(onnx_path)) if onnx_path else
+             laya.load(str(resolve(model)), device="cpu"))
+    rows = []
+    for req, skill, _, slot, split in A.CASES:
+        a = agent.system_one({"goal": req}, {"skill": {"type": "choice", "criteria": A.SKILLS,
+                                                       "instructions": ROUTE_Q}}, **A.KW)["answers"]["skill"]
+        r = {"split": split, "skill": (a["choice"] == skill, A.conf_of(a))}
+        for key, trim_ in (("slot", False), ("slot_trim", True)):
+            if slot:
+                sp = A.spans(req, trim_)
+                b = laya.predict_tournament(agent, {"goal": req}, {"slot": {
+                    "type": "choice", "criteria": {str(i): x for i, x in enumerate(sp)}, "instructions": SLOT_Q}},
+                    **A.KW)["answers"]["slot"]
+                got, want = sp[int(b["choice"])].lower(), slot.lower()
+                r[key] = (got == want, got in want or want in got, A.conf_of(b))
+        rows.append(r)
+
+    def summary(pairs):  # pairs: (right, confidence)
+        sure = [ok for ok, c in pairs if c >= 0.7]
+        return {"n": len(pairs), "accuracy": round(sum(ok for ok, _ in pairs) / len(pairs), 3),
+                "coverage_at_0.7": round(len(sure) / len(pairs), 3),
+                "accuracy_at_0.7": round(sum(sure) / len(sure), 3) if sure else None}
+    rep = {"model": str(model), "onnx": str(onnx_path) if onnx_path else None, "respell": respell,
+           "skill": {sp: summary([r["skill"] for r in rows if sp in ("all", r["split"])]) for sp in ("all", "seen", "para")}}
+    for key in ("slot", "slot_trim"):
+        have = [r[key] for r in rows if key in r]
+        rep[key] = {"exact": summary([(e, c) for e, _, c in have]),
+                    "overlap": round(sum(o for _, o, _ in have) / len(have), 3)}
+    (OUT / ("%s.assistant.json" % name)).write_text(json.dumps(rep, indent=1))
+    print(json.dumps(rep))
+
+
 # ---------------------------------------------------------------------------------------------------- smoke
 def smoke(n=40):
     """A few synthetic steps in laya-android's item format, to dry-run every stage before the real data lands."""
@@ -682,8 +838,8 @@ def smoke(n=40):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("stage", choices=["make", "cache", "train", "eval", "export", "parity", "vocab", "vocab-eval",
-                                      "trim", "fixture", "smoke"])
+    ap.add_argument("stage", choices=["make", "cache", "cache-assist", "train", "eval", "export", "parity", "vocab",
+                                      "vocab-eval", "trim", "fixture", "assistant", "onnx-eval", "smoke"])
     ap.add_argument("--layers", default="0,2,4,6,8,10,12,14,16,18,20")
     ap.add_argument("--init")
     ap.add_argument("--out")
@@ -703,14 +859,21 @@ if __name__ == "__main__":
     ap.add_argument("--encoder-lr", type=float, default=2.5e-5)
     ap.add_argument("--freeze-emb", action="store_true")
     ap.add_argument("--wait-for", help="build the items, then wait for any of these files (comma-separated)")
+    ap.add_argument("--respell", action="store_true", help="assistant: tokens outside the English-only cut re-spelt")
+    ap.add_argument("--assist", action="store_true", help="train: add the teacher's routing/slot answers (cache-assist)")
+    ap.add_argument("--torch-name", help="onnx-eval: the PyTorch run to pair with (out/<name>.test.preds.jsonl.gz)")
+    ap.add_argument("--sample", type=int, help="onnx-eval: this many random test steps (seed 0) instead of all")
+    ap.add_argument("--threads", type=int, default=8)
     a = ap.parse_args()
     if a.stage == "make":
         make(a.layers, a.out)
     elif a.stage == "cache":
         cache()
+    elif a.stage == "cache-assist":
+        cache_assist()
     elif a.stage == "train":
         train(a.init, a.out, a.alpha, a.tau, a.epochs, a.limit, a.train_file, a.val_file, a.replay, a.encoder_lr,
-              a.freeze_emb, a.wait_for)
+              a.freeze_emb, a.wait_for, a.assist)
     elif a.stage == "eval":
         evaluate(a.model, a.name, a.split)
     elif a.stage == "export":
@@ -728,5 +891,9 @@ if __name__ == "__main__":
         trim(a.model, a.onnx, a.name)
     elif a.stage == "fixture":
         fixture(a.onnx, a.name, a.vmap)
+    elif a.stage == "assistant":
+        assistant(a.model, a.name, a.onnx, a.respell)
+    elif a.stage == "onnx-eval":
+        onnx_eval(a.model, a.onnx, a.name, a.torch_name, a.sample, a.threads)
     else:
         smoke()

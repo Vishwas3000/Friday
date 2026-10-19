@@ -4,6 +4,19 @@ _2026-10-19 · Builds on research/22 §5 item 5 (planned there), research/06 and
 made) · Runs on the rented RTX 4090 (D-042), never on the Mac · Run-pack: `training/laya-student/` · Trust tags:
 [primary] read at source · [measured] run here · [derived] computed from cited numbers · [estimate] · [UNCERTAIN]_
 
+## TL;DR
+- **S11 (11 of 22 layers, distilled) passes the gate** [measured, AndroidControl test, 9,987 steps]: Policy Joint
+  0.6029 vs the teacher's 0.6099 (−0.70 points, 95% CI −1.46 to +0.05; the gate was −2). Type 75.47 vs 76.75,
+  Grounding 60.43 vs 61.86. It loses most on crowded screens (−1.4 PJ at 11–50 candidates) and nothing up to 10.
+- **About half the compute** [derived]: ~0.56× the multiply-adds per token, so ~1.0 s instead of 1.73–1.85 s per
+  pass on the Pixel 8 if time follows compute [estimate; the owner's phone bench decides].
+- **Same contract, same export:** identical ONNX inputs, outputs and op types; nb8 file 515.6 MB (−11%); nb8 keeps
+  298/300 operations and 147/148 targets vs PyTorch on x86 (the shipped teacher file: 297/300, 146/148).
+- **Memory needs the vocabulary, not the layers.** English-only (D-058): 49,736 of 256,000 token ids cover 99.37% of
+  test tokens; accuracy cost −0.03 / +0.09 points (teacher / S11). **S11 English-only: 198.7 MB file, ~272 MB RAM
+  [estimate]** vs 578 MB / 651 MB today. Needs a 5-line id map in `Tokenizer.encode` (§6 E4c).
+- Deeper cut S8 and the Friday-format fine-tune S11-F: §6 E2, E5.
+
 ## 1. The goal, and what counts as done
 **The problem.**
 - One Laya pass takes 1.73–1.85 s for 636 tokens on the Pixel 8 (`nb8-h-e16`, 578 MB file, 651 MB RAM), and a tap
@@ -158,10 +171,14 @@ Same harness and rows as the students; checks the data and the environment again
 ### E1 — S11
 `make` (T2) → `cache` the teacher's train distributions → `train` (§3.3–3.5) → `eval` on test.
 
-### E2 — S8 (if S11 passes, or alongside it, §3.7)
+### E2 — S8 (run after S11 passed, §3.7)
 
 ### E3 — Export and parity (T6)
 ONNX contract and op types vs the shipped file; nb8 vs PyTorch on test rows (decision agreement, max |Δp|); size.
+
+### E4 — Vocabulary (T7, analysis only)
+Token ids used by AndroidControl train and test rows (question, options and state, as the model sees them); the share
+of test tokens a train-built vocabulary covers; the size and RAM saving; what the phone's tokenizer would need.
 
 ### E5 — S11-F: S11 fine-tuned on Friday's input format (asked 2026-10-19, after S11 passed)
 research/27 found Friday's format (system windows out, id labels, loose text, icon names; target rows cut to the k = 32
@@ -183,10 +200,6 @@ shortlist) costs 0.4 operation points, mostly DONE → CLICK and WAIT → CLICK,
   the shortlist cut counts as wrong (research/27 L3's rule). DONE and WAIT recall are reported per operation.
 - **Gate (the coordinator's):** S11-F beats S11 on Friday-format test Policy Joint, and stays within 1 point of S11 on
   the trained-format test.
-
-### E4 — Vocabulary (T7, analysis only)
-Token ids used by AndroidControl train and test rows (question, options and state, as the model sees them); the share
-of test tokens a train-built vocabulary covers; the size and RAM saving; what the phone's tokenizer would need.
 
 ## 6. Results log
 ### E0 — the teacher, re-run here [measured, RTX 4090, 2026-10-19]
@@ -229,8 +242,18 @@ them in 331 s), 3 epochs, 1.70 h on the shared 4090. Validation (827 steps) afte
 - **Paired on the same 9,660 scored steps:** −0.70 points, 95% CI [−1.46, +0.05]. The 2-point gate is well outside it.
   The teacher alone is right on 727 steps and S11 alone on 659: the student is not a copy. It picks the teacher's
   operation on 85.5% of steps and its target on 75.5% of target questions.
-- **Calibration** is a little looser than the teacher's (ECE 0.043 vs 0.026 for the operation): the temperature was
-  fitted on 827 validation steps only.
+- **Calibration: after the fold S11 is more over-confident than the teacher on test** (the temperature was fitted on
+  827 validation steps; it is never fitted on test):
+
+  | | mean confidence − accuracy | at confidence ≥ 0.7: share of steps / right | ECE |
+  |---|---|---|---|
+  | operation, teacher | +0.021 | 63.9% / **87.4%** | 0.026 |
+  | operation, S11 | +0.042 | 69.4% / **85.0%** | 0.043 |
+  | target, teacher | +0.038 | 54.7% / 87.9% | 0.038 |
+  | target, S11 | +0.055 | 58.2% / 86.4% | 0.056 |
+
+  Friday acts without asking at confidence ≥ 0.7 (`Skills.kt` CONFIDENT), so on AndroidControl-style steps S11's
+  "sure" answers are ~2.4 points less often right than the teacher's. Routing itself is measured in E6.
 
 **By candidate count** (Policy Joint and target top-1 over all steps in the bucket; Type/Grounding over reference
 steps):
@@ -245,9 +268,15 @@ steps):
 | > 50 | 123 | 0.512 → 0.463 | 0.542 → 0.458 (n = 96) | 85.5 → 80.0 | 62.5 → 56.3 |
 
 - **The student loses on crowded screens:** −1.4 points of Policy Joint at 11–50 candidates and −5 above 50 (only
-  123 steps). Up to 10 candidates it is level or better. Friday's target shortlist (k = 32, D-060) caps the target
-  question at 32 options, so the > 50 case doesn't reach the target question on the phone; the 21–50 gap still does
-  [inference].
+  123 steps). Up to 10 candidates it is level or better.
+- **What the phone's target question sees** (target shortlist k = 32, D-060, so a target question has at most 32
+  options) [measured, target top-1 on the test target questions]:
+
+  | candidates on the screen | n | teacher | S11 | gap |
+  |---|---|---|---|---|
+  | 1–16 | 2,791 | 0.714 | 0.711 | −0.4 |
+  | 17–32 | 1,566 | 0.569 | 0.557 | −1.2 |
+  | 33 or more (on the phone: cut to 32) | 399 | 0.566 | 0.561 | −0.5 |
 
 **By test subsplit** (Policy Joint; Type / Grounding):
 
@@ -280,14 +309,18 @@ steps):
 ### E4 — the English-only vocabulary (T7) [measured]
 The owner narrowed Friday to English on 2026-10-19, so the cut keeps: every token id in AndroidControl train rows (as
 the model reads them: question, options and state), the fixed templates (question texts, the 12 operation options,
-markers, option numbers up to 299), the special tokens, and all 255 byte-fallback tokens (so unseen text still
-tokenizes, to bytes at worst, never to UNK).
+markers, option numbers up to 299), **Friday's own fixed questions on this model** (the routing question and the 16
+skill options of `Skills.kt`, `SLOT_Q`, LayaEngine's warm-up), the special tokens, all 255 byte-fallback tokens, and
+**the 31 tokens that contain a tab** (Gemma has no `<0x09>` byte token, so a tab would otherwise become UNK).
+- **v1 → v2 (after the independent review):** v1 (49,736 ids, the file the owner benched) missed the tabs and the app's
+  questions: `spend_query`, `device_setting` and `device_status` were re-spelt on every routing call. v2 adds 35 ids.
+  The test rows that tokenize differently stay 6,698, so the accuracy numbers below (measured with v1) carry over.
 
 | | count |
 |---|---|
 | Vocabulary | 256,000 |
 | Ids used by train / val / test rows | 49,547 / 5,960 / 25,243 |
-| **Kept** (train + templates + specials + bytes) | **49,736** (19.4%) |
+| **Kept, v2** (train + templates + app questions + specials + bytes + tabs) | **49,771** (19.4%) |
 | Test tokens covered by the kept set | **99.37%** (5.59M tokens) |
 | Test ids never seen in train | 4,037 |
 | Test question rows that tokenize differently after the cut | 6,698 of 14,743 (45%) |
@@ -341,6 +374,26 @@ re-spelt 33,468 times, e.g. `reasons` → `reas` + `ons`, `▁flipped` → `▁f
 - **Better for shipping:** rebuild `tokenizer.json` itself with the kept vocabulary (keeping every merge intermediate
   the kept tokens need). Then DJL emits new ids directly, no map is needed, and the tokenizer's own load time (~8 s
   today, docs/SYSTEM.md §3.3) and memory shrink too. Not done here.
+
+### E6 — Friday's other questions: skill routing and slot picks [measured, PyTorch fp32 on the box's CPU]
+The same model file also routes requests (`Skills.kt route()`: 16 skills, act at confidence ≥ 0.7, else ask the owner)
+and picks slots (`SLOT_Q` over the request's own word spans). `scripts/eval_assistant.py`'s 50 cases (34 phrasings
+the rules were written for, 16 paraphrases), through laya on the box (`student.py assistant`); the app-choice part
+needs the owner's app list and stayed on the Mac.
+
+| | routing accuracy (seen / paraphrases) | routing at confidence ≥ 0.7: share / right | slot, trimmed spans: exact / overlap |
+|---|---|---|---|
+| Teacher | **0.82** (0.82 / 0.81) | 60% / **93.3%** | 0.77 / 0.96 |
+| **S11** | **0.40** (0.59 / **0.00**) | 52% / **46.2%** | 0.73 / 0.92 |
+
+- **S11 lost routing.** It was distilled on AndroidControl's two questions only, and the general choice skill the
+  teacher kept from base Laya (research/09: 93% right at ≥ 0.7) went with the dropped layers. Worse than the accuracy:
+  half of its *confident* routings are wrong, and Friday acts on those without asking. **S11 must not replace the
+  teacher for routing as it is.**
+- Slots held up (−4 points exact on 26 cases).
+- **Fix, folded into S11-F (E5):** the teacher's answers to the routing and slot questions over AndroidControl's
+  train requests (every unique goal, plus as many step instructions) are learnt as soft targets (`cache-assist`).
+  The 50 cases above are not among them.
 
 ## 7. Dead ends and lessons
 - **CPU jobs next to GPU training cost 3–4×.** A CPU parity run (torch + ONNX Runtime threads) on the same box cut
