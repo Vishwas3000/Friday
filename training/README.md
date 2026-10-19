@@ -50,8 +50,9 @@ Needs Job 2's `data/READY` (it reads `/root/friday-laya/laya/data/`). The two jo
 | 4. Teacher's answers | `tmux new -d -s friday-student "bash run.sh teacher"`: caches the teacher's distributions on train once, plus its own test metrics | ~20 min |
 | 5. Train S11 | `bash run.sh s11` (in tmux): distils 3 epochs, keeps the best validation epoch, refits the temperature, evaluates on test | ~1.7 h |
 | 6. Export and the rest | `tmux new -d -s friday-student-chain "bash chain.sh"`: exports S11 as the phone's 8-bit file, checks parity, builds the English-only cut (`-en`) with its id map and fixture, then trains S8 if S11 passed the gate | ~2.5 h |
-| 7. Fine-tune on Friday's format | `bash chain_f.sh` after S8, once Job 2 step 5's `READY_FRIDAY` exists: S11-F (research/27 §7) | ~1.5 h |
-| 8. Bring back | `out/laya-android-s11*.onnx`, `*.vocab-map.json`, `fixture-s11*.json` → the Mac's `models/student/` | 5 min |
+| 7. Fine-tune on Friday's format | `bash chain_f.sh` after S8, once Job 2 step 5's `READY_FRIDAY` exists: S11-F (research/27 §7), its evals on both formats and the routing/slot check | ~1.5 h |
+| 8. CPU work, GPU idle | `bash chain_x.sh` (start it any time; it waits for step 7): exports and English-only cuts of S8 and S11-F, S11's re-cut, fixtures, the cut files' routing check, S11-F's nb8 file on 1,000 test steps | ~35 min |
+| 9. Bring back | `out/laya-android-s*.onnx`, `*.vocab-map.json`, `fixture-s*.json`, `*.json` metrics → the Mac's `models/student/` | 5 min |
 
 Shared Hugging Face cache for both jobs: `export HF_HOME=/root/friday-laya/hf` (the model is ~0.65 GB).
 
