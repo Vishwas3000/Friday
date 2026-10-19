@@ -274,3 +274,25 @@ every class weighs the same.
 
 **The final model is E0b:** the fixed data, plus E1's best settings if they beat E0 on the unique-image validation
 split. It is re-thresholded with the unseen-"other" set counted. E0 above is superseded by it.
+
+**E4 — on the phone, first screens of 10 of the owner's apps [measured, Pixel 8, 2026-10-19].** The `icons` bridge
+command was run on each app's first screen without tapping. The apps were Chrome, Play Store, Zomato, Amazon, YouTube,
+Photos, Maps, Gmail, Spotify and Meesho. The crops were checked by eye against the screenshots on the Mac (scratchpad
+only, not kept).
+- **Unnamed, icon-shaped elements are rare.** There were 7 in all: 4 on Zomato and 3 on Spotify. The other 8 apps
+  label every element.
+- **What they were:**
+  - Zomato: a wallet icon (₹), a "Meals under ₹250" banner, a dotted-plus brand button and the "district" logo;
+  - Spotify: three artist photos (two of them the same box).
+- **Names given: 1 of 7.** The dotted-plus brand button was named **add**: the shape is a plus, but the meaning is
+  wrong. The photos, banner and logo were rightly left unnamed. The wallet (a class learned from renders) was missed:
+  no harm done, but no help either.
+- **Speed:** 455–697 ms per screen. The model took 77–305 ms for 3–4 icons and the session loaded once in 273 ms; the
+  rest is the screenshot and the crops. After that the names are cached.
+- **Coordinates:** the screenshot is 1080×2400, the screen's size, and the crops line up with the element boxes.
+- **What it means:**
+  - In the owner's everyday apps the classifier has little to do on first screens.
+  - Its real risk is **brand logos and photos that look like icons**, not old-looking icons.
+  - That points icon v2 at "other": photos, banners, logos and thumbnails.
+  - The planned 100–200-icon collection needs deeper screens, from an exploration walk. Not done.
+  - E5 (the suite, on vs off) decides whether it stays on.

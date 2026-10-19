@@ -528,4 +528,27 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - Porting the UIST'18 network (147 MB fp32).
   - COALA's GPL classifier; captioners (0.7–1.9 GB).
   - int8 MobileNetV3: hard-swish and squeeze-excite lose accuracy under ORT int8.
-- **Who / status:** owner (approved; rented an RTX 4090, 2026-10-19) · Claude · **E0 trained (research/26 §6):** 94.1% real top-1, 98.3% right / 92% named at the shipped threshold 0.7, 6.53 MB, ONNX parity 1e-6. E1 (Optuna) is running; the phone integration is being built.
+- **Who / status:** owner (approved; rented an RTX 4090, 2026-10-19) · Claude · **E0 trained (research/26 §6):** 94.1% real top-1, 98.3% right / 92% named at the shipped threshold 0.7, 6.53 MB, ONNX parity 1e-6. **Shipped E0b** (E1's settings): 94.07% real top-1, threshold 0.90 (99.2% right, 86% named, 5% of unseen icons wrongly named). **E4 on the phone:** only 7 unnamed icons on the first screens of 10 everyday apps, mostly photos and logos; 1 named, wrongly (a plus-shaped logo as "add"). E5 (task suite) pending.
+
+### D-056 — Use the rented GPU for Laya at scale: AndroidControl evaluation of Friday's input, and a half-depth student
+- **Decision:** two experiments run in parallel on the rented RTX 4090. Each has its own folder and venv.
+  - **research/27, Laya at scale** (`/root/friday-laya/laya`):
+    - stream AndroidControl one shard at a time; keep the steps, not the screenshots;
+    - reproduce Laya-Android's published test numbers;
+    - then measure, on thousands of held-out steps, each of Friday's input changes (system windows out, id labels, loose text, icon names) and the shortlist's recall at k.
+    - The original-format rows it writes are also research/22's replay data for later fine-tunes.
+  - **research/28, a student** (`/root/friday-laya/laya-student`):
+    - 11 of 22 layers (the even ones, so the global-attention layers line up), distilled from Laya-Android on AndroidControl train;
+    - exported the same way as the phone model (8-bit MatMulNBits);
+    - plus an analysis of how far the 256k vocabulary could be trimmed.
+- **Why:**
+  - The owner asked for more GPU work and research that improves the system ("you can parallelly do the GPU related things", 2026-10-19).
+  - Reliability: the shortlist and the input changes were judged on only 52 screens (research/18 §9). Speed and memory: the owner wants it "as light as possible in both compute and memory".
+  - Both fit the 40 GB rented disk when shards are streamed.
+- **Rejected for now:**
+  - Icon classifier v2: E4 found little for it to do (D-055).
+  - A custom wake-word model: off by default, and the bubble (D-053) replaced it.
+  - A VLM labelling the owner's screens: needs exploration screenshots first.
+  - A full fine-tune on Friday's format: waits for research/27 to show which changes matter.
+- **Who / status:** owner (asked) · Claude (chose the experiments; two agents run them) · **running**.
+
