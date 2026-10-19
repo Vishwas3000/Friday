@@ -397,6 +397,28 @@ The result keeps screen order.
     suggestion" and were skipped), not from k.
   - Accuracy at scale is research/27 L3.
 
+## 12. The half-depth student on the phone [measured, Pixel 8, ORT 1.31, 2026-10-19]
+Bench: `bench_device.py`, 636-token fixture, 4 threads, 10 passes. The phone was charging at thermal status 1
+(headroom 0.85). The models are research/28's.
+
+| Model | Median pass | p90 | Session load | Process PSS in the bench | Model's share (PSS minus ~130 MB idle app) |
+|---|---|---|---|---|---|
+| Shipped teacher, 22 layers (`nb8-h-e16`) | **2,271 ms** | 2,291 | 4.8 s | 785 MB | ≈ 655 MB |
+| S11, 11 layers | **1,249 ms** | 1,266 | 3.0 s | 705 MB | ≈ 575 MB |
+| **S11 English** (49,736-token vocabulary) | **1,256 ms** | 1,264 | **2.1 s** | 408 MB | **≈ 278 MB** |
+
+- **Faster: 1.82× per pass,** close to the compute ratio research/28 §4 predicted (0.56×).
+  - The teacher ran 2.27 s here, against 1.73–1.85 s on a cool phone (§6b): this run was warm and charging. The
+    ratio is the result, not the absolute numbers.
+- **Lighter: the English cut takes the model from ≈ 655 MB to ≈ 278 MB** (−58%), and loading drops from 4.8 s to 2.1 s.
+  Halving the layers alone saved only ~80 MB.
+- **Parity on the phone:** the students' logits are within 0.059 of the box's PyTorch references, the expected x86 vs
+  ARM MatMulNBits difference.
+  - On this synthetic fixture the students pick a different operation from the teacher (OPEN_APP vs BACK).
+  - So routing and slot answers must be measured on the student before it ships (review, 2026-10-19).
+- **How memory was measured:** each figure is the process PSS minus the app's idle PSS (~130 MB). Friday's warm Laya
+  copy, when loaded, adds ~650 MB to the process (the first runs read 1.43 GB).
+
 ## Open
 - Re-check nb8 on more screens once Teach/run rows exist (research/14). 52 pairs can't show a 1% flip rate.
 - The embedding is now the largest part of nb8 (393 MB as fp16). An 8-bit `GatherBlockQuantized` in a newer ORT could
