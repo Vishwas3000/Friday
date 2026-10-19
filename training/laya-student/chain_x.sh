@@ -9,8 +9,8 @@ cd /root/friday-laya/laya-student
 export HF_HOME=/root/friday-laya/hf CUDA_VISIBLE_DEVICES= OMP_NUM_THREADS=16
 until grep -q "ASSIST_S11F_EXIT" logs/run_status; do sleep 30; done
 step() { local tag=$1; shift; python student.py "$@" > "logs/$tag.log" 2>&1; echo "$tag EXIT $?" >> logs/run_status; }
-grep -q "S8_EXIT 0" logs/run_status && models="s8" || models=""
-grep -q "S11F_TRAIN_EXIT 0" logs/run_status && models="$models s11f"
+# S8 missed the gate (test Policy Joint 0.5754 vs the teacher's 0.6099, E2), so only S11-F is exported.
+grep -q "S11F_TRAIN_EXIT 0" logs/run_status && models="s11f" || models=""
 for s in $models; do
   step export_$s export --model ckpt/$s --name $s --parity 100
   step trim_$s trim --model ckpt/$s --onnx out/laya-android-$s.nb8-h-e16.onnx --name $s
