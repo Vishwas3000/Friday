@@ -35,7 +35,7 @@ class LayaEngine(ctx: Context) : AutoCloseable {
         var tokMs = 0L
         val tokThread = Thread {
             val t = SystemClock.elapsedRealtime()
-            try { tokLoaded = Tokenizer(tokFile) } catch (e: Throwable) { tokError = e }
+            try { tokLoaded = Tokenizer(tokFile, Tokenizer.vocabMapFor(model)) } catch (e: Throwable) { tokError = e }
             tokMs = SystemClock.elapsedRealtime() - t
         }.apply { start() }
         val t0 = SystemClock.elapsedRealtime()

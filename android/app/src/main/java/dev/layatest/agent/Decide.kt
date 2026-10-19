@@ -22,7 +22,7 @@ object Decide {
         require(tokFile.exists()) { "tokenizer.json not in filesDir (run scripts/bench_device.py --decide)" }
         require(modelFile.exists()) { "model not in filesDir: ${modelFile.name}" }
 
-        Tokenizer(tokFile).use { tok ->
+        Tokenizer(tokFile, Tokenizer.vocabMapFor(modelFile)).use { tok ->
             val candidates = (0 until 14).map { Candidate("Item $it", "Button") }
             val built = buildInputs(tok::encode, "Open settings and turn on Wi-Fi", emptyList(), candidates)
 
