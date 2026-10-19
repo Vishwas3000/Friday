@@ -3,6 +3,7 @@ package dev.layatest.agent
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Bundle
@@ -66,7 +67,7 @@ class AgentService : AccessibilityService() {
         "selfcheck" -> JSONObject().put("candidates", candidatesSelfCheck()).put("slots", slotsSelfCheck())
             .put("media", mediaSelfCheck()).put("people", peopleSelfCheck()).put("profiler", appCatalogSelfCheck())
             .put("routes", routesSelfCheck()).put("routing", routingSelfCheck()).put("wake", wakeSelfCheck(this))
-            .put("shortlist", shortlistSelfCheck()).put("card", cardSelfCheck())
+            .put("shortlist", shortlistSelfCheck()).put("card", cardSelfCheck()).put("icons", iconNamerSelfCheck())
         "wake" -> wake?.command(c) ?: error("the wake word isn't set up yet")  // {"on": bool} optional; listening stats
         "wake_test" -> wakeTest(this, java.io.File(filesDir, c.getString("wav")))  // max score of a WAV in filesDir
         "profiles" -> JSONObject(AppProfiler.profiles(packageManager) as Map<*, *>)  // D-031: auto app profiles, to evaluate
@@ -94,6 +95,18 @@ class AgentService : AccessibilityService() {
         "routes" -> Routes.all(this)  // UI memory (D-040), for debugging
         "step_parity" -> stepParity(c.getString("goal"))
         "shortlist_eval" -> shortlistEval(c)
+        // E4 (research/26): the current screen's unnamed icons as the icon model names them, without Laya
+        "icons" -> {
+            val st = readState()
+            val size = st.getJSONArray("screen")
+            val notes = JSONArray()
+            val before = buildCandidates(st, size.getInt(0), size.getInt(1))
+            val after = IconNamer.relabel(this, st.optString("package").ifEmpty { null }, st, before) { notes.put(it) }
+            JSONObject().put("package", st.optString("package")).put("notes", notes).put("icons", JSONArray(before.indices
+                .filter { IconNamer.isIcon(before[it], minOf(size.getInt(0), size.getInt(1)) / 4) }
+                .map { i -> JSONObject().put("bounds", JSONArray(before[i].bounds.toList())).put("rid", before[i].rid)
+                    .put("name", after[i].label.ifEmpty { JSONObject.NULL }) }))
+        }
         "screenshot" -> screenshotTest()  // icon labels step 3: can Friday see this app's pixels?
         // the request log's last entries (default 20), timelines included
         "requests" -> JSONObject().put("requests", JSONArray(java.io.File(filesDir, Assistant.REQUEST_LOG)
@@ -379,33 +392,53 @@ class AgentService : AccessibilityService() {
      */
     private fun screenshotTest(): JSONObject {
         val out = JSONObject().put("package", rootInActiveWindow?.packageName?.toString())
+        val bmp = screenshot().getOrElse { return out.put("error", it.message) }
+        var black = 0
+        var n = 0
+        for (y in 0 until bmp.height step 8) for (x in 0 until bmp.width step 8) {
+            val p = bmp.getPixel(x, y)
+            n++
+            if ((p shr 16 and 0xff) < 8 && (p shr 8 and 0xff) < 8 && (p and 0xff) < 8) black++
+        }
+        out.put("width", bmp.width).put("height", bmp.height).put("black", black.toDouble() / n)
+        bmp.recycle()
+        return out
+    }
+
+    private var lastShotAt = 0L
+    private val shotLock = Any()  // not the service's own: laya() holds that for ~10 s while Laya loads
+
+    /**
+     * The display now as a software ARGB_8888 bitmap (icon labels, research/25 §4): a HARDWARE bitmap can't be read, and
+     * cropping one copies the whole screen each time, so it's copied once. Waits out the system's 333 ms between shots
+     * (sooner fails with error 3). A secure window comes back black, not as a failure (GPay, research/26). Never saved.
+     */
+    internal fun screenshot(): Result<Bitmap> = synchronized(shotLock) {
+        val wait = lastShotAt + 350 - SystemClock.uptimeMillis()  // 333 ms on the system's clock, plus the call's latency
+        if (wait > 0) Thread.sleep(wait)
+        lastShotAt = SystemClock.uptimeMillis()
+        var got = Result.failure<Bitmap>(IllegalStateException("no screenshot within 2 s"))
         val done = CountDownLatch(1)
-        takeScreenshot(android.view.Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+        // the callback runs on the binder thread, not main: main may be waiting on a lock the caller holds (IconNamer.wipe)
+        takeScreenshot(android.view.Display.DEFAULT_DISPLAY, { it.run() }, object : TakeScreenshotCallback {
             override fun onSuccess(shot: ScreenshotResult) {
-                runCatching {
-                    val bmp = android.graphics.Bitmap.wrapHardwareBuffer(shot.hardwareBuffer, shot.colorSpace)!!
-                        .copy(android.graphics.Bitmap.Config.ARGB_8888, false)
-                    shot.hardwareBuffer.close()
-                    var black = 0
-                    var n = 0
-                    for (y in 0 until bmp.height step 8) for (x in 0 until bmp.width step 8) {
-                        val p = bmp.getPixel(x, y)
-                        n++
-                        if ((p shr 16 and 0xff) < 8 && (p shr 8 and 0xff) < 8 && (p and 0xff) < 8) black++
+                got = runCatching {
+                    Bitmap.wrapHardwareBuffer(shot.hardwareBuffer, shot.colorSpace)!!.let { hw ->
+                        hw.copy(Bitmap.Config.ARGB_8888, false)!!.also { hw.recycle() }
                     }
-                    out.put("width", bmp.width).put("height", bmp.height).put("black", black.toDouble() / n)
-                    bmp.recycle()
-                }.onFailure { out.put("error", it.toString()) }
+                }
+                shot.hardwareBuffer.close()
                 done.countDown()
             }
 
             override fun onFailure(code: Int) {
-                out.put("error_code", code)  // 3: too soon after the last one; 6: a secure window (5 is a bad window id)
+                // 3: too soon after the last one; 6: a secure window (5 is a bad window id)
+                got = Result.failure(IllegalStateException("screenshot error $code"))
                 done.countDown()
             }
         })
-        done.await(5, TimeUnit.SECONDS)
-        return out
+        done.await(2, TimeUnit.SECONDS)
+        got
     }
 
     /** Bridge test: how a request routes on the phone (rule hit, or Laya's pick + confidence); compare research/09. */
@@ -429,7 +462,9 @@ class AgentService : AccessibilityService() {
     private fun liveNode(c: ScreenCandidate): AccessibilityNodeInfo? {
         val w = screenW()
         val h = screenH()
-        val now = buildCandidates(state(), w, h).filter { it.label == c.label && it.className == c.className && it.rid == c.rid }
+        // the live tree has no learned names (Meanings, IconNamer): an element named by them is unnamed there
+        val fresh = buildCandidates(state(), w, h).filter { it.className == c.className && it.rid == c.rid }
+        val now = (fresh.filter { it.label == c.label }.ifEmpty { fresh.filter { it.label.isEmpty() } })
             .minByOrNull { kotlin.math.abs(it.bounds[0] - c.bounds[0]) + kotlin.math.abs(it.bounds[1] - c.bounds[1]) } ?: return null
         fun find(n: AccessibilityNodeInfo): AccessibilityNodeInfo? {
             val r = Rect().also(n::getBoundsInScreen)

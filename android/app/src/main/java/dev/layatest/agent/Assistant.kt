@@ -147,7 +147,9 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         val cands = buildCandidates(state, size.getInt(0), size.getInt(1)).map { e ->
             if (e.label.isNotEmpty()) e else known.optString(Meanings.key(pkg, e)).ifEmpty { null }?.let { e.copy(label = it) } ?: e
         }
-        return Screen(pkg, cands, screenTexts(state), state)
+        // icons still unnamed are named from their pixels (D-055); if that fails they stay unnamed, as before
+        val named = runCatching { IconNamer.relabel(svc, pkg, state, cands) { trace += it } }.getOrElse { trace += "icons: $it"; cands }
+        return Screen(pkg, named, screenTexts(state), state)
     }
 
     override fun choose(instructions: String, options: List<String>): Pick? {
