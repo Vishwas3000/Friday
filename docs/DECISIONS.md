@@ -679,6 +679,9 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   the teacher's 82%, half its confident routings wrong). S8 (8 layers) missed the gate (−3.5 points, E2). **S11-F**
   (S11 plus Friday-format rows, trained-format replay and the teacher's routing/slot answers, E5) restores routing to
   82% with every confident routing right, and is level with S11 on Friday's format (−0.9 on the trained one); the
-  format rows bought nothing. **S11-A** (the routing fix without the format rows, E7) is running; the phone candidate
-  is whichever of S11-F / S11-A keeps S11's accuracy, after the owner's phone bench. The English-only cut costs
-  routing 4 points (re-spelt request words); the kept list should take the request log's words first.
+  format rows bought nothing. **S11-A** (the routing fix without the format rows, E7) **is the phone candidate:**
+  S11's accuracy on both formats (paired +0.01 against S11), routing 84% with 96% of its confident routings right,
+  but confident on 48% of requests against the teacher's 60%, so Friday asks about the skill more often. Files:
+  `models/student/out/laya-android-s11a{,-en}.nb8-h-e16.onnx` with the `-en` id map and fixtures. **The swap waits
+  for the owner's phone bench** (speed, RAM, the task suite) and for the request log's words in the kept list: the
+  English-only cut costs routing 4 points through re-spelt request words (2 for the teacher).

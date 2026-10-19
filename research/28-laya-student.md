@@ -21,8 +21,11 @@ made) · Runs on the rented RTX 4090 (D-042), never on the Mac · Run-pack: `tra
 - **S11-F** (E5: S11 fine-tuned on Friday's format, with trained-format replay and the teacher's routing/slot answers)
   **restores routing to the teacher's 82%, with every confident routing right**, but the format rows bought nothing:
   Friday-format Policy Joint level with S11 (−0.27, CI −0.81 to +0.28) and −0.9 on the trained format.
-- **S11-A** (E7: S11 plus the routing/slot answers, no format rows) is the run that should keep S11's accuracy and the
-  fixed routing [running]. The swap into the phone waits for its numbers and the owner's phone bench.
+- **S11-A** (E7: S11 plus the routing/slot answers, no format rows, one 13-minute epoch) **is the phone candidate:**
+  S11's step accuracy on both formats (Policy Joint 0.6030 / 0.6018; paired against S11 +0.01, CI −0.46 to +0.47),
+  routing 84% with 96% of its confident routings right, nb8 515.6 MB, English-only cut 198.8 MB. It asks the owner
+  about the skill more often than the teacher (52% of the requests that reach Laya against 40%). The swap into the
+  phone waits for the owner's phone bench of `laya-android-s11a-en` and the request-log words in the kept list.
 
 ## 1. The goal, and what counts as done
 **The problem.**
@@ -449,7 +452,7 @@ needs the owner's app list and stayed on the Mac.
 | Teacher | **0.82** (0.82 / 0.81) | 60% / **93.3%** | 0.77 / 0.96 |
 | **S11** | **0.40** (0.59 / **0.00**) | 52% / **46.2%** | 0.73 / 0.92 |
 | **S11-F** (E5) | **0.82** (0.85 / 0.75) | 38% / **100%** | 0.73 / 0.92 |
-| S11-A (E7) | [running] | | |
+| **S11-A** (E7) | **0.84** (0.88 / 0.75) | 48% / **95.8%** | 0.73 / 0.92 |
 
 The same on the **English-only cut files, with the request re-spelt as the phone would see it** (`--respell`):
 
@@ -458,6 +461,7 @@ The same on the **English-only cut files, with the request re-spelt as the phone
 | teacher, cut | 0.80 (0.79 / 0.81) | 58% / 93.1% | 0.77 / 0.96 |
 | S11, cut | 0.40 (0.56 / 0.06) | 58% / 37.9% | 0.62 / 0.89 |
 | S11-F, cut | **0.78** (0.82 / 0.69) | 32% / **100%** | 0.73 / 0.92 |
+| S11-A, cut | **0.78** (0.85 / 0.62) | 48% / **95.8%** | 0.73 / 0.92 |
 
 - **S11 lost routing.** It was distilled on AndroidControl's two questions only, and the general choice skill the
   teacher kept from base Laya (research/09: 93% right at ≥ 0.7) went with the dropped layers. Worse than the accuracy:
@@ -474,12 +478,43 @@ The same on the **English-only cut files, with the request re-spelt as the phone
   re-spelt into pieces. Before a cut file ships, the kept list should also cover the words of the owner's own request
   log (E4's recipe takes any extra ids).
 
-### E7 — S11-A: S11 plus the routing/slot answers, no format rows [running, 2026-10-19]
+### E7 — S11-A: S11 plus the routing/slot answers, no format rows [measured, 2026-10-19]
 E5 showed the Friday-format rows bought nothing on the step questions and cost 0.9 points on the trained format,
 while the routing/slot items fixed routing. S11-A keeps only the fix: from `ckpt/s11`, one epoch over a random
-30,000 trained-format steps (the teacher mix, as a low-lr replay) plus the 39,495 routing/slot items; encoder lr
-1e-5, embeddings frozen; temperature refitted on `val`. **Gate:** test Policy Joint within 0.5 of S11's, routing
-≥ 0.80 on the 50 cases. Exported and cut only if it passes (`chain_a.sh`). Results: [pending].
+30,000 trained-format steps (45,038 items with the teacher mix, as a low-lr replay) plus the 39,495 routing/slot
+items; encoder lr 1e-5, embeddings frozen; 0.22 h. Validation joint 0.6741; temperature 0.841, folded as scorer
+× 1.381. **Gate:** test Policy Joint within 0.5 of S11's, routing ≥ 0.80 on the 50 cases (`chain_a.sh`): **passed.**
+
+| | trained-format test: PJ / op / target / Type / Grounding | Friday-format test: PJ / op / target / Type / Grounding |
+|---|---|---|
+| teacher | 0.6099 / 0.7472 / 0.6541 / 76.75 / 61.86 | 0.6104 / 0.7433 / 0.6641 / 76.55 / 62.40 |
+| S11 | 0.6029 / 0.7363 / 0.6476 / 75.47 / 60.43 | 0.6023 / 0.7356 / 0.6511 / 75.60 / 60.72 |
+| S11-F | 0.5941 / 0.7277 / 0.6407 / 74.06 / 59.26 | 0.5996 / 0.7306 / 0.6529 / 74.53 / 59.87 |
+| **S11-A** | **0.6030** / 0.7360 / 0.6463 / 75.79 / 60.41 | **0.6018** / 0.7334 / 0.6513 / 75.76 / 60.45 |
+
+**Paired on the same steps** (as E5; Policy Joint, 95% CI):
+- S11 → S11-A: trained format **+0.01 [−0.46, +0.47]** (243 worse, 244 better); Friday format −0.05 [−0.50, +0.40].
+  S11-A is S11 on the step questions.
+- teacher → S11-A: trained format −0.69 [−1.44, +0.05]; Friday format −0.86 [−1.62, −0.08]. The same gap as S11's.
+- S11-F → S11-A: trained format +0.89 [+0.34, +1.43]: the format rows' cost, recovered.
+- By screen size, trained test (PJ): 1–5 candidates 0.636, 6–10 0.611, 11–20 0.630, 21–50 0.533, > 50 0.463.
+  By subsplit: IDD 0.6592, app_unseen 0.5275, category_unseen 0.5362, task_unseen 0.5567.
+
+**Routing and slots** (E6's 50 cases): **0.84** (seen 0.88, paraphrases 0.75), 48% of requests at ≥ 0.7 and 95.8% of
+those right; slots 0.73 exact / 0.92 overlap. On the English-only cut, re-spelt: 0.78 (0.85 / 0.62), 48% / 95.8%,
+slots unchanged. Against the teacher's 0.82 / 60% / 93.3% (cut: 0.80 / 58%): the same accuracy, fewer confident
+answers. Below the floor Friday shows the owner the top 3 skills and asks (`route()`), after the rule-based router
+has had its turn, so S11-A would ask about the skill on about half of the requests that reach Laya, the teacher on
+two in five.
+
+**Export** (as E3): nb8 515.6 MB, same contract and op types; parity on 100 test steps 99/100 operations (the flip at
+a PyTorch margin of 0.019) and 48/48 targets, max |Δp| 0.051 / 0.060. English-only cut: 198.8 MB plus the 5.7 MB
+map, 50/50 decisions unchanged, max |Δp| 0.0. Fixtures `fixture-s11a.json`, `fixture-s11a-en.json`.
+
+**Verdict: S11-A is the phone candidate.** It keeps S11's step accuracy on both formats (−0.7 against the teacher,
+the CI touching 0), routes at the teacher's accuracy with every confident routing almost always right, exports
+cleanly, and halves the file. What remains is the owner's phone bench of `laya-android-s11a-en` (speed, RAM, the
+task suite) and the request-log words in the kept list (E6).
 
 ## 7. Dead ends and lessons
 - **Fine-tuning the student on Friday's format gave nothing** (E5): S11 already handled Friday's format as well as the
