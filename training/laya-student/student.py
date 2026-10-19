@@ -255,8 +255,9 @@ def train(init, out, alpha, tau, epochs, limit, train_file="train", val_file="va
     teacher = torch.load(CACHE, weights_only=False)
     assert teacher["steps"] == len(ac), "teacher cache is for another train file"
     if train_file == "train":
-        rows = ac[:limit] if limit else ac
-        items, skipped = distil_items(tok, rows, teacher["logits"], alpha, tau)
+        pick = sorted(random.Random(0).sample(range(len(ac)), limit)) if limit else None  # a random subset (S11-A)
+        rows = [ac[i] for i in pick] if pick else ac
+        items, skipped = distil_items(tok, rows, teacher["logits"], alpha, tau, idx=pick)
     else:
         rows = steps(train_file)[:limit] if limit else steps(train_file)
         items, skipped = distil_items(tok, rows, {}, 0.0, tau)  # hard labels
