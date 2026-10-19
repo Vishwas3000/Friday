@@ -39,8 +39,8 @@ RTX 4090 (Vast, Ireland), never on the Mac (D-042) · Trust tags: [primary] read
 | T5 | E0 baseline training + ONNX export + parity + threshold | Vast | **done**: passes every gate (§6) |
 | T6 | Independent code review of the run-pack | agent (read only) | running |
 | T7 | Phone integration: crop unnamed icons outside money apps, classify, cache | agent (Kotlin, built only) | running |
-| T8 | E1 Optuna tuning: E0 passes, so this checks for easy headroom on a cheap rented GPU | Vast | running |
-| T9 | E2 ablations: what each data and model choice is worth | Vast | planned |
+| T8 | E1 Optuna tuning | Vast | **done**: +1–2 points; width 0.75 always worse (§6) |
+| T9 | E2 ablations: what each data and model choice is worth | Vast | **done**: A1, A2 (§6) |
 | T10 | E3 robustness: dark mode, blur, low resolution, per-class confusions | Vast | planned |
 | T11 | E4 on the phone: latency, parity and the owner's icons | Pixel 8 | after T7 |
 | T12 | E5 task-suite gate, icon names on vs off | Pixel 8 | after T11 |
@@ -224,6 +224,22 @@ The task suite (D-049) with icon names on vs off. No task may get worse. Then th
   - Above ~0.92 nothing is named, because label smoothing caps confidence.
   - E4 re-sets the threshold on the owner's icons.
 - **On the phone:** pushed with threshold 0.90. E0 is kept in `models/icons/e0/` (git-ignored).
+
+**E2 ablations — one change against E0b, same settings [measured, 2026-10-19]:**
+| Run | Training data | Real top-1 | Renders top-1 | Unseen "other" wrongly named at 0.9 | Self-set threshold → named share on all sets |
+|---|---|---|---|---|---|
+| **E0b** | real + renders | **94.07%** | **98.58%** | **5.0%** | 0.19 → 90.5% |
+| A1 | real only (113,854) | 93.60% | 54.4% | 10.4% | 0.88 → 71.2% |
+| A2 | renders only (16,488) | 47.2% | 98.3% | 1.1% | 0.75 → 45.4% |
+
+- **The real (Rico) icons carry real-icon accuracy.** Renders alone reach 47%, so the licence-clean fallback of D-055
+  is **not usable as is**. Publishing would need a different real-icon dataset. Many classes score 0% on real icons
+  in A2, follow and book among them.
+- **The renders add only +0.5 points on real icons.** But they teach the 8 new classes (A1 manages 54% on renders, and
+  can't predict QR code, wallet, … or "other") and **halve the unseen icons wrongly named** (10.4% → 5.0% at 0.9).
+  That is the "other" class doing its job.
+- **A4 (width 0.75) was answered by E1:** worse in every trial. A3, A5 and A6 were not run, because E0b passes every
+  gate with room to spare.
 
 **Independent review of the run-pack** (a separate agent, read only, 2026-10-19). Nothing blocked the run. Findings:
 1. **The parity check ran PyTorch in train mode.** Found and fixed above.
