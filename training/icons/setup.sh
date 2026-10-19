@@ -17,15 +17,21 @@ df -h "$W" | tail -1
 free -g | head -2
 
 echo "== venv"
+# PyTorch's default Linux build needs a driver for CUDA >= 12.8; an older driver (e.g. "Max CUDA 12.6") gets the 12.6 build
+CUDA=$(nvidia-smi | sed -n 's/.*CUDA Version: \([0-9]*\)\.\([0-9]*\).*/\1\2/p' | head -1)
+TORCH_INDEX=()
+[ -n "$CUDA" ] && [ "$CUDA" -lt 128 ] && TORCH_INDEX=(--index-url https://download.pytorch.org/whl/cu126) && echo "driver CUDA ${CUDA}: using the cu126 build"
 if command -v uv >/dev/null; then
   [ -d .venv ] || uv venv .venv --python 3.11
   . .venv/bin/activate
-  uv pip install -q torch torchvision onnx onnxruntime pillow numpy
+  uv pip install -q torch torchvision "${TORCH_INDEX[@]}"
+  uv pip install -q onnx onnxruntime pillow numpy
 else
   [ -d .venv ] || python3 -m venv .venv
   . .venv/bin/activate
   pip install -q --upgrade pip
-  pip install -q torch torchvision onnx onnxruntime pillow numpy
+  pip install -q torch torchvision "${TORCH_INDEX[@]}"
+  pip install -q onnx onnxruntime pillow numpy
 fi
 python -c "import torch; print('torch', torch.__version__, '| cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
 
