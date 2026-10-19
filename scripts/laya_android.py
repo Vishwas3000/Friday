@@ -98,12 +98,14 @@ def parse_forest(state):
     return nodes
 
 
-def build_candidates(nodes, screen):
-    """Visible, actionable, non-IME nodes, deduplicated on (box, label) keeping the deepest, in screen order."""
+def build_candidates(nodes, screen, system=True, ids=True, loose_text=True):
+    """Visible, actionable, non-IME nodes, deduplicated on (box, label) keeping the deepest, in screen order.
+    system / ids / loose_text turn off Friday's changes to the trained format, one at a time (research/27); the phone
+    always has all three on."""
     w, h = screen
     groups = {}
     for n in nodes:
-        if n["ime"] or n.get("sys") or not n["visible"] or not any(n[f] for f in FLAGS):
+        if n["ime"] or (system and n.get("sys")) or not n["visible"] or not any(n[f] for f in FLAGS):
             continue
         x1, y1, x2, y2 = n["bounds"]
         box = (max(0, x1), max(0, y1), min(w, x2), min(h, y2))
@@ -124,7 +126,7 @@ def build_candidates(nodes, screen):
     boxes = [c["bounds"] for c in groups.values()]
     loose = {}
     for n in nodes:
-        if n["ime"] or n.get("sys") or not n["visible"] or any(n[f] for f in FLAGS) or not _own_text(n):
+        if n["ime"] or (system and n.get("sys")) or not n["visible"] or any(n[f] for f in FLAGS) or not _own_text(n):
             continue
         x1, y1, x2, y2 = n["bounds"]
         box = (max(0, x1), max(0, y1), min(w, x2), min(h, y2))
@@ -139,13 +141,13 @@ def build_candidates(nodes, screen):
             loose[(box, lab)] = {"label": lab, "class": n["class"], "resource_id": n["resource_id"], "enabled": n["enabled"],
                                  "checked": n["checked"], "selected": n["selected"], "bounds": box, "depth": n["depth"],
                                  **{f: False for f in FLAGS}}
-    if len(loose) >= 2 * len(groups):
+    if loose_text and len(loose) >= 2 * len(groups):
         for k, c in sorted(loose.items(), key=lambda kv: (kv[1]["bounds"][1], kv[1]["bounds"][0]))[:30]:
             groups[k] = c
     b = lambda c: c["bounds"]  # noqa: E731
     out = sorted(groups.values(), key=lambda c: (b(c)[1], b(c)[0], b(c)[3], b(c)[2], c["label"], c["class"]))
     for c in out:  # after sorting, as on the phone: the order and the ids don't move
-        c["label"] = c["label"] or _id_label(c["resource_id"])
+        c["label"] = c["label"] or (_id_label(c["resource_id"]) if ids else "")
     return out
 
 
@@ -170,6 +172,55 @@ def option_label(c):
                              ("scroll", c["scrollable"] and not c["clickable"]), ("on", c["checked"]),
                              ("selected", c["selected"]), ("disabled", not c["enabled"])) if on]
     return " ".join([c["label"][:40] or "-", "(%s)" % c["class"], *flags])
+
+
+# Routes.kt's word helpers and Candidates.kt's shortlist (D-049), line for line (research/27 L3)
+_STOP = {"a", "an", "the", "app", "tab", "please", "my", "me", "to", "and", "then", "for", "in", "at", "of", "with",
+         "from", "can", "could", "would", "you", "i", "want", "just", "now", "hey", "friday"}
+_NAV = {"open", "go", "show", "display", "check", "see", "view", "find", "look", "get", "take", "bring", "switch",
+        "visit", "launch", "navigate", "tap", "click", "page", "screen", "section"}
+
+
+def content_words(s):
+    """Routes.contentWords: lower-case words ([^\\p{L}\\p{N}] splits), plurals folded, filler dropped."""
+    ws = [w for w in re.split(r"[\W_]+", s.lower()) if w]
+    return {w[:-1] if len(w) > 3 and w.endswith("s") else w for w in ws} - _STOP
+
+
+def about_words(goal, app_label=None):
+    """Routes.aboutWords: what a goal is about, without the app's name or navigation verbs."""
+    return content_words(goal) - content_words(app_label or "") - _NAV
+
+
+def shortlist(cands, want, k):
+    """Candidates.kt shortlist: the k elements the target question shows (indices, screen order)."""
+    if k <= 0 or len(cands) <= k:
+        return list(range(len(cands)))
+    hits = [len((content_words(c["label"]) | content_words(c["resource_id"])) & want) for c in cands]
+    keep = dict.fromkeys(sorted((i for i in range(len(cands)) if hits[i] > 0), key=lambda i: -hits[i])[:k])
+    for i in range(len(cands)):
+        if cands[i]["editable"] and len(keep) < k:
+            keep[i] = None
+    top, bottom = 0, len(cands) - 1
+    while len(keep) < k:
+        keep[top] = None
+        top += 1
+        if len(keep) < k:
+            keep[bottom] = None
+            bottom -= 1
+    return sorted(keep)
+
+
+def _sl(label, rid="", edit=False):
+    return {"label": label, "resource_id": rid, "editable": edit}
+
+
+# shortlistSelfCheck(): the orders tab (by its resource id), the text field, then the top and bottom of the screen
+_c = [_sl("Back"), _sl("Search", edit=True)] + [_sl("Item %d" % i) for i in range(1, 21)] + [_sl("", "action_orders"),
+                                                                                            _sl("Home")]
+_want = about_words("open my orders on meesho", "Meesho")
+assert shortlist(_c, _want, 6) == [0, 1, 2, 21, 22, 23], shortlist(_c, _want, 6)
+assert shortlist(_c[:5], _want, 6) == [0, 1, 2, 3, 4] and shortlist(_c, _want, 0) == list(range(len(_c)))
 
 
 def history_entry(op, cand=None, payload=None):
