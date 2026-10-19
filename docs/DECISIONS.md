@@ -675,5 +675,10 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Rejected:** the bottom 11 layers (the head was trained on top-layer features); odd layers (slot 0 would lose its
   layout); a narrower model (nothing copies over); teacher-only targets and Hinton's two-term loss (research/28 §3.3).
 - **Who / status:** owner (asked for a half-depth student, D-056) · Claude (layers, loss, temperature handling) ·
-  **built, gate passed; waiting for the owner's phone bench** (`models/laya-android-s11.nb8-h-e16.onnx`, and the
-  English-only `-en` file with its id map, which needs `Tokenizer.encode` to apply the map before real runs).
+  **built, gate passed, but not shippable as is:** S11 lost Friday's skill routing (research/28 E6: 40% right against
+  the teacher's 82%, half its confident routings wrong). S8 (8 layers) missed the gate (−3.5 points, E2). **S11-F**
+  (S11 plus Friday-format rows, trained-format replay and the teacher's routing/slot answers, E5) restores routing to
+  82% with every confident routing right, and is level with S11 on Friday's format (−0.9 on the trained one); the
+  format rows bought nothing. **S11-A** (the routing fix without the format rows, E7) is running; the phone candidate
+  is whichever of S11-F / S11-A keeps S11's accuracy, after the owner's phone bench. The English-only cut costs
+  routing 4 points (re-spelt request words); the kept list should take the request log's words first.

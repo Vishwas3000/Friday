@@ -15,7 +15,14 @@ made) · Runs on the rented RTX 4090 (D-042), never on the Mac · Run-pack: `tra
 - **Memory needs the vocabulary, not the layers.** English-only (D-058): 49,736 of 256,000 token ids cover 99.37% of
   test tokens; accuracy cost −0.03 / +0.09 points (teacher / S11). **S11 English-only: 198.7 MB file, ~272 MB RAM
   [estimate]** vs 578 MB / 651 MB today. Needs a 5-line id map in `Tokenizer.encode` (§6 E4c).
-- Deeper cut S8 and the Friday-format fine-tune S11-F: §6 E2, E5.
+- **S11 lost routing** (E6): Friday's skill question is right 40% of the time (the teacher: 82%), and half of its
+  *confident* routings are wrong. Distilling on AndroidControl's two questions alone drops the general choice skill.
+- **S8 (8 layers) missed the gate** (E2): Policy Joint 0.5754, −3.5 points; it keeps operations and loses targets.
+- **S11-F** (E5: S11 fine-tuned on Friday's format, with trained-format replay and the teacher's routing/slot answers)
+  **restores routing to the teacher's 82%, with every confident routing right**, but the format rows bought nothing:
+  Friday-format Policy Joint level with S11 (−0.27, CI −0.81 to +0.28) and −0.9 on the trained format.
+- **S11-A** (E7: S11 plus the routing/slot answers, no format rows) is the run that should keep S11's accuracy and the
+  fixed routing [running]. The swap into the phone waits for its numbers and the owner's phone bench.
 
 ## 1. The goal, and what counts as done
 **The problem.**
@@ -285,6 +292,21 @@ steps):
 | Teacher | 0.6601; 81.47 / 67.81 | 0.5408; 70.88 / 53.31 | 0.5686; 72.87 / 56.68 | 0.5474; 71.58 / 55.15 |
 | S11 | 0.6516; 79.65 / 67.16 | 0.5350; 70.13 / 50.54 | 0.5629; 72.02 / 54.74 | 0.5436; 70.88 / 52.79 |
 
+### E2 — S8: 8 layers, distilled [measured, 2026-10-19]
+The teacher's layers 0, 2, 5, 9, 11, 14, 18, 20 (§3.7), the same recipe and data as S11: 3 epochs, 1.19 h on the
+4090. Best epoch 2 (validation joint 0.6295; epoch 3: 0.6270); temperature 0.835, folded as scorer × 1.390.
+
+| AndroidControl test (9,987 steps) | Policy Joint | operation | target top-1 | Type | Grounding |
+|---|---|---|---|---|---|
+| teacher | 0.6099 | 0.7472 | 0.6541 | 76.75 | 61.86 |
+| S11 | 0.6029 | 0.7363 | 0.6476 | 75.47 | 60.43 |
+| **S8** | **0.5754** | 0.7419 | **0.5929** | 76.69 | **58.65** |
+
+- **Missed the gate by a wide margin:** −3.45 points of Policy Joint against the teacher (the gate was −2). The loss
+  is all grounding: operations stay within 0.5 points of the teacher, target top-1 falls 6.1 points. By subsplit:
+  IDD 0.6307, app_unseen 0.4982, category_unseen 0.5074, task_unseen 0.5293.
+- Half the depth cost 0.7 points (S11); a third of it costs 3.5. **Not exported;** its checkpoint stayed on the box.
+
 ### E3 — S11 exported like the shipped file [measured, box: x86, onnxruntime 1.31.0]
 - **fp32 ONNX:** 1,067 MB, `onnx.checker` passes, and laya's own `ONNXAgent` reproduces PyTorch exactly
   (max |Δp| = 0), as with the teacher (research/06).
@@ -375,6 +397,42 @@ re-spelt 33,468 times, e.g. `reasons` → `reas` + `ons`, `▁flipped` → `▁f
   the kept tokens need). Then DJL emits new ids directly, no map is needed, and the tokenizer's own load time (~8 s
   today, docs/SYSTEM.md §3.3) and memory shrink too. Not done here.
 
+### E5 — S11-F: S11 fine-tuned on Friday's format [measured, 2026-10-19]
+**Data, one epoch:** 92,394 Friday-format train steps → 131,755 items with hard labels; 87,837 trained-format replay
+items (40% of the epoch, random steps, the teacher mix from the cache); 39,495 items of Friday's routing and slot
+questions with the teacher's answers as the only target (E6's fix). 259,087 items, 0.68 h at ~13 micro-batches/s.
+Validation (`friday_val`) joint 0.6277; temperature 1.112, folded as scorer × 1.044. Started from `ckpt/s11`,
+encoder lr 1e-5, embeddings frozen.
+
+| Friday-format test (9,987 steps, lines merged per step) | Policy Joint | operation | target top-1 | Type | Grounding |
+|---|---|---|---|---|---|
+| teacher | 0.6104 | 0.7433 | 0.6641 | 76.55 | 62.40 |
+| S11 | 0.6023 | 0.7356 | 0.6511 | 75.60 | 60.72 |
+| **S11-F** | **0.5996** | 0.7306 | 0.6529 | 74.53 | 59.87 |
+
+**Paired on the same steps** (10,000-resample bootstrap, 95% CI; 9,664 joint-scored steps):
+
+| | Policy Joint | operation | target top-1 |
+|---|---|---|---|
+| S11 → S11-F, Friday format | −0.27 [−0.81, +0.28]; 374 worse, 348 better | −0.49 [−0.96, −0.02] | +0.19 [−0.53, +0.90] |
+| teacher → S11-F, Friday format | −1.08 [−1.89, −0.26] | −1.26 [−1.99, −0.54] | −1.11 [−2.21, +0.00] |
+| teacher → S11, Friday format | −0.81 [−1.57, −0.04] | −0.77 [−1.45, −0.10] | −1.30 [−2.31, −0.25] |
+| S11 → S11-F, trained format | **−0.88 [−1.41, −0.36]** | −0.85 [−1.31, −0.39] | −0.69 [−1.39, −0.02] |
+| teacher → S11-F, trained format | −1.58 [−2.37, −0.79] | −1.94 [−2.66, −1.21] | −1.35 [−2.44, −0.25] |
+
+- **The gate's first clause failed:** S11-F does not beat S11 on Friday's format; it is level within noise. The second
+  clause (within 1 point of S11 on the trained format) holds at −0.88, but that loss is real (CI excludes 0).
+- Where it moved: DONE recall 0.649 → 0.677 (the format's known DONE → CLICK confusion eases), WAIT 0.353 → 0.360;
+  but SCROLL_DOWN 0.604 → 0.547 and CLICK 0.837 → 0.829. By screen size (Policy Joint, S11 → S11-F): 1–5
+  candidates 0.646 → 0.634, 6–10 0.603 → 0.596, 11–20 0.625 → 0.630, 21–50 0.544 → 0.537, > 50 0.398 → 0.415.
+- **What it did buy is routing** (E6): 0.40 → 0.82, the teacher's level, with every confident routing right. The
+  format rows were not what fixed it; the 39,495 teacher-answered routing/slot items were. Hence E7.
+- **Export** (as E3): nb8 file 515.6 MB, same contract and op types as the shipped file; parity on 100 test steps
+  99/100 operations (the one flip at a PyTorch margin of 0.047) and 48/48 targets, max |Δp| 0.086 / 0.091.
+  English-only cut (v2 vocabulary, E4): 198.8 MB plus a 5.7 MB map; 50/50 decisions unchanged, max |Δp| 0.0 against
+  the uncut file on re-spelt input. Fixtures `fixture-s11f.json` and `fixture-s11f-en.json` written for the phone
+  bench. The nb8 file itself on 1,000 test steps: [pending, `onnx-eval`].
+
 ### E6 — Friday's other questions: skill routing and slot picks [measured, PyTorch fp32 on the box's CPU]
 The same model file also routes requests (`Skills.kt route()`: 16 skills, act at confidence ≥ 0.7, else ask the owner)
 and picks slots (`SLOT_Q` over the request's own word spans). `scripts/eval_assistant.py`'s 50 cases (34 phrasings
@@ -385,17 +443,48 @@ needs the owner's app list and stayed on the Mac.
 |---|---|---|---|
 | Teacher | **0.82** (0.82 / 0.81) | 60% / **93.3%** | 0.77 / 0.96 |
 | **S11** | **0.40** (0.59 / **0.00**) | 52% / **46.2%** | 0.73 / 0.92 |
+| **S11-F** (E5) | **0.82** (0.85 / 0.75) | 38% / **100%** | 0.73 / 0.92 |
+| S11-A (E7) | [running] | | |
+
+The same on the **English-only cut files, with the request re-spelt as the phone would see it** (`--respell`):
+
+| | routing accuracy (seen / paraphrases) | at confidence ≥ 0.7: share / right | slot: exact / overlap |
+|---|---|---|---|
+| teacher, cut | [running] | | |
+| S11, cut | 0.40 (0.56 / 0.06) | 58% / 37.9% | 0.62 / 0.89 |
+| S11-F, cut | **0.78** (0.82 / 0.69) | 32% / **100%** | 0.73 / 0.92 |
 
 - **S11 lost routing.** It was distilled on AndroidControl's two questions only, and the general choice skill the
   teacher kept from base Laya (research/09: 93% right at ≥ 0.7) went with the dropped layers. Worse than the accuracy:
   half of its *confident* routings are wrong, and Friday acts on those without asking. **S11 must not replace the
   teacher for routing as it is.**
 - Slots held up (−4 points exact on 26 cases).
-- **Fix, folded into S11-F (E5):** the teacher's answers to the routing and slot questions over AndroidControl's
-  train requests (every unique goal, plus as many step instructions) are learnt as soft targets (`cache-assist`).
-  The 50 cases above are not among them.
+- **The fix works:** the teacher's answers to the routing and slot questions over AndroidControl's train requests
+  (every unique goal, plus as many step instructions; 26,550 routing and 12,945 slot rows, `cache-assist`), learnt as
+  soft targets in one epoch, bring S11-F to the teacher's accuracy. The 50 cases above are not among them. S11-F is
+  **less often confident** (38% of requests at ≥ 0.7 against the teacher's 60%), so Friday would ask the owner to
+  confirm the skill more often; what it is confident about is right.
+- **The English cut costs routing:** S11-F 0.82 → 0.78, and the confident share 38% → 32%. The 50 requests are the
+  owner's phrasing, and words outside AndroidControl's vocabulary are re-spelt into pieces. Before a cut file ships,
+  the kept list should also cover the words of the owner's own request log (E4's recipe takes any extra ids).
+
+### E7 — S11-A: S11 plus the routing/slot answers, no format rows [running, 2026-10-19]
+E5 showed the Friday-format rows bought nothing on the step questions and cost 0.9 points on the trained format,
+while the routing/slot items fixed routing. S11-A keeps only the fix: from `ckpt/s11`, one epoch over a random
+30,000 trained-format steps (the teacher mix, as a low-lr replay) plus the 39,495 routing/slot items; encoder lr
+1e-5, embeddings frozen; temperature refitted on `val`. **Gate:** test Policy Joint within 0.5 of S11's, routing
+≥ 0.80 on the 50 cases. Exported and cut only if it passes (`chain_a.sh`). Results: [pending].
 
 ## 7. Dead ends and lessons
+- **Fine-tuning the student on Friday's format gave nothing** (E5): S11 already handled Friday's format as well as the
+  trained one, as the teacher did (research/27), so there was nothing for the format rows to teach; they cost 0.9
+  points on the trained format instead. Fine-tune for what is measured missing (routing), not for a format that
+  measures level.
+- **A student distilled on the task's two questions loses the general choice skill** (E6: routing 0.82 → 0.40). Any
+  future student trains with the teacher's answers to Friday's own questions (`cache-assist`); 40k items in one epoch
+  restore the skill.
+- **The English cut re-spells the owner's words** (E6): −4 routing points on the cut S11-F. Add the request log's
+  words to the kept list before shipping a cut file.
 - **CPU jobs next to GPU training cost 3–4×.** A CPU parity run (torch + ONNX Runtime threads) on the same box cut
   S11's training from ~10–12 to ~2.6 micro-batches/s, even when pinned to other cores (pinning the trainer itself
   also cost ~30%). laya's training loop is one Python thread that feeds small kernels, so it is sensitive to memory
