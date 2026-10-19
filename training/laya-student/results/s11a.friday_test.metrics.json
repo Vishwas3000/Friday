@@ -1,0 +1,208 @@
+{
+ "model": "ckpt/s11a",
+ "split": "friday_test",
+ "harness": {
+  "ece_operation": 0.0524,
+  "ece_target": 0.0752,
+  "unfit_items": {}
+ },
+ "overall": {
+  "steps": 9972,
+  "operation": 0.7334,
+  "target_top1": 0.6513,
+  "policy_joint": 0.6018,
+  "groundable": 4760
+ },
+ "op_recall": {
+  "CLICK": [
+   0.832,
+   5059
+  ],
+  "LONG_PRESS": [
+   0.3333,
+   9
+  ],
+  "SCROLL_UP": [
+   0.375,
+   96
+  ],
+  "SCROLL_DOWN": [
+   0.6146,
+   947
+  ],
+  "SCROLL_LEFT": [
+   0.0676,
+   74
+  ],
+  "SCROLL_RIGHT": [
+   0.5213,
+   94
+  ],
+  "OPEN_APP": [
+   0.898,
+   608
+  ],
+  "INPUT_TEXT": [
+   0.8861,
+   632
+  ],
+  "BACK": [
+   0.4286,
+   343
+  ],
+  "WAIT": [
+   0.3721,
+   567
+  ],
+  "DONE": [
+   0.6254,
+   1543
+  ]
+ },
+ "by_bucket": {
+  "0": {
+   "steps": 65,
+   "operation": 0.8769,
+   "target_top1": null,
+   "policy_joint": 0.9167,
+   "groundable": 0
+  },
+  "1-5": {
+   "steps": 1346,
+   "operation": 0.6924,
+   "target_top1": 0.8526,
+   "policy_joint": 0.6398,
+   "groundable": 536
+  },
+  "6-10": {
+   "steps": 1935,
+   "operation": 0.708,
+   "target_top1": 0.6923,
+   "policy_joint": 0.601,
+   "groundable": 871
+  },
+  "11-20": {
+   "steps": 4097,
+   "operation": 0.7552,
+   "target_top1": 0.6736,
+   "policy_joint": 0.6303,
+   "groundable": 2019
+  },
+  "21-50": {
+   "steps": 2406,
+   "operation": 0.7315,
+   "target_top1": 0.5162,
+   "policy_joint": 0.5358,
+   "groundable": 1238
+  },
+  ">50": {
+   "steps": 123,
+   "operation": 0.813,
+   "target_top1": 0.4271,
+   "policy_joint": 0.4228,
+   "groundable": 96
+  }
+ },
+ "by_subsplit": {
+  "IDD": {
+   "steps": 4616,
+   "operation": 0.7864,
+   "target_top1": 0.6786,
+   "policy_joint": 0.6465,
+   "groundable": 2337
+  },
+  "app_unseen": {
+   "steps": 4093,
+   "operation": 0.668,
+   "target_top1": 0.593,
+   "policy_joint": 0.5348,
+   "groundable": 1882
+  },
+  "category_unseen": {
+   "steps": 4578,
+   "operation": 0.6726,
+   "target_top1": 0.604,
+   "policy_joint": 0.5441,
+   "groundable": 2096
+  },
+  "task_unseen": {
+   "steps": 5254,
+   "operation": 0.689,
+   "target_top1": 0.6292,
+   "policy_joint": 0.5652,
+   "groundable": 2387
+  }
+ },
+ "reference": {
+  "all": {
+   "steps": 8429,
+   "type": 75.76,
+   "grounding": 60.45,
+   "gold_clicks": 5059
+  },
+  "by_bucket": {
+   "0": {
+    "steps": 63,
+    "type": 88.89,
+    "grounding": 0.0,
+    "gold_clicks": 5
+   },
+   "1-5": {
+    "steps": 1170,
+    "type": 73.33,
+    "grounding": 57.67,
+    "gold_clicks": 626
+   },
+   "6-10": {
+    "steps": 1624,
+    "type": 73.71,
+    "grounding": 63.48,
+    "gold_clicks": 942
+   },
+   "11-20": {
+    "steps": 3482,
+    "type": 77.69,
+    "grounding": 61.99,
+    "gold_clicks": 2123
+   },
+   "21-50": {
+    "steps": 1980,
+    "type": 74.75,
+    "grounding": 58.17,
+    "gold_clicks": 1267
+   },
+   ">50": {
+    "steps": 110,
+    "type": 81.82,
+    "grounding": 47.92,
+    "gold_clicks": 96
+   }
+  },
+  "by_subsplit": {
+   "IDD": {
+    "steps": 3895,
+    "type": 80.08,
+    "grounding": 66.8,
+    "gold_clicks": 2443
+   },
+   "app_unseen": {
+    "steps": 3462,
+    "type": 70.02,
+    "grounding": 50.47,
+    "gold_clicks": 2011
+   },
+   "category_unseen": {
+    "steps": 3878,
+    "type": 70.73,
+    "grounding": 52.83,
+    "gold_clicks": 2228
+   },
+   "task_unseen": {
+    "steps": 4451,
+    "type": 72.21,
+    "grounding": 55.02,
+    "gold_clicks": 2570
+   }
+  }
+ }
+}

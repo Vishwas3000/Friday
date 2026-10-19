@@ -1,0 +1,84 @@
+{
+ "model": "ckpt/s11f",
+ "onnx": "out/laya-android-s11f.nb8-h-e16.onnx",
+ "steps": 1000,
+ "sample": 1000,
+ "threads": 16,
+ "seconds": 811,
+ "nb8": {
+  "steps": 1000,
+  "operation": 0.716,
+  "target_top1": 0.6568,
+  "policy_joint": 0.5868,
+  "groundable": 475
+ },
+ "torch_same_steps": {
+  "steps": 1000,
+  "operation": 0.715,
+  "target_top1": 0.6589,
+  "policy_joint": 0.5868,
+  "groundable": 475
+ },
+ "agreement_with_torch": {
+  "operation": "987/1000",
+  "target": "462/475"
+ },
+ "nb8_op_recall": {
+  "CLICK": [
+   0.8182,
+   506
+  ],
+  "LONG_PRESS": [
+   1.0,
+   1
+  ],
+  "SCROLL_UP": [
+   0.3,
+   10
+  ],
+  "SCROLL_DOWN": [
+   0.5698,
+   86
+  ],
+  "SCROLL_LEFT": [
+   0.0,
+   6
+  ],
+  "SCROLL_RIGHT": [
+   0.1667,
+   6
+  ],
+  "OPEN_APP": [
+   0.8545,
+   55
+  ],
+  "INPUT_TEXT": [
+   0.9444,
+   72
+  ],
+  "BACK": [
+   0.2564,
+   39
+  ],
+  "WAIT": [
+   0.25,
+   52
+  ],
+  "DONE": [
+   0.6587,
+   167
+  ]
+ },
+ "nb8_reference": {
+  "steps": 833,
+  "type": 72.87,
+  "grounding": 59.68,
+  "gold_clicks": 506
+ },
+ "torch_reference_same_steps": {
+  "steps": 833,
+  "type": 72.87,
+  "grounding": 60.47,
+  "gold_clicks": 506
+ }
+}

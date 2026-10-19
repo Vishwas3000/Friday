@@ -1,0 +1,166 @@
+{
+ "file": "laya-android-s11.nb8-h-e16.onnx",
+ "mb": 515.6,
+ "io": {
+  "inputs": [
+   [
+    "input_ids",
+    7,
+    [
+     "rows",
+     "seq"
+    ]
+   ],
+   [
+    "attention_mask",
+    7,
+    [
+     "rows",
+     "seq"
+    ]
+   ],
+   [
+    "marker_pos",
+    7,
+    [
+     "rows",
+     "markers"
+    ]
+   ],
+   [
+    "marker_mask",
+    9,
+    [
+     "rows",
+     "markers"
+    ]
+   ],
+   [
+    "qtype",
+    7,
+    [
+     "rows"
+    ]
+   ]
+  ],
+  "outputs": [
+   [
+    "logits",
+    1,
+    [
+     "rows",
+     "markers"
+    ]
+   ],
+   [
+    "act_logits",
+    1,
+    [
+     "rows",
+     2
+    ]
+   ]
+  ]
+ },
+ "ops": {
+  "Constant": 665,
+  "Shape": 76,
+  "Gather": 54,
+  "Cast": 94,
+  "Range": 2,
+  "Unsqueeze": 90,
+  "Concat": 58,
+  "Reshape": 45,
+  "ConstantOfShape": 5,
+  "Mul": 135,
+  "Equal": 5,
+  "Where": 12,
+  "Expand": 3,
+  "Sub": 3,
+  "Transpose": 53,
+  "Abs": 1,
+  "LessOrEqual": 1,
+  "Not": 3,
+  "LayerNormalization": 28,
+  "MatMulNBits": 44,
+  "MatMul": 41,
+  "Cos": 1,
+  "Sin": 1,
+  "Split": 15,
+  "Squeeze": 35,
+  "Div": 61,
+  "Slice": 94,
+  "Neg": 23,
+  "Add": 106,
+  "Sqrt": 39,
+  "Softmax": 14,
+  "Erf": 13,
+  "Mod": 6,
+  "IsNaN": 2,
+  "Relu": 2,
+  "Clip": 3,
+  "GatherElements": 1,
+  "ReduceSum": 2,
+  "Log": 2,
+  "TopK": 1,
+  "Gemm": 2
+ },
+ "io_matches_shipped": true,
+ "shipped_ops": {
+  "Constant": 1255,
+  "Shape": 130,
+  "Gather": 119,
+  "Cast": 246,
+  "Range": 4,
+  "Unsqueeze": 206,
+  "LayerNormalization": 50,
+  "ConstantOfShape": 6,
+  "GreaterOrEqual": 1,
+  "And": 6,
+  "Flatten": 1,
+  "Mul": 258,
+  "Add": 184,
+  "Reshape": 69,
+  "Concat": 103,
+  "Equal": 5,
+  "Where": 54,
+  "Expand": 3,
+  "Sub": 2,
+  "Abs": 1,
+  "LessOrEqual": 1,
+  "Cos": 1,
+  "Sin": 1,
+  "MatMulNBits": 88,
+  "Split": 26,
+  "Squeeze": 68,
+  "Transpose": 128,
+  "Div": 94,
+  "Slice": 149,
+  "Neg": 45,
+  "MatMul": 62,
+  "Softmax": 25,
+  "IsNaN": 24,
+  "Erf": 24,
+  "Not": 2,
+  "Mod": 6,
+  "Sqrt": 6,
+  "Relu": 2,
+  "Clip": 3,
+  "GatherElements": 1,
+  "ReduceSum": 2,
+  "Log": 2,
+  "TopK": 1,
+  "Gemm": 2
+ },
+ "op_types_not_in_shipped": [],
+ "parity": {
+  "steps": 300,
+  "operation_same": "298/300",
+  "target_same": "147/148",
+  "max_abs_dp": {
+   "operation": 0.0688,
+   "target": 0.0583
+  },
+  "runtime": "onnxruntime 1.31.0, x86 CPU"
+ }
+}

@@ -1,0 +1,43 @@
+{
+ "model": "teacher",
+ "onnx": null,
+ "respell": false,
+ "skill": {
+  "all": {
+   "n": 50,
+   "accuracy": 0.82,
+   "coverage_at_0.7": 0.6,
+   "accuracy_at_0.7": 0.933
+  },
+  "seen": {
+   "n": 34,
+   "accuracy": 0.824,
+   "coverage_at_0.7": 0.647,
+   "accuracy_at_0.7": 0.955
+  },
+  "para": {
+   "n": 16,
+   "accuracy": 0.812,
+   "coverage_at_0.7": 0.5,
+   "accuracy_at_0.7": 0.875
+  }
+ },
+ "slot": {
+  "exact": {
+   "n": 26,
+   "accuracy": 0.0,
+   "coverage_at_0.7": 0.385,
+   "accuracy_at_0.7": 0.0
+  },
+  "overlap": 0.885
+ },
+ "slot_trim": {
+  "exact": {
+   "n": 26,
+   "accuracy": 0.769,
+   "coverage_at_0.7": 0.923,
+   "accuracy_at_0.7": 0.792
+  },
+  "overlap": 0.962
+ }
+}

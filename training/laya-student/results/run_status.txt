@@ -1,0 +1,39 @@
+RUN_EXIT 0
+EXPORT_EXIT 0
+PARITY_SHIPPED_EXIT 0
+TRIM_EXIT 1
+gate: teacher 0.6099, s11 0.6029
+TRIM2_EXIT 0
+FIXTURE_EXIT 0
+ASSIST_EXIT 0
+ASSIST_CACHE_EXIT 0
+S8_EXIT 0
+S11F_TRAIN_EXIT 0
+EVAL_EXIT s11f friday_test.jsonl 0
+EVAL_EXIT s11 friday_test.jsonl 0
+EVAL_EXIT s11f test 0
+EVAL_EXIT teacher friday_test.jsonl 0
+ASSIST_S11F_EXIT 0
+export_s11f EXIT 0
+trim_s11f EXIT 0
+fixture_s11f EXIT 0
+fixture_s11f_en EXIT 0
+trim_s11_v2 EXIT 0
+fixture_s11_v2 EXIT 0
+fixture_s11_en_v2 EXIT 0
+assistant_s11_en EXIT 0
+assistant_s11f_en EXIT 0
+assistant_teacher_en EXIT 0
+onnx_eval_s11f EXIT 0
+ALL_DONE
+S11A_TRAIN_EXIT 0
+EVAL_EXIT s11a test 0
+EVAL_EXIT s11a friday_test.jsonl 0
+assistant_s11a EXIT 0
+gate: s11 0.6029, s11a 0.6030, routing 0.84
+export_s11a EXIT 0
+trim_s11a EXIT 0
+fixture_s11a EXIT 0
+fixture_s11a_en EXIT 0
+assistant_s11a_en EXIT 0
+ALL_DONE_A

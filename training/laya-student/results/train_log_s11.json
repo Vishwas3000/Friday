@@ -1,0 +1,498 @@
+{
+ "init": "ckpt/s11-init",
+ "alpha": 0.5,
+ "tau": 2.0,
+ "train_steps": 88308,
+ "train_items": 132448,
+ "skipped": {
+  "teacher_missing": 0
+ },
+ "epochs": [
+  {
+   "epoch": 1,
+   "train_loss": 1.272498943835072,
+   "val": {
+    "steps": 827,
+    "operation_accuracy": 0.769,
+    "target_top1_accuracy": 0.6484,
+    "joint_action_accuracy": 0.6295,
+    "grounding_coverage": 0.9525,
+    "ece_operation": 0.1719,
+    "brier_operation": 0.3637,
+    "ece_target": 0.14,
+    "brier_target": 0.4988,
+    "latency_ms_median": null,
+    "latency_ms_p95": null,
+    "target_top1_by_candidates": {
+     "1-5": {
+      "acc": 0.8772,
+      "n": 57
+     },
+     "6-10": {
+      "acc": 0.6747,
+      "n": 83
+     },
+     "11-20": {
+      "acc": 0.6429,
+      "n": 154
+     },
+     "21-50": {
+      "acc": 0.5347,
+      "n": 101
+     },
+     ">50": {
+      "acc": 0.1667,
+      "n": 6
+     }
+    },
+    "operation_macro_f1": 0.5219,
+    "op_per_class": {
+     "CLICK": {
+      "precision": 0.8471,
+      "recall": 0.831,
+      "f1": 0.8389,
+      "n_gold": 420,
+      "n_pred": 412
+     },
+     "LONG_PRESS": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_gold": 1,
+      "n_pred": 0
+     },
+     "SCROLL_UP": {
+      "precision": 0.8333,
+      "recall": 0.5556,
+      "f1": 0.6667,
+      "n_gold": 9,
+      "n_pred": 6
+     },
+     "SCROLL_DOWN": {
+      "precision": 0.5732,
+      "recall": 0.662,
+      "f1": 0.6144,
+      "n_gold": 71,
+      "n_pred": 82
+     },
+     "SCROLL_LEFT": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_gold": 3,
+      "n_pred": 0
+     },
+     "SCROLL_RIGHT": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_gold": 3,
+      "n_pred": 2
+     },
+     "OPEN_APP": {
+      "precision": 0.9362,
+      "recall": 0.9778,
+      "f1": 0.9565,
+      "n_gold": 45,
+      "n_pred": 47
+     },
+     "INPUT_TEXT": {
+      "precision": 0.7833,
+      "recall": 0.8868,
+      "f1": 0.8319,
+      "n_gold": 53,
+      "n_pred": 60
+     },
+     "BACK": {
+      "precision": 0.6071,
+      "recall": 0.5862,
+      "f1": 0.5965,
+      "n_gold": 29,
+      "n_pred": 28
+     },
+     "WAIT": {
+      "precision": 0.5625,
+      "recall": 0.4821,
+      "f1": 0.5192,
+      "n_gold": 56,
+      "n_pred": 48
+     },
+     "DONE": {
+      "precision": 0.7042,
+      "recall": 0.7299,
+      "f1": 0.7168,
+      "n_gold": 137,
+      "n_pred": 142
+     }
+    },
+    "unfit_items": {}
+   },
+   "minutes": 53.6
+  },
+  {
+   "epoch": 2,
+   "train_loss": 1.0927216044192183,
+   "val": {
+    "steps": 827,
+    "operation_accuracy": 0.8017,
+    "target_top1_accuracy": 0.6584,
+    "joint_action_accuracy": 0.6605,
+    "grounding_coverage": 0.9525,
+    "ece_operation": 0.146,
+    "brier_operation": 0.3193,
+    "ece_target": 0.116,
+    "brier_target": 0.4739,
+    "latency_ms_median": null,
+    "latency_ms_p95": null,
+    "target_top1_by_candidates": {
+     "1-5": {
+      "acc": 0.8772,
+      "n": 57
+     },
+     "6-10": {
+      "acc": 0.6747,
+      "n": 83
+     },
+     "11-20": {
+      "acc": 0.6494,
+      "n": 154
+     },
+     "21-50": {
+      "acc": 0.5347,
+      "n": 101
+     },
+     ">50": {
+      "acc": 0.6667,
+      "n": 6
+     }
+    },
+    "operation_macro_f1": 0.536,
+    "op_per_class": {
+     "CLICK": {
+      "precision": 0.8341,
+      "recall": 0.8976,
+      "f1": 0.8647,
+      "n_gold": 420,
+      "n_pred": 452
+     },
+     "LONG_PRESS": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_gold": 1,
+      "n_pred": 0
+     },
+     "SCROLL_UP": {
+      "precision": 0.75,
+      "recall": 0.6667,
+      "f1": 0.7059,
+      "n_gold": 9,
+      "n_pred": 8
+     },
+     "SCROLL_DOWN": {
+      "precision": 0.6389,
+      "recall": 0.6479,
+      "f1": 0.6434,
+      "n_gold": 71,
+      "n_pred": 72
+     },
+     "SCROLL_LEFT": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_gold": 3,
+      "n_pred": 0
+     },
+     "SCROLL_RIGHT": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_gold": 3,
+      "n_pred": 1
+     },
+     "OPEN_APP": {
+      "precision": 0.9375,
+      "recall": 1.0,
+      "f1": 0.9677,
+      "n_gold": 45,
+      "n_pred": 48
+     },
+     "INPUT_TEXT": {
+      "precision": 0.902,
+      "recall": 0.8679,
+      "f1": 0.8846,
+      "n_gold": 53,
+      "n_pred": 51
+     },
+     "BACK": {
+      "precision": 0.56,
+      "recall": 0.4828,
+      "f1": 0.5185,
+      "n_gold": 29,
+      "n_pred": 25
+     },
+     "WAIT": {
+      "precision": 0.8519,
+      "recall": 0.4107,
+      "f1": 0.5542,
+      "n_gold": 56,
+      "n_pred": 27
+     },
+     "DONE": {
+      "precision": 0.7413,
+      "recall": 0.7737,
+      "f1": 0.7571,
+      "n_gold": 137,
+      "n_pred": 143
+     }
+    },
+    "unfit_items": {}
+   },
+   "minutes": 77.9
+  },
+  {
+   "epoch": 3,
+   "train_loss": 1.0078106051206042,
+   "val": {
+    "steps": 827,
+    "operation_accuracy": 0.8089,
+    "target_top1_accuracy": 0.6658,
+    "joint_action_accuracy": 0.6667,
+    "grounding_coverage": 0.9525,
+    "ece_operation": 0.1423,
+    "brier_operation": 0.3157,
+    "ece_target": 0.1026,
+    "brier_target": 0.4659,
+    "latency_ms_median": null,
+    "latency_ms_p95": null,
+    "target_top1_by_candidates": {
+     "1-5": {
+      "acc": 0.8421,
+      "n": 57
+     },
+     "6-10": {
+      "acc": 0.7229,
+      "n": 83
+     },
+     "11-20": {
+      "acc": 0.6558,
+      "n": 154
+     },
+     "21-50": {
+      "acc": 0.5347,
+      "n": 101
+     },
+     ">50": {
+      "acc": 0.6667,
+      "n": 6
+     }
+    },
+    "operation_macro_f1": 0.5485,
+    "op_per_class": {
+     "CLICK": {
+      "precision": 0.8429,
+      "recall": 0.9071,
+      "f1": 0.8739,
+      "n_gold": 420,
+      "n_pred": 452
+     },
+     "LONG_PRESS": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_gold": 1,
+      "n_pred": 0
+     },
+     "SCROLL_UP": {
+      "precision": 0.8571,
+      "recall": 0.6667,
+      "f1": 0.75,
+      "n_gold": 9,
+      "n_pred": 7
+     },
+     "SCROLL_DOWN": {
+      "precision": 0.6301,
+      "recall": 0.6479,
+      "f1": 0.6389,
+      "n_gold": 71,
+      "n_pred": 73
+     },
+     "SCROLL_LEFT": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_gold": 3,
+      "n_pred": 0
+     },
+     "SCROLL_RIGHT": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_gold": 3,
+      "n_pred": 1
+     },
+     "OPEN_APP": {
+      "precision": 0.9375,
+      "recall": 1.0,
+      "f1": 0.9677,
+      "n_gold": 45,
+      "n_pred": 48
+     },
+     "INPUT_TEXT": {
+      "precision": 0.9167,
+      "recall": 0.8302,
+      "f1": 0.8713,
+      "n_gold": 53,
+      "n_pred": 48
+     },
+     "BACK": {
+      "precision": 0.6071,
+      "recall": 0.5862,
+      "f1": 0.5965,
+      "n_gold": 29,
+      "n_pred": 28
+     },
+     "WAIT": {
+      "precision": 0.8065,
+      "recall": 0.4464,
+      "f1": 0.5747,
+      "n_gold": 56,
+      "n_pred": 31
+     },
+     "DONE": {
+      "precision": 0.7554,
+      "recall": 0.7664,
+      "f1": 0.7609,
+      "n_gold": 137,
+      "n_pred": 139
+     }
+    },
+    "unfit_items": {}
+   },
+   "minutes": 102.2
+  }
+ ],
+ "train_hours": 1.704,
+ "best": {
+  "joint": 0.6667,
+  "epoch": 3
+ },
+ "fitted_temperature": 0.8372687101364136,
+ "scorer_scale": 1.386566335194651,
+ "val_final": {
+  "steps": 827,
+  "operation_accuracy": 0.8089,
+  "target_top1_accuracy": 0.6683,
+  "joint_action_accuracy": 0.6679,
+  "grounding_coverage": 0.9525,
+  "ece_operation": 0.0425,
+  "brier_operation": 0.295,
+  "ece_target": 0.0631,
+  "brier_target": 0.4572,
+  "latency_ms_median": null,
+  "latency_ms_p95": null,
+  "target_top1_by_candidates": {
+   "1-5": {
+    "acc": 0.8421,
+    "n": 57
+   },
+   "6-10": {
+    "acc": 0.7349,
+    "n": 83
+   },
+   "11-20": {
+    "acc": 0.6558,
+    "n": 154
+   },
+   "21-50": {
+    "acc": 0.5347,
+    "n": 101
+   },
+   ">50": {
+    "acc": 0.6667,
+    "n": 6
+   }
+  },
+  "operation_macro_f1": 0.5485,
+  "op_per_class": {
+   "CLICK": {
+    "precision": 0.8429,
+    "recall": 0.9071,
+    "f1": 0.8739,
+    "n_gold": 420,
+    "n_pred": 452
+   },
+   "LONG_PRESS": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "n_gold": 1,
+    "n_pred": 0
+   },
+   "SCROLL_UP": {
+    "precision": 0.8571,
+    "recall": 0.6667,
+    "f1": 0.75,
+    "n_gold": 9,
+    "n_pred": 7
+   },
+   "SCROLL_DOWN": {
+    "precision": 0.6301,
+    "recall": 0.6479,
+    "f1": 0.6389,
+    "n_gold": 71,
+    "n_pred": 73
+   },
+   "SCROLL_LEFT": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "n_gold": 3,
+    "n_pred": 0
+   },
+   "SCROLL_RIGHT": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "n_gold": 3,
+    "n_pred": 1
+   },
+   "OPEN_APP": {
+    "precision": 0.9375,
+    "recall": 1.0,
+    "f1": 0.9677,
+    "n_gold": 45,
+    "n_pred": 48
+   },
+   "INPUT_TEXT": {
+    "precision": 0.9167,
+    "recall": 0.8302,
+    "f1": 0.8713,
+    "n_gold": 53,
+    "n_pred": 48
+   },
+   "BACK": {
+    "precision": 0.6071,
+    "recall": 0.5862,
+    "f1": 0.5965,
+    "n_gold": 29,
+    "n_pred": 28
+   },
+   "WAIT": {
+    "precision": 0.8065,
+    "recall": 0.4464,
+    "f1": 0.5747,
+    "n_gold": 56,
+    "n_pred": 31
+   },
+   "DONE": {
+    "precision": 0.7554,
+    "recall": 0.7664,
+    "f1": 0.7609,
+    "n_gold": 137,
+    "n_pred": 139
+   }
+  },
+  "unfit_items": {}
+ }
+}

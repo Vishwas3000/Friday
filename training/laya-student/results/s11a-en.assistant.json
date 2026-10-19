@@ -1,0 +1,43 @@
+{
+ "model": "ckpt/s11a",
+ "onnx": null,
+ "respell": true,
+ "skill": {
+  "all": {
+   "n": 50,
+   "accuracy": 0.78,
+   "coverage_at_0.7": 0.48,
+   "accuracy_at_0.7": 0.958
+  },
+  "seen": {
+   "n": 34,
+   "accuracy": 0.853,
+   "coverage_at_0.7": 0.618,
+   "accuracy_at_0.7": 1.0
+  },
+  "para": {
+   "n": 16,
+   "accuracy": 0.625,
+   "coverage_at_0.7": 0.188,
+   "accuracy_at_0.7": 0.667
+  }
+ },
+ "slot": {
+  "exact": {
+   "n": 26,
+   "accuracy": 0.038,
+   "coverage_at_0.7": 0.308,
+   "accuracy_at_0.7": 0.0
+  },
+  "overlap": 0.923
+ },
+ "slot_trim": {
+  "exact": {
+   "n": 26,
+   "accuracy": 0.731,
+   "coverage_at_0.7": 0.962,
+   "accuracy_at_0.7": 0.72
+  },
+  "overlap": 0.923
+ }
+}

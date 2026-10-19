@@ -1,0 +1,319 @@
+{
+ "model": "ckpt/s11f",
+ "split": "test",
+ "harness": {
+  "steps": 9987,
+  "operation_accuracy": 0.7277,
+  "target_top1_accuracy": 0.6407,
+  "joint_action_accuracy": 0.5941,
+  "grounding_coverage": 0.9357,
+  "ece_operation": 0.0482,
+  "brier_operation": 0.386,
+  "ece_target": 0.047,
+  "brier_target": 0.4866,
+  "latency_ms_median": null,
+  "latency_ms_p95": null,
+  "target_top1_by_candidates": {
+   "1-5": {
+    "acc": 0.8355,
+    "n": 547
+   },
+   "6-10": {
+    "acc": 0.6872,
+    "n": 860
+   },
+   "11-20": {
+    "acc": 0.6533,
+    "n": 2025
+   },
+   "21-50": {
+    "acc": 0.5114,
+    "n": 1228
+   },
+   ">50": {
+    "acc": 0.5,
+    "n": 96
+   }
+  },
+  "operation_macro_f1": 0.5456,
+  "op_per_class": {
+   "CLICK": {
+    "precision": 0.818,
+    "recall": 0.8248,
+    "f1": 0.8214,
+    "n_gold": 5074,
+    "n_pred": 5116
+   },
+   "LONG_PRESS": {
+    "precision": 0.75,
+    "recall": 0.3333,
+    "f1": 0.4615,
+    "n_gold": 9,
+    "n_pred": 4
+   },
+   "SCROLL_UP": {
+    "precision": 0.6,
+    "recall": 0.4062,
+    "f1": 0.4845,
+    "n_gold": 96,
+    "n_pred": 65
+   },
+   "SCROLL_DOWN": {
+    "precision": 0.5369,
+    "recall": 0.5375,
+    "f1": 0.5372,
+    "n_gold": 947,
+    "n_pred": 948
+   },
+   "SCROLL_LEFT": {
+    "precision": 0.3333,
+    "recall": 0.0405,
+    "f1": 0.0723,
+    "n_gold": 74,
+    "n_pred": 9
+   },
+   "SCROLL_RIGHT": {
+    "precision": 0.5424,
+    "recall": 0.3404,
+    "f1": 0.4183,
+    "n_gold": 94,
+    "n_pred": 59
+   },
+   "OPEN_APP": {
+    "precision": 0.7956,
+    "recall": 0.8898,
+    "f1": 0.8401,
+    "n_gold": 608,
+    "n_pred": 680
+   },
+   "INPUT_TEXT": {
+    "precision": 0.8046,
+    "recall": 0.8861,
+    "f1": 0.8434,
+    "n_gold": 632,
+    "n_pred": 696
+   },
+   "BACK": {
+    "precision": 0.575,
+    "recall": 0.4023,
+    "f1": 0.4734,
+    "n_gold": 343,
+    "n_pred": 240
+   },
+   "WAIT": {
+    "precision": 0.4658,
+    "recall": 0.3598,
+    "f1": 0.406,
+    "n_gold": 567,
+    "n_pred": 438
+   },
+   "DONE": {
+    "precision": 0.6085,
+    "recall": 0.6831,
+    "f1": 0.6437,
+    "n_gold": 1543,
+    "n_pred": 1732
+   }
+  },
+  "unfit_items": {}
+ },
+ "overall": {
+  "steps": 9987,
+  "operation": 0.7277,
+  "target_top1": 0.6407,
+  "policy_joint": 0.5941,
+  "groundable": 4756
+ },
+ "op_recall": {
+  "CLICK": [
+   0.8248,
+   5074
+  ],
+  "LONG_PRESS": [
+   0.3333,
+   9
+  ],
+  "SCROLL_UP": [
+   0.4062,
+   96
+  ],
+  "SCROLL_DOWN": [
+   0.5375,
+   947
+  ],
+  "SCROLL_LEFT": [
+   0.0405,
+   74
+  ],
+  "SCROLL_RIGHT": [
+   0.3404,
+   94
+  ],
+  "OPEN_APP": [
+   0.8898,
+   608
+  ],
+  "INPUT_TEXT": [
+   0.8861,
+   632
+  ],
+  "BACK": [
+   0.4023,
+   343
+  ],
+  "WAIT": [
+   0.3598,
+   567
+  ],
+  "DONE": [
+   0.6831,
+   1543
+  ]
+ },
+ "by_bucket": {
+  "0": {
+   "steps": 97,
+   "operation": 0.7526,
+   "target_top1": null,
+   "policy_joint": 0.8293,
+   "groundable": 0
+  },
+  "1-5": {
+   "steps": 1344,
+   "operation": 0.6778,
+   "target_top1": 0.8355,
+   "policy_joint": 0.6118,
+   "groundable": 547
+  },
+  "6-10": {
+   "steps": 1943,
+   "operation": 0.7077,
+   "target_top1": 0.6872,
+   "policy_joint": 0.6002,
+   "groundable": 860
+  },
+  "11-20": {
+   "steps": 4095,
+   "operation": 0.7565,
+   "target_top1": 0.6533,
+   "policy_joint": 0.6236,
+   "groundable": 2025
+  },
+  "21-50": {
+   "steps": 2385,
+   "operation": 0.7182,
+   "target_top1": 0.5114,
+   "policy_joint": 0.5272,
+   "groundable": 1228
+  },
+  ">50": {
+   "steps": 123,
+   "operation": 0.7967,
+   "target_top1": 0.5,
+   "policy_joint": 0.4878,
+   "groundable": 96
+  }
+ },
+ "by_subsplit": {
+  "IDD": {
+   "steps": 4618,
+   "operation": 0.7845,
+   "target_top1": 0.6825,
+   "policy_joint": 0.6501,
+   "groundable": 2337
+  },
+  "app_unseen": {
+   "steps": 4106,
+   "operation": 0.6617,
+   "target_top1": 0.5662,
+   "policy_joint": 0.5196,
+   "groundable": 1888
+  },
+  "category_unseen": {
+   "steps": 4591,
+   "operation": 0.6635,
+   "target_top1": 0.5752,
+   "policy_joint": 0.5263,
+   "groundable": 2102
+  },
+  "task_unseen": {
+   "steps": 5267,
+   "operation": 0.6793,
+   "target_top1": 0.6051,
+   "policy_joint": 0.5477,
+   "groundable": 2383
+  }
+ },
+ "reference": {
+  "all": {
+   "steps": 8444,
+   "type": 74.06,
+   "grounding": 59.26,
+   "gold_clicks": 5074
+  },
+  "by_bucket": {
+   "0": {
+    "steps": 89,
+    "type": 78.65,
+    "grounding": 0.0,
+    "gold_clicks": 15
+   },
+   "1-5": {
+    "steps": 1166,
+    "type": 71.27,
+    "grounding": 56.9,
+    "gold_clicks": 638
+   },
+   "6-10": {
+    "steps": 1624,
+    "type": 72.35,
+    "grounding": 61.38,
+    "gold_clicks": 940
+   },
+   "11-20": {
+    "steps": 3482,
+    "type": 76.82,
+    "grounding": 60.79,
+    "gold_clicks": 2127
+   },
+   "21-50": {
+    "steps": 1973,
+    "type": 71.72,
+    "grounding": 57.0,
+    "gold_clicks": 1258
+   },
+   ">50": {
+    "steps": 110,
+    "type": 80.0,
+    "grounding": 59.38,
+    "gold_clicks": 96
+   }
+  },
+  "by_subsplit": {
+   "IDD": {
+    "steps": 3897,
+    "type": 78.86,
+    "grounding": 66.3,
+    "gold_clicks": 2445
+   },
+   "app_unseen": {
+    "steps": 3475,
+    "type": 68.12,
+    "grounding": 49.16,
+    "gold_clicks": 2024
+   },
+   "category_unseen": {
+    "steps": 3891,
+    "type": 68.44,
+    "grounding": 51.05,
+    "gold_clicks": 2241
+   },
+   "task_unseen": {
+    "steps": 4464,
+    "type": 70.0,
+    "grounding": 53.19,
+    "gold_clicks": 2583
+   }
+  }
+ }
+}

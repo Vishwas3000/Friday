@@ -1,0 +1,9 @@
+{
+ "file": "laya-android-s11f-en.nb8-h-e16.onnx",
+ "mb": 198.8,
+ "map": "laya-android-s11f-en.vocab-map.json",
+ "map_mb": 5.7,
+ "check_steps": 50,
+ "same_decisions": 50,
+ "max_abs_dp_vs_uncut_respelt": 0.0
+}

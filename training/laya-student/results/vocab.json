@@ -1,0 +1,139 @@
+{
+ "vocab_size": 256000,
+ "unique_ids": {
+  "train": 49547,
+  "val": 5960,
+  "test": 25243
+ },
+ "tokens": {
+  "train": 53755171,
+  "val": 475526,
+  "test": 5588835
+ },
+ "test_token_coverage_by_train": 0.993654,
+ "test_unique_ids_unseen_in_train": 4037,
+ "test_rows_with_an_unseen_token": 6698,
+ "test_rows": 14743,
+ "test_steps_with_an_unseen_token": 4565,
+ "test_steps": 9987,
+ "templates_outside_train": 1,
+ "tab_ids": 31,
+ "app_templates_outside_train": 4,
+ "kept_rows_train_special_bytes": 49771,
+ "special_ids": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  106,
+  107
+ ],
+ "byte_fallback_ids": 255,
+ "embedding_mb_fp16": {
+  "full": 393.2,
+  "kept": 76.4
+ },
+ "most_common_unseen": [
+  [
+   "▁phases",
+   287
+  ],
+  [
+   "reasons",
+   217
+  ],
+  [
+   "♎",
+   216
+  ],
+  [
+   "▁anime",
+   215
+  ],
+  [
+   "♏",
+   209
+  ],
+  [
+   "▁Realism",
+   188
+  ],
+  [
+   "♍",
+   187
+  ],
+  [
+   "▁flipped",
+   186
+  ],
+  [
+   "♐",
+   180
+  ],
+  [
+   "♌",
+   173
+  ],
+  [
+   "♑",
+   163
+  ],
+  [
+   "♒",
+   157
+  ],
+  [
+   "▁affairs",
+   157
+  ],
+  [
+   "Remix",
+   139
+  ],
+  [
+   "▁ƒ",
+   139
+  ],
+  [
+   "▁Nebula",
+   138
+  ],
+  [
+   "♊",
+   137
+  ],
+  [
+   "▁Biden",
+   135
+  ],
+  [
+   "♋",
+   133
+  ],
+  [
+   "Ukraine",
+   130
+  ],
+  [
+   "▁mandala",
+   128
+  ],
+  [
+   "viations",
+   127
+  ],
+  [
+   "▁hostages",
+   124
+  ],
+  [
+   "emu",
+   123
+  ],
+  [
+   "▁pleads",
+   121
+  ]
+ ]
+}
