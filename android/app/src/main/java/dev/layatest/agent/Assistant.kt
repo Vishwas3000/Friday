@@ -515,8 +515,9 @@ class Assistant(private val svc: AgentService, override val request: String, pri
     companion object {
         const val REQUEST_LOG = "requests.jsonl"
         private const val SKIM_PAGES = 4
-        /** The target row's size on crowded screens (D-049, research/18 §9: no worse pick at 16, 0.63× the time); 0: all. */
-        const val SHORTLIST = 16
+        /** The target row's size on crowded screens; 0: all. 16 hid 17% of gold targets on AndroidControl's test steps
+         *  (research/27 L3), 32 costs nothing measurable (D-060, owner); the 52 screens of D-049 were too few to tell. */
+        const val SHORTLIST = 32
         private const val TAG = "FridayAssistant"
         private const val GROUP = 16
     }

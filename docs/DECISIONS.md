@@ -607,8 +607,24 @@ Every project decision, with its reason. Entries are never deleted; replaced one
   - **The task suite waits while the phone is hot** (thermal status ≥ 3), up to 10 min, then stops.
 - **Suite now (memory on, read only):** 23/25, median 6.3 s. Only Photos (no search intent; Laya taps a photo) and
   Swiggy (no accessibility candidates) fail.
-- **Not changed, for the owner to decide:** risky words are matched anywhere in a label. A container's label includes
+- **Not changed; the owner decided to keep it as is (2026-10-19):** risky words are matched anywhere in a label. A container's label includes
   its children's text, so Spotify's playlist row "… Add … to My Library" asks the owner (the unattended suite skips it).
   - Narrowing the rule (first words only, or short labels only) could let a container labelled
     "₹1,249 Total Place order" through, so it stays as is.
 - **Who / status:** Claude, from the suite (the owner's standing ask: reliable and fast) · **shipped.**
+
+### D-060 — Target shortlist 32 (was 16)
+- **Decision:** on screens with more than 32 elements, Laya's target question shows 32 of them, not 16. The
+  operation question still sees every element (research/27: cutting it costs 1–2 points).
+- **Why:**
+  - **At scale, k = 16 hides the gold target** on 17% of crowded taps and costs 5 points of target accuracy on them
+    (−2.1 overall). Fewer options don't help Laya choose.
+  - **k = 32 costs 0.2 points overall,** which is not significant (research/27 L3, AndroidControl's 9,987 test steps).
+  - D-049 chose 16 from 52 screens, too few to see this.
+  - **The phone pays about 19% more Laya time on crowded screens** (research/18 §11). The owner chose accuracy first;
+    the half-depth model (research/28) is the speed fix.
+- **Rejected:**
+  - 24: −3.1 points on the 17% of taps above 24, which is significant.
+  - Keeping 16.
+- **Who / status:** owner (chose 32 over 24 and 16, 2026-10-19) · Claude (measured, recommended) · **shipped.**
+

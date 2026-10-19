@@ -3,7 +3,7 @@ Prints pass/fail, total time, Laya time and steps per task; saves each run to ca
 
     uv run python scripts/task_suite.py                      # every task, memory off: Laya and the skills do the work
     uv run python scripts/task_suite.py --memory             # with Friday's memory, read only (the suite never teaches it)
-    uv run python scripts/task_suite.py --shortlist 16       # Laya picks targets from 16 elements (D-049); 0 = all
+    uv run python scripts/task_suite.py --shortlist 16       # Laya picks targets from 16 elements (default 32, D-060); 0 = all
     uv run python scripts/task_suite.py --only clock         # tasks whose id contains "clock"
     uv run python scripts/task_suite.py --owner              # also tasks that need you (fingerprint): stay by the phone
     uv run python scripts/task_suite.py --compare captures/suite/A.json captures/suite/B.json

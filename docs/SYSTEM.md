@@ -31,7 +31,7 @@ typed request, or spoken to the floating bubble (tap, speak, tap), or "Hey Frida
   │     d. done checks: the goal's words already on a selected tab, or the screen looks like the hint's finished screen
   │     e. skim: if nothing on screen matches the goal's words, scroll down up to 4 pages looking for it
   │     f. Laya step: OPERATION first (12 options, the whole screen), then TARGET only for tap / long-press / type,
-  │        shown at most 16 elements (shortlist)
+  │        shown at most 32 elements (shortlist, D-060)
   │     g. safety verdict: AUTO / ASK the owner / BLOCK
   │     h. act: click the element (accessibility), scroll, type, back
   │     i. done-on-tap: the tapped element names everything the goal is about → stop
