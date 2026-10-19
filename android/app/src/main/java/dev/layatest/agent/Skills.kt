@@ -164,14 +164,18 @@ internal fun countAsked(request: String) =
     COUNT.find(request)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }?.toInt()?.coerceIn(1, 20)
 
 /** Up to the count the request asks for (else 3), scrolling down up to 3 pages when the screen shows fewer. */
-private fun readAll(ctx: SkillContext, dated: Boolean): String {
-    val n = countAsked(ctx.request) ?: 3
-    ctx.waitUntil(5000) { readAmounts(ctx.screen().texts, 1, dated) != null }  // the list loads after the tap
+private fun readAll(ctx: SkillContext, dated: Boolean): String =
+    readList(ctx, countAsked(ctx.request) ?: 3) { t, n -> readAmounts(t, n, dated) }?.let { ctx.succeeded(); "Here's what I see:\n$it" }
+        ?: if (dated) "I didn't find any dated payments on this screen" else "Done"
+
+/** Up to [n] items as [read] finds them, once the list has loaded, scrolling down up to 3 pages when fewer show. */
+internal fun readList(ctx: SkillContext, n: Int, read: (List<ScreenText>, Int) -> String?): String? {
+    // the list loads after the tap: Amazon's orders weren't there yet when read at once (2026-10-19)
+    ctx.waitUntil(5000) { read(ctx.screen().texts, 1) != null }
     var texts = ctx.screen().texts
     var pages = 0
-    while (pages++ < 3 && (readAmounts(texts, n, dated)?.lines()?.size ?: 0) < n && ctx.scroll("down")) texts = texts + ctx.screen().texts
-    return readAmounts(texts, n, dated)?.let { ctx.succeeded(); "Here's what I see:\n$it" }
-        ?: if (dated) "I didn't find any dated payments on this screen" else "Done"
+    while (pages++ < 3 && (read(texts, n)?.lines()?.size ?: 0) < n && ctx.scroll("down")) texts = texts + ctx.screen().texts
+    return read(texts, n)
 }
 private val AMOUNT = Regex("(₹|rs\\.?|inr)\\s?[\\d,]+(\\.\\d{1,2})?", RegexOption.IGNORE_CASE)
 

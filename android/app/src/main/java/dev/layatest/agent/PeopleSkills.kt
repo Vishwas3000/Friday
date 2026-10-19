@@ -110,7 +110,7 @@ object Shopping : Skill {
             // the goal a taught path is keyed on, so "open amazon and show my orders" replays without Laya
             track -> ctx.runLaya("open ${app.label.lowercase()} and show my orders").let { o ->
                 if (o != Outcome.DONE) outcome(o, "")
-                else readOrders(ctx.screen().texts, countAsked(ctx.request) ?: 3)?.let { "Your latest ${app.label} orders:\n$it" }
+                else readList(ctx, countAsked(ctx.request) ?: 3, ::readOrders)?.let { ctx.succeeded(); "Your latest ${app.label} orders:\n$it" }
                     ?: "Your ${app.label} orders are on screen"
             }
             item == null -> "Opened ${app.label}"

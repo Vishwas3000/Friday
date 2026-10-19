@@ -578,3 +578,11 @@ Every project decision, with its reason. Entries are never deleted; replaced one
 - **Who / status:** Claude, from the suite's failures (the owner's standing ask: make Friday fast and reliable) ·
   **shipped, verified on the 3 suite tasks.**
 
+
+### D-058 — English only, for now
+- **Decision:** Friday supports English only: requests, speech, word lists, test tasks and the Writer. Hindi and
+  Hinglish (research/13's language table) are parked.
+- **Why:** the owner's call (2026-10-19: "we will only focus on giving support for english for now"). It also frees
+  memory: most of Laya's 256k-token multilingual vocabulary (196M of its 322M parameters) is never used by English UI
+  text, so research/28's vocabulary trim can keep only English tokens plus byte fallback.
+- **Who / status:** owner · **in force.** research/28 was told mid-run; the app's code needed no change.
