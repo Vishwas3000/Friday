@@ -12,7 +12,8 @@ internal object HotelSearch {
     private val money = Regex("(?:₹|INR|NPR|Rs\\.?)\\s*[\\d,]+(?:\\.\\d+)?", RegexOption.IGNORE_CASE)
     private val month = DateTimeFormatter.ofPattern("MMM", Locale.ENGLISH)
 
-    fun run(ctx: SkillContext, state: JSONObject, navigate: (AppInfo, String, String?) -> Outcome): String {
+    fun run(ctx: SkillContext, state: JSONObject, typeDestination: (ScreenCandidate, String) -> Boolean,
+            navigate: (AppInfo, String, String?) -> Outcome): String {
         val hotel = state.optJSONObject("hotel") ?: return pending(state, "Missing saved hotel details.")
         applyOwnerInputs(hotel, state.optString("original_request"), false)
         applyOwnerInputs(hotel, state.optString("latest_request"), true)
@@ -26,14 +27,27 @@ internal object HotelSearch {
         if (!ctx.open(app) || !ctx.waitUntil(5000) { ctx.foreground() == PKG })
             return pending(state, "MakeMyTrip could not be opened.")
         var screen = ctx.screen()
-        if (find(screen, "btnDone") != null && !ctx.back()) return pending(state, "Return to the hotel search form to continue.")
+        if ((find(screen, "btnDone") != null || destinationInput(screen) != null || find(screen, "done_button") != null) && !ctx.back())
+            return pending(state, "Return to the hotel search form to continue.")
         screen = ctx.screen()
-        if (find(screen, "hotel_landing_main_screen") == null) {
+        screen = revealResultsHeader(ctx, screen)
+        repeat(3) {
+            if (!formVisible(screen) && !ctx.stopped) {
+                val edit = find(screen, "edit_search_container") ?: find(screen, "edit_icon")
+                val hotels = nodes(screen).firstOrNull { it.optString("text").trim().equals("Hotels", true) && it.optBoolean("enabled") }
+                val target = edit ?: hotels
+                if (target != null && tapNode(ctx, screen, target)) {
+                    ctx.waitUntil(3500) { screen = ctx.screen(); formVisible(screen) }
+                    screen = ctx.screen()
+                }
+            }
+        }
+        if (!formVisible(screen)) {
             if (navigate(app, "open the Hotels search form only; do not search, select a hotel, reserve or pay", null) == Outcome.STOPPED || ctx.stopped)
                 return "Stopped. The hotel search is saved."
             screen = ctx.screen()
         }
-        if (screen.pkg != PKG || find(screen, "hotel_landing_main_screen") == null)
+        if (!formVisible(screen))
             return pending(state, "The MakeMyTrip hotel form was not verified.")
         if (missing.isNotEmpty()) {
             state.put("missing_hotel_inputs", JSONArray(missing)).put("stage", "awaiting_hotel_inputs")
@@ -53,8 +67,32 @@ internal object HotelSearch {
         if (!destinationMatches(field(screen, "location_box"), destination)) {
             ctx.say("Setting hotel destination…")
             if (!tap(ctx, screen, "location_box")) return pending(state, "The hotel location field could not be opened.")
-            if (navigate(app, "enter the supplied destination and select its matching city/locality suggestion; return to the hotel form; do not search or book", destination) == Outcome.STOPPED || ctx.stopped)
-                return "Stopped. The hotel search is saved."
+            val query = destinationQuery(destination)
+            if (query.isBlank()) return pending(state, "The saved destination does not contain a usable city/locality.")
+            if (!ctx.waitUntil(3500) { destinationInput(ctx.screen()) != null })
+                return pending(state, "MakeMyTrip's destination input was not verified.")
+            screen = ctx.screen()
+            val input = destinationInput(screen) ?: return pending(state, "The destination input disappeared.")
+            if (!tapNode(ctx, screen, input)) return pending(state, "The verified destination input could not be focused.")
+            screen = ctx.screen()
+            val focused = destinationInput(screen)?.let(::candidate) ?: return pending(state, "The focused destination field was not verified.")
+            if (!typeDestination(focused, query)) return pending(state, "The exact destination could not be entered in the verified field.")
+            ctx.say("Finding $query…")
+            if (!ctx.waitUntil(6000) {
+                    screen = ctx.screen()
+                    destinationInput(screen)?.optString("text")?.trim()?.equals(query, true) == true &&
+                        destinationSuggestion(screen, destination) != null
+                }) return pending(state, "No exact $query suggestion with the requested country was verified. No alternative location was selected.")
+            screen = ctx.screen()
+            if (destinationInput(screen)?.optString("text")?.trim()?.equals(query, true) != true)
+                return pending(state, "The destination search text changed before selection.")
+            val suggestion = destinationSuggestion(screen, destination)
+                ?: return pending(state, "The matching destination suggestion disappeared.")
+            state.put("hotel_destination_evidence", JSONObject().put("query", query).put("selected_suggestion", suggestion.label)
+                .put("captured_at", System.currentTimeMillis()))
+            if (ctx.stopped || ctx.foreground() != PKG || !ctx.tap(suggestion))
+                return pending(state, "The verified destination suggestion could not be selected.")
+            ctx.waitUntil(4000) { formDestinationMatches(ctx.screen(), destination) }
             screen = ctx.screen()
             if (!destinationMatches(field(screen, "location_box"), destination))
                 return pending(state, "The destination was not verified as $destination. Please select the matching locality/city in MakeMyTrip.")
@@ -97,13 +135,21 @@ internal object HotelSearch {
         state.put("hotel_step", "results").put("hotel_form_verified", true)
         if (!tap(ctx, screen, "search_cta")) return pending(state, "The Search control could not be activated.")
         var results = JSONArray()
-        ctx.waitUntil(10000) {
+        var headerRecoveryAttempted = false
+        ctx.waitUntil(15000) {
             screen = ctx.screen()
-            results = readResults(screen)
+            if (!headerRecoveryAttempted && find(screen, "edit_search_container") == null && readResults(screen).length() > 0) {
+                headerRecoveryAttempted = true
+                screen = revealResultsHeader(ctx, screen)
+            }
+            results = if (resultHeaderMatches(screen, destination, checkIn, checkOut, rooms, adults + children)) readResults(screen) else JSONArray()
             results.length() > 0
         }
         if (ctx.stopped) return "Stopped. The hotel search is saved."
         state.put("hotel_results", results).put("hotel_results_captured_at", System.currentTimeMillis())
+            .put("hotel_result_header_evidence", JSONObject().put("destination_and_stay", field(screen, "edit_search_container"))
+                .put("dates_and_guests", field(screen, "dateGuestText"))
+                .put("year_and_guest_breakdown_basis", "independently verified pre-search form"))
         if (results.length() == 0) return pending(state, "Search was submitted with verified stay details, but no hotel result cards could be verified. Availability, loading or a network problem may still need attention.")
         state.put("stage", "hotel_search_complete").put("hotel_results_verified", true)
             .put("hotel_result_scope", "visible result cards from one screen; no reservation")
@@ -122,6 +168,73 @@ internal object HotelSearch {
         return "Hotel search pending. $message The saved stay details are preserved."
     }
 
+    /** A retained result-list scroll can hide Edit Search. Read-only, at most three upward scrolls. */
+    private fun revealResultsHeader(ctx: SkillContext, initial: Screen): Screen {
+        var screen = initial
+        repeat(3) {
+            if (ctx.stopped || screen.pkg != PKG || ctx.foreground() != PKG || formVisible(screen) ||
+                find(screen, "edit_search_container") != null || readResults(screen).length() == 0 ||
+                Safety.isAuthPrompt(screen.pkg, nodes(screen).map(::text))) return screen
+            ctx.say("Checking the hotel results header…")
+            if (!ctx.scroll("up")) return screen
+            screen = ctx.screen()
+        }
+        return screen
+    }
+
+    fun formVisible(screen: Screen): Boolean = screen.pkg == PKG &&
+        listOf("location_box", "check_in_date", "check_out_date", "room_and_guest_box").all { find(screen, it) != null }
+
+    fun formDestinationMatches(screen: Screen, destination: String): Boolean =
+        formVisible(screen) && destinationMatches(field(screen, "location_box"), destination)
+
+    private fun destinationQuery(destination: String) = destination.substringBefore(',').trim()
+        .replace(Regex("\\s+Nepal$", RegexOption.IGNORE_CASE), "").trim()
+
+    private fun destinationInput(screen: Screen): JSONObject? = nodes(screen).filter {
+        id(it) == "input_text" && it.optBoolean("editable") && it.optBoolean("enabled")
+    }.singleOrNull()
+
+    /** Known city rows: title and country subtitle must belong to the same bounded clickable row. */
+    private fun destinationSuggestion(screen: Screen, destination: String): ScreenCandidate? {
+        val query = normalized(destinationQuery(destination))
+        val expectedCountry = destination.substringAfter(',', "").trim()
+        val height = screen.state?.optJSONArray("screen")?.optInt(1) ?: return null
+        val rows = nodes(screen).filter { row ->
+            val bounds = row.optJSONArray("bounds")
+            val children = row.optJSONArray("children")
+            if (!row.optBoolean("clickable") || !row.optBoolean("enabled") || bounds == null ||
+                bounds.optInt(3) - bounds.optInt(1) >= height / 3 || children == null) return@filter false
+            val items = (0 until children.length()).map { children.getJSONObject(it) }
+                .filter { it.optBoolean("visible") && it.optString("package") == PKG }
+            val titles = items.filter { id(it) == "title" }
+            val country = items.filter { id(it) == "sub_title" }.joinToString(" ") { it.optString("text") }
+            titles.size == 1 && normalized(titles.single().optString("text")) == query &&
+                (expectedCountry.isBlank() || Regex("\\b${Regex.escape(expectedCountry)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(country))
+        }
+        return rows.singleOrNull()?.let(::candidate)
+    }
+
+    private fun resultHeaderMatches(screen: Screen, destination: String, checkIn: LocalDate, checkOut: LocalDate,
+                                    rooms: Int, guests: Int): Boolean {
+        if (screen.pkg != PKG || formVisible(screen)) return false
+        val header = find(screen, "edit_search_container") ?: return false
+        val children = header.optJSONArray("children") ?: return false
+        val title = (0 until children.length()).map { children.getJSONObject(it) }.firstOrNull { id(it) == "title" }
+            ?.let(::text).orEmpty()
+        if (!destinationMatches(title, destination)) return false
+        val stay = field(screen, "dateGuestText")
+        val start = "${checkIn.dayOfMonth}\\s+${month.format(checkIn)}[a-z]*"
+        val end = "${checkOut.dayOfMonth}\\s+${month.format(checkOut)}[a-z]*"
+        val firstYear = "(?:\\s*['‘’]?(?:${checkIn.year}|${checkIn.year % 100}))?"
+        val lastYear = "(?:\\s*['‘’]?(?:${checkOut.year}|${checkOut.year % 100}))?"
+        if (!Regex("\\b$start$firstYear\\s*(?:-|–|—|to)\\s*$end$lastYear(?=\\s*(?:,|·|\\||$))", RegexOption.IGNORE_CASE).containsMatchIn(stay)) return false
+        val shownYears = Regex("\\b(?:19|20)\\d{2}\\b").findAll(stay).map { it.value.toInt() }.toList()
+        if (shownYears.any { it != checkIn.year && it != checkOut.year }) return false
+        return Regex("\\b$rooms\\s+rooms?\\b", RegexOption.IGNORE_CASE).containsMatchIn(stay) &&
+            Regex("\\b$guests\\s+guests?\\b", RegexOption.IGNORE_CASE).containsMatchIn(stay)
+    }
+
     private fun missingInputs(hotel: JSONObject) = listOf("destination", "check_in", "check_out", "adults", "rooms", "children").filter { key ->
         when (key) {
             "adults", "rooms" -> hotel.optInt(key, 0) < 1
@@ -131,12 +244,13 @@ internal object HotelSearch {
     }
 
     /** Only explicit owner facts enter the stay; Gemini's answer is never parsed here. */
-    private fun applyOwnerInputs(hotel: JSONObject, request: String, overwrite: Boolean) {
+    internal fun applyOwnerInputs(hotel: JSONObject, request: String, overwrite: Boolean) {
         val sources = hotel.optJSONObject("input_sources") ?: JSONObject().also { hotel.put("input_sources", it) }
         fun put(key: String, value: Any) {
             if (overwrite || hotel.isNull(key)) {
                 hotel.put(key, value)
-                sources.put(key, JSONObject().put("basis", "explicit owner input").put("request", request.take(2000)))
+                val basis = if (Regex("\\btest\\s*search\\b", RegexOption.IGNORE_CASE).containsMatchIn(request)) "diagnostic test setup" else "explicit owner input"
+                sources.put(key, JSONObject().put("basis", basis).put("request", request.take(2000)))
             }
         }
         val range = Regex("\\b(\\d{4}-\\d{2}-\\d{2})\\s*(?:to|until|through|–|—)\\s*(\\d{4}-\\d{2}-\\d{2})\\b", RegexOption.IGNORE_CASE).find(request)
@@ -190,12 +304,15 @@ internal object HotelSearch {
     private fun tap(ctx: SkillContext, screen: Screen, rid: String): Boolean = find(screen, rid)?.let { tapNode(ctx, screen, it) } ?: false
     private fun tapNode(ctx: SkillContext, screen: Screen, node: JSONObject): Boolean {
         if (ctx.stopped || screen.pkg != PKG || ctx.foreground() != PKG || !node.optBoolean("enabled") || !node.optBoolean("visible")) return false
-        val b = node.optJSONArray("bounds") ?: return false
-        if (b.length() != 4 || b.optInt(2) <= b.optInt(0) || b.optInt(3) <= b.optInt(1)) return false
-        val target = ScreenCandidate(text(node).take(100), node.optString("class").substringAfterLast('.'), node.optBoolean("clickable"),
+        return candidate(node)?.let(ctx::tap) ?: false
+    }
+    private fun candidate(node: JSONObject): ScreenCandidate? {
+        if (node.optString("package") != PKG || !node.optBoolean("enabled") || !node.optBoolean("visible")) return null
+        val b = node.optJSONArray("bounds") ?: return null
+        if (b.length() != 4 || b.optInt(2) <= b.optInt(0) || b.optInt(3) <= b.optInt(1)) return null
+        return ScreenCandidate(text(node).take(100), node.optString("class").substringAfterLast('.'), node.optBoolean("clickable"),
             node.optBoolean("long_clickable"), node.optBoolean("editable"), node.optBoolean("scrollable"), node.optBoolean("checkable"),
             node.optBoolean("checked"), node.optBoolean("selected"), true, IntArray(4) { b.getInt(it) }, id(node))
-        return ctx.tap(target)
     }
     private fun selectDate(ctx: SkillContext, expected: LocalDate, checkIn: Boolean): Boolean {
         val footer = if (checkIn) "rlCheckin" else "rlCheckout"
@@ -222,7 +339,7 @@ internal object HotelSearch {
 
     private fun readResults(screen: Screen): JSONArray {
         val result = JSONArray()
-        if (screen.pkg != PKG || find(screen, "hotel_landing_main_screen") != null) return result
+        if (screen.pkg != PKG || formVisible(screen)) return result
         val names = nodes(screen).filter { node ->
             val role = id(node).replace(Regex("([a-z])([A-Z])"), "$1 $2").replace('_', ' ')
             Regex("\\b(?:hotel|property)\\b.*\\b(?:name|title)\\b", RegexOption.IGNORE_CASE).containsMatchIn(role) &&
@@ -269,6 +386,37 @@ internal object HotelSearch {
         applyOwnerInputs(hotel, "2026-11-02 to 2026-11-04, 3 adults", true)
         check(hotel.getString("check_in") == "2026-11-02" && hotel.getString("check_out") == "2026-11-04" && hotel.getInt("adults") == 3)
         check(missingInputs(JSONObject()).size == 6)
+        applyOwnerInputs(hotel, "test search 4 adults", true)
+        check(hotel.getJSONObject("input_sources").getJSONObject("adults").getString("basis") == "diagnostic test setup")
+        fun node(rid: String, value: String = "", children: JSONArray = JSONArray()) = JSONObject()
+            .put("resource_id", rid).put("text", value).put("package", PKG).put("visible", true).put("children", children)
+        fun screen(children: JSONArray): Screen = Screen(PKG, emptyList(), emptyList(), JSONObject()
+            .put("screen", JSONArray(listOf(1080, 2400)))
+            .put("windows", JSONArray().put(JSONObject().put("type", 1).put("root", node("root", children = children)))))
+        val form = screen(JSONArray().put(node("location_box", "Kathmandu")).put(node("check_in_date"))
+            .put(node("check_out_date")).put(node("room_and_guest_box")))
+        check(formVisible(form) && formDestinationMatches(form, "Kathmandu, Nepal"))
+        check(!formDestinationMatches(form, "Pokhara, Nepal"))
+        val stay = node("dateGuestText", "28 Oct - 30 Oct, 1 room, 2 Guests")
+        val header = node("edit_search_container", children = JSONArray().put(node("title", "Kathmandu")).put(stay))
+        val listing = screen(JSONArray().put(header))
+        check(!formVisible(listing))
+        check(resultHeaderMatches(listing, "Kathmandu, Nepal", day, day.plusDays(2), 1, 2))
+        check(!resultHeaderMatches(listing, "Pokhara, Nepal", day, day.plusDays(2), 1, 2))
+        check(!resultHeaderMatches(listing, "Kathmandu, Nepal", day, day.plusDays(2), 1, 3))
+        stay.put("text", "28 Oct '27 - 30 Oct '27, 1 room, 2 Guests")
+        check(!resultHeaderMatches(listing, "Kathmandu, Nepal", day, day.plusDays(2), 1, 2))
+        check(destinationQuery("Kathmandu, Nepal") == "Kathmandu")
+        fun row(city: String, country: String) = node("", children = JSONArray().put(node("title", city)).put(node("sub_title", country)))
+            .put("clickable", true).put("enabled", true).put("bounds", JSONArray(listOf(0, 469, 1080, 645)))
+        val correct = row("Kathmandu", "City in Nepal")
+        val wrongCity = row("Delhi", "India")
+        val queryOnly = node("", "Kathmandu").put("clickable", true).put("enabled", true)
+            .put("bounds", JSONArray(listOf(0, 316, 1080, 469)))
+        check(destinationSuggestion(screen(JSONArray().put(queryOnly).put(wrongCity).put(correct)), "Kathmandu, Nepal")?.label == "Kathmandu City in Nepal")
+        check(destinationSuggestion(screen(JSONArray().put(wrongCity)), "Kathmandu, Nepal") == null)
+        check(destinationSuggestion(screen(JSONArray().put(row("Kathmandu", "India"))), "Kathmandu, Nepal") == null)
+        check(destinationSuggestion(screen(JSONArray().put(queryOnly)), "Kathmandu, Nepal") == null)
         return "ok"
     }
 }

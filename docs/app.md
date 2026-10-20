@@ -1,11 +1,11 @@
 # Friday — the agent app (Android)
 
-**Friday** is a personal, sideloaded app that lets Laya read the screen and operate the phone. Everything runs
-locally. (Package id stays `dev.layatest.agent`; the display name is Friday.)
+**Friday** is a personal, sideloaded app that reads the screen and operates the phone. Its action and Writer models run
+locally; requested Gemini Research uses Gemini's external service through its app. (Package id stays `dev.layatest.agent`; the display name is Friday.)
 Not for the Play Store (it bans autonomous accessibility agents, D-012).
 
 ## Phasing (D-008)
-- **Phase 1 (now):** the app is the **eyes and hands** — an AccessibilityService that reads the screen tree and
+- **Phase 1 (historical tooling):** the app is the **eyes and hands** — an AccessibilityService that reads the screen tree and
   performs actions. **Laya runs on the Mac** and drives the app over USB (`adb forward`). Fast to iterate, and the
   model's quality is measured on the real device.
 - **Phase 2 (built):** Laya runs **inside the app** (ONNX Runtime, fp16, CPU arena off — D-023), so there
@@ -37,6 +37,7 @@ enabled_accessibility_services …` is enough [measured 2026-10-16], confirming 
 ## Bridge protocol
 One JSON object per line, one reply per request.
 - `{"cmd":"state"}` → `{screen:[w,h], package, windows:[{type, root:<node tree>}]}` after the screen settles.
+- `{"cmd":"state","include_own":true}` → opt into Friday's own windows for diagnostic UI inspection. The default excludes Friday UI; this flag does not change normal app observation.
 - `{"cmd":"foreground"}` → `{package}`  ·  `{"cmd":"apps"}` → `{apps:[{label, package}]}`
 - `{"cmd":"confirm","text":..,"bounds":[l,t,r,b]}` → `{choice:"run"|"skip"|"stop"}`
 - `{"cmd":"tap","x","y"}` · `{"cmd":"swipe","x","y","x2","y2","ms"}` · `{"cmd":"text","text"}`
@@ -61,6 +62,8 @@ nothing to pool. The bridge is one thread.
 - Measure per build: peak RSS, step latency, and battery per 100 steps.
 
 ## The assistant (D-024)
+
+The current build also routes supported device requests through the persistent coordinator: native calendar creation, visible bill reading, app opening/search and standalone text drafting. It passes 35 synthetic coordinator checks and 19 component groups on the Pixel. Calendar access is an owner-controlled runtime permission; the saved event is checked through CalendarProvider. Unreadable app screens produce a blocked/unverified result. See the [capability checkpoint](../research/41-capability-checkpoint.md) and [evaluation harness](NAVIGATION_HARNESS.md) for test scope and remaining gaps. Earlier Research measurements below describe that separate acceptance sequence.
 Type a request in Friday and tap **Run on this phone**. `Assistant` handles it:
 1. **Route** to one of 16 skills (`Skills.kt`): keyword rules first, Laya for paraphrases, and below 0.7
    confidence Friday asks "do you want me to…".
@@ -72,6 +75,36 @@ Type a request in Friday and tap **Run on this phone**. `Assistant` handles it:
 Laya loads only when a step needs it, stays warm for 3 minutes, and pre-warms when you open Friday (D-030).
 Bridge tests: `{"cmd":"selfcheck"}` (parsers), `{"cmd":"route","text":…}` (routing + timings), `{"cmd":"run","goal":…}`.
 
+## Durable Research (M1 development)
+
+Type a question and tap **Research**. Friday saves four steps in local `friday_tasks.db` storage before opening Gemini: prepare, submit, capture and publish. A normal new task waits automatically; interrupted tasks expose **Resume**, which reconciles the exact saved question/marker rather than blindly resending. Stop invalidates the worker. The general Run skills have not all migrated to this coordinator.
+
+**M1 has not passed live acceptance.** An earlier Pixel build passed 22/22 fake coordinator checks and focused selectors, but a Mongolia research/stay request falsely published only the final 2,889 characters of a longer answer. No stay app was searched. The recorded active segments totalled 113.534 s; the plan-to-completion event span was 113.578 s. Neither is a verified-success time.
+
+The installed Pixel build passes 24/24 fake coordinator checks, all four focused groups and the 18-group component selfcheck. Whole Copy corrected that result to **8,794 characters** after manual setup. Live fresh-session capture, label isolation, short answers and UI Stop also have evidence. L15 resumed after an initial failure/operator repair/installed IME fix: its same-task retry took 8.372 s, retaining one row with no new dispatch. Two L16 rechecks passed at 7.986 s / 8.011 s without duplication. A final clipboard-freshness recheck passed with a 7.296 s event span and 6.544 s capture increment. Automatic conversation location, clean restart acceptance and content constraints remain open; M1 has not passed. See the [live report](../research/37-pixel-research-live-acceptance.md) for interventions and failed attempts.
+
+**New chat** and **History** remain above the scrollable transcript. Live Pixel checks verified both with the keyboard open, an empty newly selected chat, and restoration of the original conversation without changing its result. Switching remains subject to the active-task gate.
+
+After forwarding the bridge, `python3 scripts/coordinator_test.py` runs the Room/fake-provider and focused selector checks without native model inference or external app actions. Use `--port` for a different forwarded port. Raw reports stay in ignored local captures.
+
+| Bridge request | Result |
+| --- | --- |
+| `{"cmd":"run","goal":"<question>","research":true}` | Accept a Research request through the same executor as the app button. |
+| `{"cmd":"task_state"}` | Latest task in the selected chat, with saved steps, events, timing and evidence. |
+| `{"cmd":"resume_task","task_id":"<id>"}` | Reconcile and continue the saved task. |
+| `{"cmd":"recheck_task","task_id":"<id>"}` | Reverify the saved answer and replace its old published turn after matching identity/hash checks, without another Send. |
+| `{"cmd":"cancel_task","task_id":"<id>"}` | Signal Stop; confirm the subsequent saved task state. |
+| `{"cmd":"coordinator_selfcheck"}` | Run synthetic coordinator checks on Android. |
+| `{"cmd":"research_selfcheck"}` | Run focused Gemini/hotel fixtures, including whole-response Copy checks reported as `gemini_copy`. |
+
+The fake-driver and Copy fixtures do not operate Gemini or establish full live capture. The broad legacy `selfcheck` includes native wake-model execution and crashes with SIGILL on the emulator; use focused checks for this work. See the [coordinator plan](COORDINATOR_PLAN.md) for evidence and the open M1 gate.
+
+## Email draft handoff
+
+Email uses `ACTION_SENDTO` with `mailto:`. Subject/body URI fields use percent encoding; Friday retains the original extras as well. These formats follow [Android common intents](https://developer.android.com/guide/components/intents-common#Email) and [RFC 6068](https://www.rfc-editor.org/rfc/rfc6068). Friday rejects multiline/control subjects and retains the draft with an explicit failure.
+
+The initial Gmail test opened a composer with empty subject/body. After the URI fix, an operator screenshot verified the exact synthetic recipient, subject and body without manual edits; nothing was sent. Gmail still exposed no app accessibility root/package, so Friday reported **unverified** rather than claiming automatic readback. Transport/population has assisted visual evidence; autonomous field verification remains open. The latest Writer suite generated no text because memory preflight blocked loading.
+
 ## Safety (D-011, D-014, D-025, D-026)
 - **Approvals (D-025):** safe steps run on their own; typing and taps on send/pay/buy/book/delete/call/confirm/allow…
   always ask (Run / Skip / Stop). Stop on three identical actions or three skips.
@@ -79,5 +112,4 @@ Bridge tests: `{"cmd":"selfcheck"}` (parsers), `{"cmd":"route","text":…}` (rou
   you tap Run. On fingerprint, screen-lock and UPI-PIN screens it waits for you and never acts.
 - **No `isAccessibilityTool` flag** — so Android keeps permission dialogs and installer buttons out of the agent's
   reach. System Allow dialogs (Wi-Fi, Bluetooth) are yours to tap. Apps that block accessibility are respected.
-- The Mac driver logs each step to `captures/` (git-ignored; it holds on-screen text). The on-phone assistant
-  logs no screen content or answers.
+- Diagnostic captures stay in ignored `captures/`. Friday stores conversations, answers and bounded task evidence in its private files/database. Clear this chat cancels and purges its tasks and transcript; late workers cannot recreate cleared results.

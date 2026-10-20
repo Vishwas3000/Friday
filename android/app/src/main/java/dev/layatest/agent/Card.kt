@@ -28,6 +28,7 @@ data class TaskCard(
     val mode: String = "act",  // read: look and report | act
     val risk: String = "none", // money: read-only app | commit: the last tap is the owner's | none
     val done: String = "subject",
+    val calendarEvent: JSONObject? = null,
 ) {
     fun json(): JSONObject = JSONObject().apply {
         put("task", task); put("skill", skill ?: "?"); app?.let { put("app", it) }; put("about", about.joinToString(" "))
@@ -35,10 +36,11 @@ data class TaskCard(
         place?.let { put("place", it) }; clock?.let { put("clock", it) }; seconds?.let { put("seconds", it) }
         range?.let { put("range", it) }; count?.let { put("count", it) }; control?.let { put("control", it) }
         put("mode", mode); put("risk", risk); put("done", done)
+        calendarEvent?.let { put("calendar_event", it) }
     }
 }
 
-private val COMMIT = setOf("call", "message", "ride", "shopping")
+private val COMMIT = setOf("call", "message", "ride", "shopping", "calendar_event")
 private val ON_OFF = Regex("\\b(?:turn|switch) (on|off)\\b|\\b(enable|disable)\\b", RegexOption.IGNORE_CASE)
 
 /** The card for [request], from the rules alone; [named] is the app it names (AppResolver.named on the phone). */
@@ -59,6 +61,7 @@ fun understand(request: String, named: (String) -> AppInfo?): TaskCard {
     val timer = bareTimer(request, s.clock)  // "a timer for 5": 5 minutes, not 5:00
     val clock = s.clock?.takeIf { timer == null }?.let { (h, m) -> "%02d:%02d".format(h, m) }
     val money = app?.pkg in AppResolver.MONEY || skill in READ_SKILLS
+    val calendar = if (skill == "calendar_event") CalendarRequest.parse(request).event?.let(CalendarEvents::metadata) else null
     return TaskCard(
         request = request, task = task, skill = skill, app = app?.pkg,
         about = Routes.aboutWords(task, app?.label), query = query,
@@ -68,6 +71,7 @@ fun understand(request: String, named: (String) -> AppInfo?): TaskCard {
         clock = clock, seconds = s.durationSec ?: timer, range = s.timeRange?.label, count = countAsked(request), control = control,
         mode = if (skill in READ_SKILLS || skill == "device_status" || (skill == "shopping" && isTracking(task))) "read" else "act",
         risk = when { money -> "money"; skill in COMMIT -> "commit"; else -> "none" },
+        calendarEvent = calendar,
         done = when (skill) {
             "play_music", "play_video" -> "playing"
             "alarm_timer" -> if (Regex("\\btimer\\b", RegexOption.IGNORE_CASE).containsMatchIn(request)) "none" else clock?.let { "alarm:$it" } ?: "none"
@@ -75,6 +79,7 @@ fun understand(request: String, named: (String) -> AppInfo?): TaskCard {
             "device_setting" -> control?.let { "switch:$it" } ?: "front"
             "device_status" -> "api"
             "navigate", "web_search" -> "front"
+            "calendar_event" -> "calendar_provider_readback"
             in COMMIT -> "owner"
             else -> "subject"
         },

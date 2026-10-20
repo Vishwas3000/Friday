@@ -1,6 +1,9 @@
 plugins {
     id("com.android.application")
+    id("com.google.devtools.ksp")
 }
+
+ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 
 android {
     namespace = "dev.layatest.agent"
@@ -25,6 +28,8 @@ android {
 }
 
 dependencies {
+    implementation("androidx.room:room-runtime:2.8.5")
+    ksp("androidx.room:room-compiler:2.8.5")
     // Phase 2: run Laya's exported ONNX on-device. Full build (not -mobile) for the ModernBERT op set.
     // 1.31: 8-bit MatMulNBits (research/18). Its AAR adds INTERNET, which the manifest removes.
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")

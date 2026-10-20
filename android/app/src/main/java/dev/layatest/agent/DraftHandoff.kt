@@ -55,10 +55,16 @@ internal object DraftHandoff {
     private fun phone(s: String?): String? = s?.takeIf { it.matches(Regex("\\+?[\\d ()-]+")) }
         ?.replace(Regex("[ ()-]"), "")?.takeIf { it.count(Char::isDigit) in 3..15 }
 
-    /** Android common intents; no permissions or provider access. Extras preserve the accepted text verbatim. */
+    /** Android common intents + RFC 6068 subject/body fields; extras retain the approved text. */
     internal fun emailIntent(dest: DraftDestination, subject: String, body: String): Intent {
+        require(subject.none { it.isISOControl() || it == '\u2028' || it == '\u2029' }) {
+            "Email subject must be one line without control characters; the approved subject was not changed"
+        }
         val to = address(dest.recipient)
-        return Intent(Intent.ACTION_SENDTO, Uri.fromParts("mailto", to.orEmpty(), null)).apply {
+        // RFC 6068 requires CRLF line endings in the URI. Extras keep the original newline spelling.
+        val uriBody = body.replace("\r\n", "\n").replace('\r', '\n').replace("\n", "\r\n")
+        val uri = Uri.parse("mailto:${Uri.encode(to.orEmpty(), "@")}?subject=${Uri.encode(subject)}&body=${Uri.encode(uriBody)}")
+        return Intent(Intent.ACTION_SENDTO, uri).apply {
             dest.app?.let { setPackage(it.pkg) }
             if (to != null) putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
             putExtra(Intent.EXTRA_SUBJECT, subject)
@@ -130,13 +136,15 @@ internal object DraftHandoff {
             return share(ctx, dest, body, draft)
         }
 
-        val intent = when {
+        val intent = try { when {
             dest.email -> emailIntent(dest, written.getString("subject"), body)
             whatsappIntent(dest, body) != null -> whatsappIntent(dest, body)!!
             dest.app?.pkg == "com.google.android.apps.messaging" && phone(dest.recipient) != null ->
                 Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", phone(dest.recipient), null))
                     .setPackage(dest.app.pkg).putExtra("sms_body", body)
             else -> return share(ctx, dest, body, draft)
+        } } catch (invalid: IllegalArgumentException) {
+            return result("I couldn't prepare the email: ${invalid.message}. The draft is kept here; nothing was sent.")
         }
         ctx.say("Opening $target…")
         if (!ctx.launch(intent)) return result("I couldn't open a matching composer in $target. The draft is kept here.")
@@ -245,6 +253,30 @@ internal object DraftHandoff {
         val intent = emailIntent(mail, "Exact subject", body)
         check(intent.`package` == "com.google.android.gm" && intent.getStringExtra(Intent.EXTRA_TEXT) == body)
         check(intent.getStringArrayExtra(Intent.EXTRA_EMAIL)!!.contentEquals(arrayOf("alex@example.test")))
+        check(intent.action == Intent.ACTION_SENDTO && intent.getStringExtra(Intent.EXTRA_SUBJECT) == "Exact subject")
+        fun mailFields(intent: Intent): Map<String, String> = intent.data!!.encodedSchemeSpecificPart.substringAfter('?')
+            .split('&').associate { field -> Uri.decode(field.substringBefore('=')) to Uri.decode(field.substringAfter('=')) }
+        val specialSubject = "Review & + ? # % \"quoted\" café 🙂"
+        val specialBody = "First & + ? # % \"quoted\".\nUnicode café 日本語 🙂\r\nAlready CRLF\rFinal line"
+        val specialRecipient = "qa+tag&x?y#z%@example.test"
+        val encoded = emailIntent(mail.copy(recipient = specialRecipient), specialSubject, specialBody)
+        val encodedUri = encoded.data!!.toString()
+        val fields = mailFields(encoded)
+        check(encoded.`package` == "com.google.android.gm" && encoded.data!!.fragment == null)
+        check(Uri.decode(encoded.data!!.encodedSchemeSpecificPart.substringBefore('?')) == specialRecipient)
+        check(encoded.getStringArrayExtra(Intent.EXTRA_EMAIL)!!.contentEquals(arrayOf(specialRecipient)))
+        check(fields.keys == setOf("subject", "body") && fields["subject"] == specialSubject)
+        check(fields["body"] == "First & + ? # % \"quoted\".\r\nUnicode café 日本語 🙂\r\nAlready CRLF\r\nFinal line")
+        check(encoded.getStringExtra(Intent.EXTRA_SUBJECT) == specialSubject && encoded.getStringExtra(Intent.EXTRA_TEXT) == specialBody)
+        check(listOf("%26", "%2B", "%3F", "%23", "%25", "%22", "%20", "%0D%0A", "%C3%A9", "%F0%9F%99%82").all { it in encodedUri })
+        check(mailFields(emailIntent(mail, "Literal %0D%0ABcc:other@example.test", "A\r\nB"))["subject"] == "Literal %0D%0ABcc:other@example.test")
+        check(mailFields(emailIntent(mail, "One line", "A\r\nB"))["body"] == "A\r\nB")
+        check(emailIntent(mail.copy(app = null, appName = null, recipient = null), "Subject", "Body").let {
+            it.`package` == null && it.getStringArrayExtra(Intent.EXTRA_EMAIL) == null && it.data!!.toString().startsWith("mailto:?")
+        })
+        for (badSubject in listOf("Hi\r\nBcc:other@example.test", "Hi\nNext", "Hi\rNext", "Hi\u0000", "Hi\tNext", "Hi\u2028Next", "Hi\u2029Next")) {
+            check(runCatching { emailIntent(mail, badSubject, body) }.exceptionOrNull() is IllegalArgumentException)
+        }
         check(shareIntent(wa, body).getStringExtra(Intent.EXTRA_TEXT) == body)
         val numbered = wa.copy(recipient = "+91 98765 43210")
         check(whatsappIntent(numbered, body)!!.data!!.getQueryParameter("text") == body)

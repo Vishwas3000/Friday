@@ -14,6 +14,9 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
+import dev.layatest.agent.coordinator.TaskCoordinator
+import dev.layatest.agent.coordinator.TaskCoordinatorChecks
+import dev.layatest.agent.coordinator.TaskStore
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
@@ -31,13 +34,19 @@ class AgentService : AccessibilityService() {
     private val modelLock = ReentrantLock()
     private val requestState = Any()
     @Volatile private var destroyed = false
+    internal val stopping get() = destroyed
     @Volatile private var writing = false
 
     override fun onServiceConnected() {
+        destroyed = false
         instance = this
         bridge = Bridge(this).also { it.start() }
         wake = WakeWord(this).also { it.start() }
         bubble = Bubble(this).also { it.show() }
+        Thread({
+            runCatching { TaskCoordinator.recoverInterrupted(this) }
+                .onFailure { android.util.Log.e("Friday", "Task recovery failed", it) }
+        }, "friday-recovery").start()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -54,6 +63,7 @@ class AgentService : AccessibilityService() {
         bubble?.hide()
         Thread({ modelLock.lock(); try { freeLaya() } finally { modelLock.unlock() } }, "models-destroy").start()
         instance = null
+        Thread({ TaskStore.get(this).changed() }, "friday-service-state").start()
         super.onDestroy()
     }
 
@@ -78,7 +88,7 @@ class AgentService : AccessibilityService() {
     private fun command(c: JSONObject): JSONObject = when (val cmd = c.getString("cmd")) {
         "state" -> {
             settle(c.optLong("quiet_ms", 300), c.optLong("timeout_ms", 3000))
-            state()
+            state(c.optBoolean("include_own"))
         }
         "foreground" -> JSONObject().put("package", rootInActiveWindow?.packageName?.toString())
         "apps" -> JSONObject().put("apps", apps())
@@ -95,13 +105,41 @@ class AgentService : AccessibilityService() {
             .put("routes", routesSelfCheck()).put("routing", routingSelfCheck()).put("wake", wakeSelfCheck(this))
             .put("shortlist", shortlistSelfCheck()).put("card", cardSelfCheck()).put("icons", iconNamerSelfCheck())
             .put("conversation", conversationSelfCheck()).put("writer", Writer.selfCheck()).put("message_read", ReadMessages.selfCheck())
-            .put("research", ResearchWorkflow.selfCheck()).put("hotel", HotelSearch.selfCheck())
+            .put("research", ResearchWorkflow.selfCheck()).put("gemini_chat", GeminiChat.selfCheck())
+            .put("gemini_research", GeminiResearch.selfCheck()).put("hotel", HotelSearch.selfCheck())
+            .put("calendar", CalendarEvents.selfCheck())
+        "calendar_selfcheck" -> JSONObject().put("calendar", CalendarEvents.selfCheck()).put("routing", routingSelfCheck())
+        "calendar_observe" -> CalendarEvents.observe(this, c.getString("title"), c.getLong("from_ms"), c.getLong("until_ms"))
         "workflow_state" -> JSONObject().put("research", ResearchWorkflow.state(this) ?: JSONObject.NULL)
+        "coordinator_selfcheck" -> TaskCoordinatorChecks.run(this)
+        "research_selfcheck" -> JSONObject().put("gemini_chat", GeminiChat.selfCheck())
+            .put("gemini_research", GeminiResearch.selfCheck()).put("gemini_copy", GeminiResponse.selfCheck()).put("hotel", HotelSearch.selfCheck())
+        "task_state" -> {
+            val store = TaskStore.get(this)
+            val snapshot = if (c.has("task_id")) store.snapshot(c.getString("task_id")) else store.latestForChat(ChatHistory.activeId(this))
+            JSONObject().put("task", snapshot?.let { s -> JSONObject().put("id", s.task.id).put("chat_id", s.task.chatId)
+                .put("capability", s.task.capability).put("provider", s.task.provider)
+                .put("state", s.task.state).put("message", s.task.message).put("request", s.task.request)
+                .put("published", s.task.published).put("ms", s.task.activeMs).put("revision", s.task.revision)
+                .put("answer_chars", s.task.answer?.length ?: 0).put("evidence", JSONObject(s.task.evidence))
+                .put("steps", JSONArray(s.steps.map { step -> JSONObject().put("id", step.id).put("capability", step.capability)
+                    .put("state", step.state).put("attempts", step.attempts).put("ms", step.activeMs).apply {
+                        if (c.optBoolean("include_evidence")) {
+                            put("output", JSONObject(step.output)); put("evidence", JSONObject(step.evidence))
+                        }
+                    } }))
+                .put("events", JSONArray(s.events.map { event -> JSONObject().put("kind", event.kind).put("state", event.state)
+                    .put("message", event.message).put("ms", event.durationMs).put("time", event.createdAt) }))
+            } ?: JSONObject.NULL)
+        }
+        "resume_task" -> JSONObject().put("started", resumeTask(c.getString("task_id")))
+        "recheck_task" -> JSONObject().put("started", runGoal("", research = true, resumeTaskId = c.getString("task_id"), recheck = true))
+        "cancel_task" -> { cancelTask(c.getString("task_id")); JSONObject().put("stopping", true) }
         "wake" -> wake?.command(c) ?: error("the wake word isn't set up yet")  // {"on": bool} optional; listening stats
         "wake_test" -> wakeTest(this, java.io.File(filesDir, c.getString("wav")))  // max score of a WAV in filesDir
         "profiles" -> JSONObject(AppProfiler.profiles(packageManager) as Map<*, *>)  // D-031: auto app profiles, to evaluate
         "route" -> routeTest(c.getString("text"))
-        "run" -> JSONObject().put("started", runGoal(c.getString("goal")))
+        "run" -> JSONObject().put("started", runGoal(c.getString("goal"), c.optBoolean("research")))
         "writer" -> when (c.optString("action", "generate")) {
             "status", "unload" -> JSONObject().put("status", "ok").put("writer_loaded", false)
                 .put("laya_loaded", layaWarm).put("cold", true)
@@ -127,7 +165,7 @@ class AgentService : AccessibilityService() {
         // the task suite's options (D-049): memory on/read/off, unattended (never wait for a tap), shortlist size
         // "follow": true carries on the open task, as the owner's next words on the phone do (D-061)
         "ask" -> Assistant(this, c.getString("goal"), c.optString("memory", "on"), c.optBoolean("unattended"),
-            c.optInt("shortlist", Assistant.SHORTLIST), session?.takeIf { c.optBoolean("follow") && it.fresh }).also { lastAsk = it }.let { a ->
+            c.optInt("shortlist", Assistant.SHORTLIST), session?.takeIf { c.optBoolean("follow") && it.fresh }, c.optBoolean("research")).also { lastAsk = it }.let { a ->
             JSONObject().put("answer", a.run().also { session = a.session() }).put("trace", JSONArray(a.trace)).put("kept", a.kept)
                 .put("learned", a.learned?.steps?.joinToString(" → ") { it.describe() } ?: JSONObject.NULL)
                 .put("session", session?.let { s -> JSONObject().put("goal", s.goal).put("pkg", s.pkg).put("finished", s.finished).put("steps", s.path.size) } ?: JSONObject.NULL)
@@ -172,11 +210,11 @@ class AgentService : AccessibilityService() {
     }
 
     /** Every window's tree, in the shape Laya-Android's candidate builder expects (android_env-style fields). */
-    private fun state(): JSONObject {
+    private fun state(includeOwn: Boolean = false): JSONObject {
         val wins = JSONArray()
         for (w in windows) {
             val root = w.root ?: continue
-            if (root.packageName == packageName) continue // our own confirmation overlay
+            if (!includeOwn && root.packageName == packageName) continue // our own confirmation overlay
             wins.put(JSONObject().put("type", w.type).put("root", node(root)))
         }
         val size = getSystemService(WindowManager::class.java).maximumWindowMetrics.bounds
@@ -278,7 +316,10 @@ class AgentService : AccessibilityService() {
         if (running || teacher != null || destroyed) false else { running = true; true }
     }
 
-    private fun endRequest() = synchronized(requestState) { running = false }
+    private fun endRequest() {
+        synchronized(requestState) { running = false }
+        TaskStore.get(this).changed() // Enables Resume after the last state commit releases the request gate.
+    }
 
     /** Running a request or being taught: the wake word must not pop the request box over either. */
     internal val busy get() = running || teacher != null
@@ -293,13 +334,35 @@ class AgentService : AccessibilityService() {
     }
 
     /** Handle one typed request on a background thread (one at a time) and show the answer as a card. */
-    fun runGoal(goal: String): Boolean {
-        if (goal.isBlank() || !beginRequest()) return false
+    fun resumeTask(taskId: String): Boolean = runGoal("", research = true, resumeTaskId = taskId)
+
+    fun cancelTask(taskId: String) {
+        TaskCoordinator.signalCancel(taskId)
+        Thread({ TaskCoordinator.cancel(this, taskId) }, "friday-cancel").start()
+    }
+
+    /** Worker-only; clearing and request intake share the same ownership gate. */
+    internal fun clearChat(chatId: String): Boolean {
+        if (!beginRequest()) return false
+        return try { TaskCoordinator.clearChat(this, chatId) } finally { endRequest() }
+    }
+
+    fun runGoal(goal: String, research: Boolean = false, resumeTaskId: String? = null, recheck: Boolean = false): Boolean {
+        if ((goal.isBlank() && resumeTaskId == null) || !beginRequest()) return false
+        val originChatId = ChatHistory.activeId(this)
         Thread({
             modelLock.lock()
             try {
-                val a = Assistant(this, goal.trim(), prev = session?.takeIf { it.fresh })
+                val saved = resumeTaskId?.let { TaskStore.get(this).dao.task(it) }
+                if (resumeTaskId != null && saved == null) { toast("This task was cleared."); return@Thread }
+                if (recheck && (resumeTaskId == null || !TaskCoordinator.requestRecheck(this, resumeTaskId))) {
+                    toast("This result cannot be rechecked now."); return@Thread
+                }
+                val a = Assistant(this, saved?.request ?: goal.trim(), prev = session?.takeIf { it.fresh }, research = research,
+                    resumeTaskId = resumeTaskId, originChatId = saved?.chatId ?: originChatId)
+                val startedAt = SystemClock.elapsedRealtime()
                 val said = a.run()
+                val seconds = (SystemClock.elapsedRealtime() - startedAt) / 1000
                 session = a.session()
                 // the owner sees the steps and says right or wrong: Laya sometimes overshoots (D-048 feedback)
                 val did = (a.learned ?: a.replayed)?.steps?.joinToString(" → ") { it.describe() }
@@ -307,6 +370,7 @@ class AgentService : AccessibilityService() {
                     append(said)
                     if (did != null) append("\n\nI did: $did")
                     if (a.kept) append("\n(It checked out, so I'll remember how)")
+                    append("\n\nTime: ${seconds / 60}m ${seconds % 60}s")
                 }
                 Overlay(this).answer(text,
                     right = a.learned?.takeIf { !a.kept }?.let { { a.keep("confirmed"); toast("Got it — I'll do it this way next time") } },
@@ -570,6 +634,17 @@ class AgentService : AccessibilityService() {
         return windows.firstNotNullOfOrNull { win -> win.root?.takeIf { it.packageName != packageName }?.let(::find) }
     }
 
+    /** Retry a confirmed unchanged target when an app reports a click but has not changed its UI. */
+    internal fun gestureClick(pkg: String, target: ScreenCandidate): Boolean {
+        if (foregroundPkg() != pkg) return false
+        val node = liveNode(target) ?: return false
+        val rect = Rect().also(node::getBoundsInScreen)
+        if (node.packageName?.toString() != pkg || !node.isVisibleToUser || !node.isEnabled ||
+            !target.bounds.contentEquals(intArrayOf(rect.left, rect.top, rect.right, rect.bottom))) return false
+        return stroke(rect.exactCenterX().toDouble(), rect.exactCenterY().toDouble(),
+            rect.exactCenterX().toDouble(), rect.exactCenterY().toDouble(), 60)
+    }
+
     internal fun act(op: String, target: ScreenCandidate?, payload: Any?, cands: List<ScreenCandidate>) {
         when {
             op == "CLICK" || op == "LONG_PRESS" -> target?.let {
@@ -618,7 +693,7 @@ class AgentService : AccessibilityService() {
     companion object {
         @Volatile var instance: AgentService? = null
         private const val IDLE_MS = 3 * 60_000L  // ~700 MB stays resident this long after a request (D-016)
-        private val MODEL_COMMANDS = setOf("ask", "writer", "route", "bench", "decide_test", "step_parity", "shortlist_eval", "laya_pin")
+        private val MODEL_COMMANDS = setOf("ask", "writer", "route", "bench", "decide_test", "step_parity", "shortlist_eval", "laya_pin", "coordinator_selfcheck")
         private val SEARCH_BOX = Regex("search|query|find|look ?up", RegexOption.IGNORE_CASE)
         private val TEACH_EVENTS = AccessibilityEvent.TYPE_VIEW_CLICKED or AccessibilityEvent.TYPE_VIEW_LONG_CLICKED or
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED

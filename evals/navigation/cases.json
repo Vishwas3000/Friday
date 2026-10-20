@@ -1,0 +1,998 @@
+{
+  "schema_version": 1,
+  "suite_id": "friday-navigation-foundation",
+  "revision": "2026-10-20.1",
+  "description": "Public synthetic tasks. Only three app navigation cases support the bridge runner; all other cases need independent controlled environment observations.",
+  "cases": [
+    {
+      "id": "app.clock",
+      "revision": 1,
+      "family": "app_open",
+      "request": "Open Clock",
+      "allowed_apps": [
+        "com.google.android.deskclock"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {}
+      },
+      "oracle": {
+        "kind": "app_open"
+      },
+      "risk": "low",
+      "side_effects": [
+        "navigate"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "navigation_only"
+      },
+      "execution": {
+        "mode": "bridge_safe",
+        "command": "ask"
+      }
+    },
+    {
+      "id": "app.maps",
+      "revision": 1,
+      "family": "app_open",
+      "request": "Open Google Maps",
+      "allowed_apps": [
+        "com.google.android.apps.maps"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {}
+      },
+      "oracle": {
+        "kind": "app_open"
+      },
+      "risk": "low",
+      "side_effects": [
+        "navigate"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "navigation_only"
+      },
+      "execution": {
+        "mode": "bridge_safe",
+        "command": "ask"
+      }
+    },
+    {
+      "id": "maps.search",
+      "revision": 1,
+      "family": "app_search",
+      "request": "Search Google Maps for Cubbon Park Bengaluru",
+      "allowed_apps": [
+        "com.google.android.apps.maps"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "query": "Cubbon Park Bengaluru",
+          "result_texts": [
+            "Cubbon Park",
+            "Bengaluru"
+          ]
+        }
+      },
+      "oracle": {
+        "kind": "screen_search"
+      },
+      "risk": "low",
+      "side_effects": [
+        "navigate",
+        "read"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "navigation_only"
+      },
+      "execution": {
+        "mode": "bridge_safe",
+        "command": "ask"
+      }
+    },
+    {
+      "id": "search.exact_date",
+      "revision": 1,
+      "family": "app_search",
+      "request": "Search Google Maps for hotel 7 January 2027",
+      "allowed_apps": [
+        "com.google.android.apps.maps"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "query": "hotel 7 January 2027",
+          "result_texts": [
+            "QA Hotel"
+          ]
+        }
+      },
+      "oracle": {
+        "kind": "screen_search"
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "navigate",
+        "read"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "calendar.jan7_all_day",
+      "revision": 1,
+      "family": "calendar",
+      "request": "Block my calendar on Jan 7 for QA review",
+      "allowed_apps": [
+        "com.android.providers.calendar"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "title": "QA review",
+          "start_ms": 1799280000000,
+          "end_ms": 1799366400000,
+          "all_day": true,
+          "zone": "UTC",
+          "busy": true
+        }
+      },
+      "oracle": {
+        "kind": "calendar",
+        "max_new_events": 1,
+        "query": {
+          "title": "QA review",
+          "from_ms": 1767225600000,
+          "until_ms": 1893456000000
+        }
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "calendar_write"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "calendar.jan7_timed",
+      "revision": 1,
+      "family": "calendar",
+      "request": "Create an event called QA timed review on January 7 from 9 AM to 10 AM",
+      "allowed_apps": [
+        "com.android.providers.calendar"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "title": "QA timed review",
+          "start_ms": 1799292600000,
+          "end_ms": 1799296200000,
+          "all_day": false,
+          "zone": "Asia/Kolkata",
+          "busy": true
+        }
+      },
+      "oracle": {
+        "kind": "calendar",
+        "max_new_events": 1,
+        "query": {
+          "title": "QA timed review",
+          "from_ms": 1767225600000,
+          "until_ms": 1893456000000
+        }
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "calendar_write"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "calendar.missing_end",
+      "revision": 1,
+      "family": "calendar",
+      "request": "Block time on January 7 at 9 AM for QA missing end",
+      "allowed_apps": [
+        "com.android.providers.calendar"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "WAITING_INPUT",
+        "outputs": {}
+      },
+      "oracle": {
+        "kind": "no_effect",
+        "query": {
+          "title": "QA missing end",
+          "from_ms": 1767225600000,
+          "until_ms": 1893456000000
+        }
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "read"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Missing duration/end must clarify, with complete independent provider snapshots proving no write."
+      }
+    },
+    {
+      "id": "calendar.invalid_day",
+      "revision": 1,
+      "family": "calendar",
+      "request": "Block my calendar on April 31 for QA invalid day",
+      "allowed_apps": [
+        "com.android.providers.calendar"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "WAITING_INPUT",
+        "outputs": {}
+      },
+      "oracle": {
+        "kind": "no_effect",
+        "query": {
+          "title": "QA invalid day",
+          "from_ms": 1767225600000,
+          "until_ms": 1893456000000
+        }
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "read"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "calendar.year_rollover",
+      "revision": 1,
+      "family": "calendar",
+      "request": "Open calander app and go to January 7 and block the day",
+      "allowed_apps": [
+        "com.android.providers.calendar"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "title": "Busy",
+          "start_ms": 1799280000000,
+          "end_ms": 1799366400000,
+          "all_day": true,
+          "zone": "UTC",
+          "busy": true
+        }
+      },
+      "oracle": {
+        "kind": "calendar",
+        "max_new_events": 1,
+        "query": {
+          "title": "Busy",
+          "from_ms": 1767225600000,
+          "until_ms": 1893456000000
+        }
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "calendar_write"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "calendar.leap_day",
+      "revision": 1,
+      "family": "calendar",
+      "request": "Block my calendar on February 29 for QA leap day",
+      "allowed_apps": [
+        "com.android.providers.calendar"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "title": "QA leap day",
+          "start_ms": 1835395200000,
+          "end_ms": 1835481600000,
+          "all_day": true,
+          "zone": "UTC",
+          "busy": true
+        }
+      },
+      "oracle": {
+        "kind": "calendar",
+        "max_new_events": 1,
+        "query": {
+          "title": "QA leap day",
+          "from_ms": 1767225600000,
+          "until_ms": 1893456000000
+        }
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "calendar_write"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "calendar.retry_same_event",
+      "revision": 1,
+      "family": "calendar",
+      "request": "Block my calendar on January 7 for QA review",
+      "allowed_apps": [
+        "com.android.providers.calendar"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "title": "QA review",
+          "start_ms": 1799280000000,
+          "end_ms": 1799366400000,
+          "all_day": true,
+          "zone": "UTC",
+          "busy": true
+        }
+      },
+      "oracle": {
+        "kind": "calendar",
+        "max_new_events": 1,
+        "same_event_on_retry": true,
+        "query": {
+          "title": "QA review",
+          "from_ms": 1767225600000,
+          "until_ms": 1893456000000
+        }
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "calendar_write"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "bills.labeled",
+      "revision": 1,
+      "family": "bills",
+      "request": "Read the labeled amount due in the selected CRED app",
+      "allowed_apps": [
+        "com.dreamplug.androidapp"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "items": [
+            {
+              "label": "Total amount due",
+              "amount": "₹5,000"
+            }
+          ]
+        }
+      },
+      "oracle": {
+        "kind": "bills"
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "navigate",
+        "read"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "bills.total",
+      "revision": 1,
+      "family": "bills",
+      "request": "Read the overall total due across my credit cards in CRED",
+      "allowed_apps": [
+        "com.dreamplug.androidapp"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "items": [
+            {
+              "label": "Grand total due",
+              "amount": "₹7,500"
+            }
+          ],
+          "total_amount": "₹7,500"
+        }
+      },
+      "oracle": {
+        "kind": "bills"
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "navigate",
+        "read"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "bills.unreadable",
+      "revision": 1,
+      "family": "bills",
+      "request": "Read my CRED bills when the app exposes no accessible application tree",
+      "allowed_apps": [
+        "com.dreamplug.androidapp"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "BLOCKED",
+        "outputs": {}
+      },
+      "oracle": {
+        "kind": "unreadable"
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "navigate",
+        "read"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "text.slm",
+      "revision": 1,
+      "family": "text",
+      "request": "Correct the grammar in 'I is ready. CHECK-73' and return only the corrected text",
+      "allowed_apps": [
+        "dev.layatest.agent"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "text": "I am ready. CHECK-73"
+        }
+      },
+      "oracle": {
+        "kind": "text",
+        "origin_chat_id": "qa_friday_text_chat",
+        "require_generation": true
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "local_generate"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "text.verbatim",
+      "revision": 1,
+      "family": "text",
+      "request": "Write exactly: CHECK-73: ₹1,200 on 28 October 2026.",
+      "allowed_apps": [
+        "dev.layatest.agent"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "text": "CHECK-73: ₹1,200 on 28 October 2026."
+        }
+      },
+      "oracle": {
+        "kind": "text",
+        "origin_chat_id": "qa_friday_text_chat"
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "local_generate"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "text.memory_block",
+      "revision": 1,
+      "family": "text",
+      "request": "Write a short greeting when Writer lacks its required memory headroom",
+      "allowed_apps": [
+        "dev.layatest.agent"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "BLOCKED",
+        "outputs": {}
+      },
+      "oracle": {
+        "kind": "generation_blocked"
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "read"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "draft.gmail_handoff",
+      "revision": 1,
+      "family": "draft_handoff",
+      "request": "Draft an email to qa@example.test with subject CHECK-73 and body Please review CHECK-73 by 28 October 2026 at 5 PM.",
+      "allowed_apps": [
+        "com.google.android.gm"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "recipient": "qa@example.test",
+          "subject": "CHECK-73",
+          "body": "Please review CHECK-73 by 28 October 2026 at 5 PM."
+        }
+      },
+      "oracle": {
+        "kind": "composer",
+        "field_ids": {
+          "recipient": [
+            "to"
+          ],
+          "subject": [
+            "subject"
+          ],
+          "body": [
+            "body"
+          ]
+        }
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "draft_write"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "research.complete",
+      "revision": 1,
+      "family": "research",
+      "request": "Reply with exactly: A rainbow forms when water droplets refract and reflect sunlight. QA_END_731",
+      "allowed_apps": [
+        "com.google.android.apps.bard"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "request_id": "QA_RESEARCH_ALPHA",
+          "conversation_id": "qa_gemini_conversation_a",
+          "chat_id": "qa_friday_chat_a",
+          "answer": "A rainbow forms when water droplets refract and reflect sunlight. QA_END_731"
+        }
+      },
+      "oracle": {
+        "kind": "research"
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "public_question",
+        "read"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "research.fresh_context",
+      "revision": 1,
+      "family": "research",
+      "request": "In this new conversation, reply with exactly unknown if no test label was given.",
+      "allowed_apps": [
+        "com.google.android.apps.bard"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "fresh_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "request_id": "QA_RESEARCH_BETA",
+          "conversation_id": "qa_gemini_conversation_b",
+          "chat_id": "qa_friday_chat_b",
+          "answer": "unknown"
+        }
+      },
+      "oracle": {
+        "kind": "research",
+        "forbidden_context": [
+          "ATLAS-731"
+        ]
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "public_question",
+        "read"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "research.followup_context",
+      "revision": 1,
+      "family": "research",
+      "request": "Reply with the test label I gave earlier in this same conversation.",
+      "allowed_apps": [
+        "com.google.android.apps.bard"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "existing_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "request_id": "QA_RESEARCH_FOLLOWUP",
+          "conversation_id": "qa_gemini_conversation_a",
+          "chat_id": "qa_friday_chat_a",
+          "answer": "ATLAS-731"
+        }
+      },
+      "oracle": {
+        "kind": "research"
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "public_question",
+        "read"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "research.partial",
+      "revision": 1,
+      "family": "research",
+      "request": "Reply with exactly: A rainbow forms when water droplets refract and reflect sunlight. QA_END_731",
+      "allowed_apps": [
+        "com.google.android.apps.bard"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "OUTCOME_UNKNOWN",
+        "outputs": {
+          "request_id": "QA_RESEARCH_ALPHA",
+          "conversation_id": "qa_gemini_conversation_a",
+          "chat_id": "qa_friday_chat_a",
+          "answer": "A rainbow forms when water droplets refract and reflect sunlight. QA_END_731"
+        }
+      },
+      "oracle": {
+        "kind": "research_partial"
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "public_question",
+        "read"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "control.stop",
+      "revision": 1,
+      "family": "control",
+      "request": "Stop the in-progress synthetic research task and prevent late actions",
+      "allowed_apps": [
+        "com.google.android.apps.bard",
+        "dev.layatest.agent"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "CANCELLED",
+        "outputs": {}
+      },
+      "oracle": {
+        "kind": "cancelled"
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "cancel",
+        "read"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    },
+    {
+      "id": "control.restart_idempotency",
+      "revision": 1,
+      "family": "control",
+      "request": "Resume the synthetic calendar task after process restart without creating another event",
+      "allowed_apps": [
+        "com.android.providers.calendar"
+      ],
+      "context": {
+        "clock_date": "2026-10-20",
+        "time_zone": "Asia/Kolkata",
+        "chat_mode": "isolated_test_chat"
+      },
+      "expected": {
+        "behavior": "COMPLETED",
+        "outputs": {
+          "title": "QA review",
+          "start_ms": 1799280000000,
+          "end_ms": 1799366400000,
+          "all_day": true,
+          "zone": "UTC",
+          "busy": true
+        }
+      },
+      "oracle": {
+        "kind": "calendar",
+        "max_new_events": 1,
+        "same_event_on_retry": true,
+        "require_restart": true,
+        "query": {
+          "title": "QA review",
+          "from_ms": 1767225600000,
+          "until_ms": 1893456000000
+        }
+      },
+      "risk": "test_environment_only",
+      "side_effects": [
+        "restart",
+        "calendar_write"
+      ],
+      "policy": {
+        "send_messages": "forbidden",
+        "payments": "forbidden",
+        "scope": "isolated_test_environment_only"
+      },
+      "execution": {
+        "mode": "fixture_only",
+        "reason": "Requires controlled fixtures and independent environment observation; never automatic on owner data."
+      }
+    }
+  ]
+}

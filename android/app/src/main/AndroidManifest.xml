@@ -6,6 +6,8 @@
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <!-- "Hey Friday" (D-035): audio is scored in RAM and never stored; the app has no INTERNET permission. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -27,6 +29,7 @@
         <intent><action android:name="android.intent.action.SENDTO" /><data android:scheme="mailto" /></intent>
         <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="upi" android:host="pay" /></intent>
         <intent><action android:name="android.intent.action.SET_ALARM" /></intent>
+        <intent><action android:name="android.intent.action.VIEW" /><data android:mimeType="vnd.android.cursor.item/event" /></intent>
         <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
         <intent><action android:name="android.intent.action.VIEW" /><data android:mimeType="image/*" /></intent>
         <intent>

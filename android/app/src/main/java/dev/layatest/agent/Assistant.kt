@@ -2,11 +2,14 @@ package dev.layatest.agent
 
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Rect
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import dev.layatest.agent.coordinator.ResearchDriver
+import dev.layatest.agent.coordinator.TaskCoordinator
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -24,21 +27,26 @@ import java.util.Locale
  */
 class Assistant(private val svc: AgentService, override val request: String, private val memory: String = "on",
                 private val unattended: Boolean = false, private val shortlistK: Int = SHORTLIST,
-                private val prev: Session? = null) : SkillContext {
+                private val prev: Session? = null, private val research: Boolean = false,
+                private val resumeTaskId: String? = null,
+                private val originChatId: String = ChatHistory.activeId(svc)) : SkillContext {
+    private val chatId = originChatId
+    private var durableTaskId: String? = resumeTaskId
     override val android: Context get() = svc
     override val slots = Slots(taskPart(request))
     override val apps = AppResolver(svc)
     /** The task card (D-051); run() fills in the skill when Laya or the owner routes. */
     override var card = understand(request, apps::named)
-    override val stopped get() = banner.stopped
+    override val stopped get() = banner.stopped || svc.stopping || TaskCoordinator.isCancelled(durableTaskId)
 
     private val overlay = Overlay(svc)
-    private val banner = overlay.banner()
+    private val banner = overlay.banner { durableTaskId?.let(svc::cancelTask) }
     private var usedLaya = false
     private var draftNavigationPkg: String? = null
     private var readNavigationPkg: String? = null
     private var hotelNavigationPkg: String? = null
     private var navigationSearchText: String? = null
+    private var researchEvidence: JSONObject? = null
     private class DraftNavigationBlocked(message: String) : RuntimeException(message)
     /** The service's shared, warm engine; loaded on first use (D-016). */
     private val laya: LayaEngine
@@ -54,7 +62,12 @@ class Assistant(private val svc: AgentService, override val request: String, pri
      *  time since the request started ("+3.2s ..."): the timeline the request log keeps. */
     val trace = object : ArrayList<String>() {
         private val t0 = SystemClock.elapsedRealtime()
-        override fun add(element: String) = super.add("+%.1fs %s".format((SystemClock.elapsedRealtime() - t0) / 1000.0, element))
+        override fun add(element: String): Boolean {
+            val stamped = "+%.1fs %s".format((SystemClock.elapsedRealtime() - t0) / 1000.0, element)
+            Log.i(TAG, stamped)
+            TaskCoordinator.note(svc, durableTaskId, stamped)
+            return super.add(stamped)
+        }
     }
 
     /** Handle the request; returns what to tell the owner. Every request is logged with its timeline (D-045). */
@@ -63,14 +76,22 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         svc.bubble?.hide()
         val said = try {
             banner.say("Understanding…")
-            val researching = ResearchWorkflow.matches(request) || (ResearchWorkflow.hasPending(svc) &&
-                Regex("^(?:please\\s+)?(?:continue|resume|keep going)\\b|^(?:check.?in|check.?out|dates?|use\\s+\\d)\\b|^\\d", RegexOption.IGNORE_CASE).containsMatchIn(request.trim()))
-            val reading = if (!researching) ReadMessages.requestFrom(request, apps.installed) else null
-            val draft = if (reading == null && !researching) Writer.requestFrom(taskPart(request)) else null
-            val follow = if (draft == null && reading == null && !researching) prev?.let { Conversation.read(request, it, apps::named) } else null
+            val researching = !research && resumeTaskId == null &&
+                ResearchWorkflow.matches(request, ResearchWorkflow.state(svc, chatId))
+            val reading = if (!researching && !research) ReadMessages.requestFrom(request, apps.installed) else null
+            val draft = if (reading == null && !researching && !research) Writer.requestFrom(taskPart(request)) else null
+            val resumingDevice = resumeTaskId?.let { TaskCoordinator.isDeviceTask(svc, it) } == true
+            val geminiResearch = !resumingDevice && (resumeTaskId != null || research || (!researching && reading == null && draft == null &&
+                card.app == "com.google.android.apps.bard" && Regex("\\b(?:research|search|ask|find|plan|look up)\\b", RegexOption.IGNORE_CASE).containsMatchIn(request))
+            )
+            val devicePlan = if (!resumingDevice && !researching && !geminiResearch && reading == null) DevicePlans.from(this, draft, chatId) else null
+            val follow = if (draft == null && reading == null && !researching && !geminiResearch && devicePlan == null && !resumingDevice) prev?.let { Conversation.read(request, it, apps::named) } else null
             val skill = when {
+                geminiResearch -> "gemini_research"
                 researching -> "research_hotels"
                 reading != null -> "read_messages"
+                resumingDevice -> "device_task"
+                devicePlan != null -> devicePlan.capability
                 draft != null -> "writer"
                 follow == null -> route(request, { laya }) { q, options -> ask(q, options) }
                 else -> null
@@ -78,24 +99,44 @@ class Assistant(private val svc: AgentService, override val request: String, pri
             if (draft != null) card = TaskCard(request, request, "writer", null, emptySet(), mode = "read", done = "api")
             if (reading != null) card = TaskCard(request, request, "read_messages", null, emptySet(), mode = "read", done = "screen")
             if (researching) card = TaskCard(request, request, "research_hotels", null, emptySet(), mode = "read", done = "screen")
+            if (geminiResearch) card = TaskCard(request, request, "gemini_research", "com.google.android.apps.bard", emptySet(), mode = "read", done = "screen")
+            if (devicePlan != null) card = card.copy(skill = devicePlan.capability, app = devicePlan.inputs.optString("package").ifBlank { null })
+            if (devicePlan?.capability == "calendar.create") card = card.copy(app = null, mode = "act", risk = "commit",
+                done = "calendar_provider_readback", calendarEvent = CalendarRequest.parse(request).event?.let(CalendarEvents::metadata))
             if (card.skill == null) card = card.copy(skill = skill)
             trace += "card: ${card.json()}"
             Log.i(TAG, "request routed to ${skill ?: "something else"}")
             trace += "route: ${if (follow != null) "follow-up to \"${prev!!.goal}\": $follow" else skill ?: "something else"}"
             val result = when {
                 stopped -> null
+                geminiResearch -> {
+                    ended = true
+                    val id = resumeTaskId ?: TaskCoordinator.create(svc, chatId, request)
+                    durableTaskId = id
+                    TaskCoordinator.run(svc, id, researchDriver(), log = { trace += it }).let { result ->
+                        researchEvidence = result.evidence
+                        result.answer
+                    }
+                }
                 researching -> {
                     ended = true
-                    ResearchWorkflow.run(this, ::submitResearch, { state ->
-                        HotelSearch.run(this, state) { app, goal, input ->
+                    ResearchWorkflow.run(this, { app, prompt -> submitResearch(app, prompt) }, hotelSearch = { state ->
+                        HotelSearch.run(this, state, typeDestination = ::fillHotelDestination) { app, goal, input ->
                             hotelNavigationPkg = app.pkg
                             navigationSearchText = input
                             try { runLaya(goal, 6, input) }
                             finally { hotelNavigationPkg = null; navigationSearchText = null }
                         }
-                    }) { trace += it }
+                    }, chatId = chatId, copyResponse = { GeminiResponse.copy(this, ::readResearchClipboard) }, log = { trace += it })
                 }
                 reading != null -> readMessages(reading)
+                resumingDevice || devicePlan != null -> {
+                    ended = true
+                    val id = resumeTaskId ?: TaskCoordinator.createDevice(svc, chatId, request, devicePlan!!.capability, devicePlan.inputs)
+                    durableTaskId = id
+                    TaskCoordinator.runDevice(svc, id, DeviceCapabilities(this, { generateDraft(it) }, { svc.stopping }),
+                        log = { trace += it }).answer
+                }
                 draft != null -> {
                     ended = true  // a local draft has no pending app action or remembered tap path
                     val exact = exactDraftText(taskPart(request)).takeIf { draft.kind in setOf("message", "email") }
@@ -105,7 +146,7 @@ class Assistant(private val svc: AgentService, override val request: String, pri
                 follow != null -> followUp(prev!!, follow)
                 else -> (skill?.let { skills[it] ?: GenericSkill(it) } ?: GenericSkill("other")).run(this)
             }
-            if (stopped) "Stopped" else result ?: "Done"
+            if (stopped) "Stopped" else result ?: UNVERIFIED_TASK
         } catch (e: Throwable) {  // an Error (e.g. a failed class init) must not vanish silently either
             Log.e(TAG, "request failed", e)
             trace += "error: $e"
@@ -116,25 +157,91 @@ class Assistant(private val svc: AgentService, override val request: String, pri
             svc.bubble?.show()
         }
         // the request log (D-045): what was asked and said, how long it took, and the timeline; text only, no screens
-        runCatching {
-            ChatHistory.append(svc, JSONObject().put("time", System.currentTimeMillis())
+        if (durableTaskId == null) runCatching {
+            ChatHistory.append(svc, JSONObject().put("time", System.currentTimeMillis()).put("chat_id", chatId)
                 .put("request", request).put("answer", said).put("ms", SystemClock.elapsedRealtime() - t0).put("card", card.json())
-                .put("trace", JSONArray(trace)))
+                .put("trace", JSONArray(trace)).put("research_mode", research)
+                .put("research_evidence", researchEvidence ?: JSONObject.NULL))
         }
         return said
+    }
+
+    /** Provider selectors stay here; scheduling, retry authority and durable evidence belong to the coordinator. */
+    private fun researchDriver() = object : ResearchDriver {
+        override val stopped get() = this@Assistant.stopped
+        override val interrupted get() = svc.stopping
+        override fun progress(message: String) = say(message)
+        private fun gemini(): AppInfo? = apps.installed.firstOrNull { it.pkg == "com.google.android.apps.bard" }
+        private fun present(): Boolean {
+            if (stopped) return false
+            if (GeminiChat.qualified(screen())) return true
+            val app = gemini() ?: return false
+            return open(app) && waitUntil(5000) { GeminiChat.qualified(screen()) }
+        }
+        override fun prepare(spec: GeminiResearch.Spec): JSONObject? {
+            if (!present() || stopped || !GeminiChat.openNormalNew(this@Assistant, spec.prompt)) return null
+            val fresh = screen()
+            return if (!stopped && GeminiChat.normalBlank(fresh, spec.prompt)) JSONObject()
+                .put("normal_chat_verified", true).put("source_package", fresh.pkg)
+                .put("capture_method", "normal_new_chat_readback") else null
+        }
+        override fun inspect(spec: GeminiResearch.Spec): GeminiResearch.Submission =
+            if (present()) GeminiResearch.inspect(screen(), spec.prompt) else GeminiResearch.Submission.WRONG_APP
+        override fun submit(spec: GeminiResearch.Spec, beforeDispatch: () -> Boolean): Boolean {
+            val app = gemini() ?: return false
+            return submitResearch(app, spec.prompt, authorizedPrompt = spec.prompt, newSession = false, beforeDispatch = beforeDispatch)
+        }
+        override fun capture(spec: GeminiResearch.Spec, timeoutMs: Long, receipt: GeminiResearch.SubmissionReceipt): GeminiResearch.Result {
+            if (!present()) return GeminiResearch.Result("Research is pending.", JSONObject().put("status", "pending")
+                .put("pending_reason", "Saved Gemini conversation is not accessible"))
+            return GeminiResearch.capture(this@Assistant, spec, timeoutMs, receipt, ::readResearchClipboard) { trace += it }
+        }
     }
 
     private fun generateDraft(draft: WriterRequest): JSONObject {
         banner.say("Writing a draft…")
         val written = svc.write(draft) { stopped }
+        val memory = if (written.has("memory_available_bytes")) " [memory available ${written.optLong("memory_available_bytes") / 1048576} MiB, " +
+            "required ${written.optLong("memory_required_bytes") / 1048576} MiB, threshold ${written.optLong("memory_threshold_bytes") / 1048576} MiB, " +
+            "low=${written.optBoolean("memory_low")}, model ${written.optLong("model_bytes") / 1048576} MiB]" else ""
         trace += "writer ${draft.kind}: ${written.optString("status")} [load ${written.optLong("load_ms")} ms, " +
             "prefill ${written.optDouble("prefill_ms", 0.0)} ms, decode ${written.optDouble("decode_ms", 0.0)} ms, " +
-            "${written.optLong("input_tokens")} input / ${written.optLong("output_tokens")} output tokens, model ${draft.model}]"
+            "${written.optLong("input_tokens")} input / ${written.optLong("output_tokens")} output tokens, model ${draft.model}]$memory"
         return written
     }
 
-    /** Submit only a public research prompt to the known Gemini surface, using the normal Send confirmation. */
-    private fun submitResearch(app: AppInfo, prompt: String): Boolean {
+    private fun readResearchClipboard(notBefore: Long): String? {
+        if (stopped || !launch(Intent(svc, MainActivity::class.java))) return null
+        if (!waitUntil(3000) { foreground() == svc.packageName }) return null
+        Thread.sleep(250)
+        if (stopped) return null
+        val clip = svc.getSystemService(ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount == 1 } ?: return null
+        if (!GeminiResponse.clipboardTimestampMatches(clip.description.timestamp, notBefore, System.currentTimeMillis())) return null
+        return clip.getItemAt(0).coerceToText(svc)?.toString()
+    }
+
+    private fun fillHotelDestination(field: ScreenCandidate, query: String): Boolean {
+        val pkg = "com.makemytrip"
+        if (stopped || query.isBlank() || query.length > 160 || query.any { it.isISOControl() } ||
+            field.rid.substringAfterLast('/') != "input_text" || !field.editable || !field.enabled) return false
+        val current = screen()
+        if (current.pkg != pkg || Safety.isAuthPrompt(current.pkg, current.texts.map { it.text }) ||
+            current.candidates.none { it.editable && it.rid.substringAfterLast('/') == "input_text" && it.bounds.contentEquals(field.bounds) } ||
+            Safety.verdict("INPUT_TEXT", field, current.pkg).first != Safety.Verdict.AUTO) return false
+        val focused = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
+        val old = focused.text?.toString().orEmpty()
+        say("Entering hotel destination: $query…")
+        banner.hide()
+        val typed = try { svc.setFocusedTextExact(pkg, field.bounds, old, query) }
+            finally { banner.resume() }
+        trace += "hotel: destination field exact input accepted: $typed"
+        return typed
+    }
+
+    /** Submit the authorized public research prompt only in a verified normal new Gemini chat. */
+    private fun submitResearch(app: AppInfo, prompt: String, authorizedPrompt: String? = null,
+                               newSession: Boolean = true, beforeDispatch: () -> Boolean = { true }): Boolean {
+        if (app.pkg != "com.google.android.apps.bard") return false
         val hosts = setOf("com.google.android.apps.bard", "com.google.android.googlequicksearchbox")
         fun gemini(scr: Screen): Boolean {
             if (scr.pkg !in hosts) return false
@@ -143,13 +250,15 @@ class Assistant(private val svc: AgentService, override val request: String, pri
                 (node.optJSONArray("children")?.let { a -> (0 until a.length()).any { has(a.getJSONObject(it)) } } ?: false)
             return scr.state?.optJSONArray("windows")?.let { a -> (0 until a.length()).any { has(a.getJSONObject(it).getJSONObject("root")) } } == true
         }
-        var scr = screen()
-        if (!gemini(scr)) return false
-        scr.candidates.firstOrNull { it.enabled && it.label.trim().equals("New chat", true) }?.let {
-            if (!tap(it)) return false
-            Thread.sleep(400)
-            scr = screen()
+        fun authorized() = authorizedPrompt == prompt || ResearchWorkflow.publicSubmissionAllowed(svc, prompt, chatId)
+        val ownedDraft = prompt.takeIf { authorized() }
+        if (newSession && !GeminiChat.openNormalNew(this, ownedDraft)) {
+            trace += "research: normal new Gemini chat could not be verified"
+            return false
         }
+        var scr = screen()
+        if (!gemini(scr) || !GeminiChat.normalBlank(scr, ownedDraft)) return false
+        trace += "research: normal Gemini chat verified before submission"
         val input = scr.candidates.firstOrNull { it.editable && it.enabled &&
             (it.rid.contains("assistant_robin") || Regex("ask gemini", RegexOption.IGNORE_CASE).containsMatchIn(it.label)) } ?: return false
         if (!gemini(scr) || !tap(input)) return false
@@ -157,7 +266,7 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         val focused = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
         val old = focused.text?.toString().orEmpty()
         if (!gemini(scr) || focused.packageName?.toString() != scr.pkg ||
-            (old.isNotBlank() && old != focused.hintText?.toString() && !old.equals("Ask Gemini", true))) return false
+            (old.isNotBlank() && old != focused.hintText?.toString() && !old.equals("Ask Gemini", true) && old != ownedDraft)) return false
         val bounds = Rect().also(focused::getBoundsInScreen)
         val field = scr.candidates.firstOrNull { it.editable && it.bounds.contentEquals(intArrayOf(bounds.left, bounds.top, bounds.right, bounds.bottom)) } ?: return false
         if (Safety.verdict("INPUT_TEXT", field, scr.pkg).first != Safety.Verdict.AUTO ||
@@ -165,10 +274,51 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         trace += "research: public prompt entered in Gemini"
         Thread.sleep(400)
         scr = screen()
-        if (!gemini(scr) || svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.text?.toString() != prompt) return false
+        if (!gemini(scr) || Safety.isAuthPrompt(scr.pkg, scr.texts.map { it.text }) ||
+            svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.text?.toString() != prompt) return false
         val send = scr.candidates.firstOrNull { it.enabled && it.label.trim().lowercase() in setOf("send", "send message", "submit") } ?: return false
         if (stopped) return false
-        return tap(send).also { if (it) trace += "research: submitted to Gemini after confirmation" }
+        val verdict = Safety.verdict("CLICK", send, scr.pkg).first
+        if (verdict == Safety.Verdict.BLOCK) return false
+        if (!authorized()) return beforeDispatch() && tap(send)
+        // This exact public query is authorized by the task. Other Send actions keep their usual approval.
+        banner.hide()
+        if (stopped || foreground() != scr.pkg || svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.text?.toString() != prompt || !beforeDispatch()) return false
+        try { svc.act("CLICK", send, null, scr.candidates) } finally { banner.resume() }
+        fun submitted(state: Screen): Boolean {
+            if (!gemini(state)) return false
+            fun found(node: JSONObject): Boolean =
+                (node.optString("package") == state.pkg &&
+                    node.optString("resource_id").substringAfterLast('/') == "assistant_robin_user_message_text" &&
+                    node.optString("text").replace(Regex("\\s+"), " ").trim() == prompt.replace(Regex("\\s+"), " ").trim()) ||
+                    (node.optJSONArray("children")?.let { a -> (0 until a.length()).any { found(a.getJSONObject(it)) } } ?: false)
+            return state.state?.optJSONArray("windows")?.let { a -> (0 until a.length()).any {
+                val window = a.getJSONObject(it)
+                window.optInt("type") == 1 && found(window.getJSONObject("root"))
+            } } == true
+        }
+        if (waitUntil(1800) { submitted(screen()) }) {
+            trace += "research: Gemini displayed the submitted public question"
+            return true
+        }
+        // Retry only while the exact unsent query remains in its field, preventing duplicate submissions.
+        scr = screen()
+        if (submitted(scr)) return true
+        val freshFocus = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
+        if (stopped || !gemini(scr) || Safety.isAuthPrompt(scr.pkg, scr.texts.map { it.text }) ||
+            scr.candidates.any { Regex("stop generat|stop response|^thinking", RegexOption.IGNORE_CASE).containsMatchIn(it.label) } ||
+            !freshFocus.isEditable || !freshFocus.isVisibleToUser || freshFocus.packageName?.toString() != scr.pkg ||
+            freshFocus.text?.toString() != prompt ||
+            !authorized()) return false
+        val retry = scr.candidates.firstOrNull { it.enabled && it.label.trim().lowercase() in setOf("send", "send message", "submit") } ?: return false
+        if (Safety.verdict("CLICK", retry, scr.pkg).first == Safety.Verdict.BLOCK) return false
+        say("Submitting the verified research question…")
+        banner.hide()
+        if (stopped || !beforeDispatch()) { banner.resume(); return false }
+        val clicked = try { svc.gestureClick(scr.pkg!!, retry) } finally { banner.resume() }
+        val verified = clicked && waitUntil(4000) { submitted(screen()) }
+        trace += "research: submission readback after unchanged-field retry: $verified"
+        return verified
     }
 
     private fun readMessages(reading: MessageReadRequest): String {
@@ -305,17 +455,18 @@ class Assistant(private val svc: AgentService, override val request: String, pri
     }
 
     override fun screen(): Screen {
-        banner.hide()
-        val state = svc.readState()
-        val size = state.getJSONArray("screen")
-        val pkg = state.optString("package").ifEmpty { null }
-        val known = Meanings.all(svc)  // unnamed elements Friday has tapped before are named by where they led
-        val cands = buildCandidates(state, size.getInt(0), size.getInt(1)).map { e ->
-            if (e.label.isNotEmpty()) e else known.optString(Meanings.key(pkg, e)).ifEmpty { null }?.let { e.copy(label = it) } ?: e
-        }
-        // icons still unnamed are named from their pixels (D-055); if that fails they stay unnamed, as before
-        val named = runCatching { IconNamer.relabel(svc, pkg, state, cands) { trace += it } }.getOrElse { trace += "icons: $it"; cands }
-        return Screen(pkg, named, screenTexts(state), state)
+        try {
+            val state = svc.readState()
+            val size = state.getJSONArray("screen")
+            val pkg = state.optString("package").ifEmpty { null }
+            val known = Meanings.all(svc)  // unnamed elements Friday has tapped before are named by where they led
+            val cands = buildCandidates(state, size.getInt(0), size.getInt(1)).map { e ->
+                if (e.label.isNotEmpty()) e else known.optString(Meanings.key(pkg, e)).ifEmpty { null }?.let { e.copy(label = it) } ?: e
+            }
+            // Keep progress visible while polling; hide only when icon pixels actually need capturing.
+            val named = runCatching { IconNamer.relabel(svc, pkg, state, cands, beforeScreenshot = { banner.hide() }) { trace += it } }.getOrElse { trace += "icons: $it"; cands }
+            return Screen(pkg, named, screenTexts(state), state)
+        } finally { banner.resume() }
     }
 
     override fun choose(instructions: String, options: List<String>): Pick? {
@@ -334,7 +485,28 @@ class Assistant(private val svc: AgentService, override val request: String, pri
     override fun tap(target: ScreenCandidate) = guarded("CLICK", target, emptyList())
     override fun scroll(direction: String) = guarded("SCROLL_${direction.uppercase()}", null, screen().candidates)
     override fun back() = guarded("BACK", null, emptyList())
-    override fun say(text: String) = banner.say(text)
+    override fun say(text: String) {
+        TaskCoordinator.note(svc, durableTaskId, text, progress = true)
+        banner.say(text)
+    }
+
+    override fun webQuery(): String? {
+        val source = taskPart(request).trim()
+        val plain = searchQuery(source) ?: return null
+        val instruction = Regex("\\b(?:first|then|afterwards?|app|browser|this|that)\\b|^(?:I\\s+(?:need|want)|please\\s+help|plan\\b)", RegexOption.IGNORE_CASE)
+        if (plain.length <= 160 && !instruction.containsMatchIn(plain)) return plain
+        say("Preparing a focused search query…")
+        val written = svc.write(WriterRequest("query",
+            "Extract the actual information question as one concise search query, at most 18 words. " +
+                "Preserve the subject, places and numeric constraints. Exclude instructions to open apps, switch apps or execute later steps.",
+            source, maxTokens = 80, timeoutMs = 15_000)) { stopped }
+        trace += "web query: ${written.optString("status")} [${written.optLong("total_ms")} ms]"
+        if (stopped || written.optString("status") != "ok") return null
+        val query = written.optString("text").trim()
+        if (query.isBlank() || query.length > 240 || '\n' in query ||
+            Regex("\\b(?:open|launch|switch to)\\b.*\\b(?:app|browser)\\b", RegexOption.IGNORE_CASE).containsMatchIn(query)) return null
+        return query
+    }
 
     override fun ask(question: String, options: List<String>): Int? {
         if (unattended) { trace += "unattended: not asked \"$question\""; return null }
@@ -345,10 +517,12 @@ class Assistant(private val svc: AgentService, override val request: String, pri
     /** One action a skill asked for, through the same policy as Laya's own steps. */
     private fun guarded(op: String, target: ScreenCandidate?, cands: List<ScreenCandidate>): Boolean {
         val (verdict, why) = actionVerdict(op, target, foreground())
+        trace += "ui: $op ${target?.label.orEmpty()} -> $verdict $why"
         if (verdict == Safety.Verdict.BLOCK) { say(why); return false }
         if (verdict == Safety.Verdict.ASK && confirm(describe(op, target, null), why, target) != "run") return false
+        say(describe(op, target, null))
         banner.hide()
-        svc.act(op, target, null, cands)
+        try { svc.act(op, target, null, cands) } finally { banner.resume() }
         trail += historyEntry(op, target?.toCandidate(), null)
         return true
     }
@@ -356,7 +530,8 @@ class Assistant(private val svc: AgentService, override val request: String, pri
     private fun actionVerdict(op: String, target: ScreenCandidate?, pkg: String?): Pair<Safety.Verdict, String> {
         hotelNavigationPkg?.let { expected ->
             if (pkg != expected || op in setOf("OPEN_APP", "HOME", "LONG_PRESS") ||
-                (op == "CLICK" && (target == null || !target.enabled || Safety.RISKY.containsMatchIn(target.label + " " + target.rid))))
+                (op == "CLICK" && (target == null || !target.enabled || Safety.RISKY.containsMatchIn(target.label + " " + target.rid) ||
+                    target.label.trim().equals("SEARCH", true) || target.rid.substringAfterLast('/') == "search_cta")))
                 return Safety.Verdict.BLOCK to "hotel preparation stays in the selected app and stops before booking"
             if (op == "INPUT_TEXT" && (navigationSearchText == null || target?.editable != true ||
                     !Regex("search|query|find|location|city|destination", RegexOption.IGNORE_CASE).containsMatchIn(target.label + " " + target.rid)))
@@ -480,7 +655,7 @@ class Assistant(private val svc: AgentService, override val request: String, pri
     private fun said(o: Outcome, goal: String, read: TaskCard? = null): String {
         task = goal
         return when (o) {
-            Outcome.DONE -> read?.let { readFor(this, it) } ?: "Done"
+            Outcome.DONE -> read?.let { readFor(this, it) } ?: UNVERIFIED_TASK
             Outcome.STOPPED -> "Stopped"
             Outcome.STUCK -> STUCK
             Outcome.MAX_STEPS -> OUT_OF_STEPS
@@ -547,11 +722,24 @@ class Assistant(private val svc: AgentService, override val request: String, pri
             if (stopped) return Outcome.STOPPED
             val t0 = SystemClock.elapsedRealtime()
             var scr = screen()
+            if (hotelNavigationPkg != null && HotelSearch.formVisible(scr) &&
+                (navigationSearchText == null || HotelSearch.formDestinationMatches(scr, navigationSearchText!!))) {
+                trace += "hotel preparation: form verified before further UI actions"
+                return Outcome.DONE
+            }
             if (Safety.isAuthPrompt(scr.pkg, scr.texts.map { it.text })) {
                 say("Unlock with your fingerprint — I'll wait")
                 val ok = waitUntil(90_000) { screen().let { !Safety.isAuthPrompt(it.pkg, it.texts.map { t -> t.text }) } }
                 if (!ok) return Outcome.STOPPED
                 continue
+            }
+            if (!readableScreen(scr)) {
+                // App startup may be transient; an absent accessibility root is never a completion signal.
+                waitUntil(1500) { screen().also { scr = it }.let(::readableScreen) }
+                if (!readableScreen(scr)) {
+                    trace += "blocked: no readable app screen; stopped before model decisions or UI actions"
+                    return Outcome.STUCK
+                }
             }
             tapped?.let { (pkg, e, before) -> if (scr.pkg == pkg) Meanings.learn(svc, pkg, e, Meanings.gained(before, scr.candidates)) }
             tapped = null
@@ -683,6 +871,10 @@ class Assistant(private val svc: AgentService, override val request: String, pri
             if (stopped) return Outcome.STOPPED
             val t0 = SystemClock.elapsedRealtime()
             var scr = screen()
+            if (!readableScreen(scr)) {
+                trace += "memory: no readable app screen; stopped before replay"
+                return Outcome.STUCK
+            }
             // a remembered element can take a moment to appear: Amazon's You page loads after the tap, and the
             // replay gave up 1.3 s in and handed a wrong "See all" to Laya (2026-10-18); on a warm phone 4 s wasn't
             // enough either, and the Laya step that found the same element took 30 s (suite, 2026-10-19)
@@ -714,6 +906,9 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         return Outcome.DONE
     }
 
+    private fun readableScreen(screen: Screen) = screen.pkg != null &&
+        (screen.candidates.isNotEmpty() || screen.texts.any { it.text.isNotBlank() })
+
     /** Do one step (Laya's or remembered) and record it: Laya's history, the path, a training row. */
     private fun perform(op: String, target: ScreenCandidate?, payload: Any?, scr: Screen) {
         hotelNavigationPkg?.let { expected ->
@@ -738,8 +933,10 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         }
         val before = row(op, scr, target, text(payload))  // open() writes "OPEN_APP X" to the history itself
         say(describe(op, target, payload))
-        banner.hide()
-        if (op == "OPEN_APP") open(payload as AppInfo) else svc.act(op, target, payload, scr.candidates)
+        if (op != "WAIT") banner.hide()
+        try {
+            if (op == "OPEN_APP") open(payload as AppInfo) else svc.act(op, target, payload, scr.candidates)
+        } finally { banner.resume() }
         record(op, target, payload, scr, before)
     }
 

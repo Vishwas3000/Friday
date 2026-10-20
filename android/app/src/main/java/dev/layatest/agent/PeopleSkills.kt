@@ -32,12 +32,27 @@ object WebSearch : Skill {
     override val id = "web_search"
 
     override fun run(ctx: SkillContext): String {
-        val q = searchQuery(taskPart(ctx.request)) ?: return "What should I search for?"
+        if (ctx.stopped) return "Stopped"
+        if (!webProviderAllowed(ctx.card.app))
+            return "I can't open this web search in the requested app. Choose Chrome, or use Research for Gemini."
+        val q = ctx.webQuery()?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return if (ctx.stopped) "Stopped" else "I could not prepare a search query; enter the search topic."
+        if (ctx.stopped) return "Stopped"
         // a VIEW of the results page: ACTION_WEB_SEARCH only pre-fills Chrome's omnibox (research/10)
         val i = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(q))).setPackage(CHROME)
-        return if (ctx.launch(i)) "Here's what Google found for \"$q\"" else "I couldn't open Chrome"
+        ctx.say("Opening Google search…")
+        if (!ctx.launch(i)) return "I couldn't open Chrome"
+        val opened = ctx.waitUntil(4000) { ctx.foreground() == CHROME }
+        return when {
+            ctx.stopped -> "Stopped"
+            opened -> "Opened Google search for \"$q\"."
+            else -> "I couldn't verify that Chrome opened for the search."
+        }
     }
 }
+
+private fun webProviderAllowed(pkg: String?): Boolean =
+    pkg == null || pkg == CHROME || pkg == "com.google.android.googlequicksearchbox"
 
 /** "dial 98765 43210" -> the dialer, pre-filled; "call mom" -> Laya finds mom in the Phone app (no READ_CONTACTS). */
 object Call : Skill {
@@ -257,6 +272,10 @@ fun peopleSelfCheck(): String {
     check(searchQuery("search for best pizza near me") == "best pizza near me")
     check(searchQuery("Look up the population of India") == "the population of India")
     check(searchQuery("what's the weather today") == "what's the weather today")
+    check(webProviderAllowed(null) && webProviderAllowed(CHROME))
+    check(webProviderAllowed("com.google.android.googlequicksearchbox"))
+    check(!webProviderAllowed("com.google.android.apps.bard"))
+    check(!webProviderAllowed("org.example.requestedapp") && !webProviderAllowed(""))
     check(callee("call my mom") == "mom")
     check(dialable(callee("call +91 98765-43210 now")!!) == "+919876543210")
     check(dialable("rahul") == null)

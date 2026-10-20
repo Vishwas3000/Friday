@@ -1,13 +1,26 @@
 # Friday: the system as it is today
 
-_Snapshot 2026-10-19. One page to bring someone (or another AI) up to speed. Details live in `research/` (01–28) and
-`docs/DECISIONS.md` (D-001–D-056). Numbers are measured on the owner's phone unless marked "estimate"._
+_Snapshot 2026-10-20. Current work is summarized below; earlier measurements retain their stated conditions. Details live in `research/` and `docs/DECISIONS.md`._
+
+## Current coordinator work (20 October)
+
+The shared coordinator now supports registered device plans as well as Research: calendar creation through CalendarProvider, source-bound bill reading, app opening/search, standalone Writer generation and publication. It saves dependencies, inputs, attempts and evidence, rejects stale or mismatched evidence, and inspects uncertain writes before retry. **35/35 fake-driver coordinator checks and 19 component groups pass on the installed Pixel build.** Interpretation still uses deterministic parsers; message-app drafts and arbitrary UI workflows have not all migrated. The [capability checkpoint](../research/41-capability-checkpoint.md) records current live evidence and limits. The [evaluation harness](NAVIGATION_HARNESS.md) has independent outcome graders, 24 case specifications and three automatic navigation runners; synthetic checks are separate from live acceptance.
+
+### Earlier Research acceptance
+
+The Research entry uses a local Kotlin/Room coordinator: save a validated plan → prepare normal Gemini chat → submit the saved question → capture → publish to the original Friday chat. A normal new task waits automatically. Task records survive interruptions; Resume reconciles the exact saved question/marker rather than blindly repeating Send. Stop/clear invalidate workers, and publication is idempotent.
+
+**M1 has not passed.** An earlier Pixel build passed 22/22 fake coordinator checks and focused selectors, but live Mongolia research falsely completed with only the final 2,889 characters while earlier observed answer blocks already exceeded 4,000 characters. No stay app/search ran. Recorded active segments were prepare 6.960 s, submit 7.004 s, capture 99.276 s and publish 0.294 s: **113.534 s** total. The plan-to-completion event span was **113.578 s**. These measure false completion, not successful end-to-end execution.
+
+The installed Pixel build passes **24/24 fake coordinator checks**, four focused groups and the 18-group component selfcheck. Whole Copy corrected the Mongolia result to 8,794 characters after manual setup, with one original-chat row and unchanged Submit attempts. Live evidence also covers fresh-session capture, label isolation, seven-character answers and UI Stop. L15's first restart resume failed; operator repair and an installed IME fix enabled an 8.372 s same-task retry, without another dispatch. Its 263.613 s overall sequence includes repair/build/install and is not autonomous timing. Two L16 rechecks passed at 7.986 s / 8.011 s with one row and no new dispatch. The final live clipboard-freshness recheck passed at a 7.296 s event span, including a 6.544 s capture increment. **Automatic conversation location, clean restart acceptance and content constraints keep M1 unpassed.** No stay search ran. See the [live report](../research/37-pixel-research-live-acceptance.md); earlier measurements below retain their scope.
+
+Maps place search passed. Gmail's initial empty subject/body were repaired through URI encoding and visually verified without field edits, but its app accessibility tree remained unavailable; the handoff stays explicitly unverified and unsent. The latest 20-case Writer run had seven expected invalid-input rejections and 13 memory-blocked cases, with zero generated outputs. New chat/History are now above the transcript; live checks verified keyboard visibility, empty-session creation and restoration of the original chat.
 
 ## 1. What Friday is
 - **An assistant that operates the owner's Android phone by itself, fully on the phone.** You type a request ("open
   clock and show the stopwatch", "show me my last 10 transactions in GPay"), and Friday opens the right app, reads the
   screen, taps and scrolls until the task is done, then answers.
-- **No cloud.** The app has no INTERNET permission. A personal research project for one owner.
+- **Local execution.** Friday has no INTERNET permission. Explicit Research uses Gemini's external service through its app.
 - **Built around Laya-Android**, a small *non-generative* decision model. It picks one option from a list (which
   action, which on-screen element); it never writes text.
 - **Phone:** Pixel 8 (Tensor G3, 8 GB RAM), Android 16, not rooted.
@@ -49,9 +62,13 @@ typed request, or spoken to the floating bubble (tap, speak, tap), or "Hey Frida
 | Part | What it does |
 |---|---|
 | `AgentService` (AccessibilityService) | Friday's eyes and hands: reads every window's accessibility tree, taps, scrolls, types (`ACTION_SET_TEXT`), presses back. It also hosts a local socket "bridge" (adb-forwarded to the Mac) for tests and tools |
-| `MainActivity` | The text box and Run button. Typing starts loading Laya. Also: Teach, the wake-word switch, and "Delete all learned data" |
+| `MainActivity` | Local chat selection/history, composer, Run/Research, persisted task progress, Stop/Resume and device tools |
 | `Overlay` | The status banner ("Thinking… step 2"), approval prompts (Run / Skip / Stop) and the answer card |
 | `Assistant` | One request end to end: routing, skills, the step loop, memory, the request log |
+| `coordinator/` | Room records/DAO/schema, Research and device plans, capability registry, validation, shared execution, reconciliation, events and idempotent publication |
+| `DevicePlans`, `DeviceCapabilities`, `CalendarRequest`, `CalendarEvents`, `BillReader` | Deterministic device-plan inputs, capability drivers, native calendar save/readback and conservative visible bill extraction |
+| `GeminiChat`, `GeminiResearch`, `GeminiResponse` | Normal-chat selectors, saved question/marker/receipt, submission reconciliation and whole-response Copy/coverage guards; assisted Pixel correction verified, automatic conversation recovery still open |
+| `ChatHistory` | App-private conversations, publication-key deduplication and identity/hash-checked atomic correction of a task result |
 | `Skills.kt`, `PhoneSkills`, `MediaSkills`, `PeopleSkills` | The 16 skills: open_app, play_music, play_video, spend_query, balance_query, bill_query, device_setting, device_status, alarm_timer, call, message, navigate, web_search, ride, shopping, photos. Rules and slot parsing live here and in `Slots.kt` |
 | `Candidates.kt` | Turns the tree into Laya's candidate list (below), plus the shortlist |
 | `LayaEngine`, `LayaInput`, `Tokenizer` | Builds Laya's input on the phone, byte-identical to the Python reference, runs ONNX Runtime and decodes |
@@ -133,7 +150,7 @@ typed request, or spoken to the floating bubble (tap, speak, tap), or "Hey Frida
 | Request log (`files/requests.jsonl` on the phone; `scripts/requests_log.py`) | Every request: answer, total time, timeline ("+3.2s step 2 …, laya 3130 ms: 20 cands, 733 tokens") |
 | `task_suite.py` + `suite_tasks.json` | Real tasks with automatic checks (app in front, screen words, selected tab, answer, media playing, a setting). Unattended, muted, memory off; waits while the phone is hot; runs saved and comparable. **15/26 → 20/26 after D-052's fixes (2026-10-18)** |
 | `shortlist_eval.py`, `speed_eval.py`, `bench_device.py` | Decision-agreement and speed checks on 52 recorded screens; on-phone benchmark |
-| Bridge commands | `ask`, `state`, `routes`, `requests`, `selfcheck`, `bench`, `teach`… for testing from the Mac |
+| Bridge commands | `task_state`, `resume_task`, `recheck_task`, `cancel_task`, `coordinator_selfcheck`, focused `research_selfcheck` (`gemini_copy` fixtures), plus legacy task/model diagnostics; see [app guide](app.md) |
 
 ## 4. Measured performance
 | What | Number |
@@ -207,7 +224,7 @@ typed request, or spoken to the floating bubble (tap, speak, tap), or "Hey Frida
   Mac runs one model job at a time.
 - **Money apps stay read-only.** Risky taps ask the owner. Friday never handles passwords, PINs or fingerprints.
 - **The repo is public:** no personal data (names, amounts, the request log) is committed. `captures/` is git-ignored.
-  "Delete all learned data" on the phone wipes the routes, Teach recordings and the request log.
+  "Delete all learned data" wipes learned routes/recordings/names; "Clear this chat" cancels and purges that chat's tasks/evidence and transcript.
 - **Every decision is logged** with its reasons in `docs/DECISIONS.md`. Research notes carry trust tags.
 
 ## 9. Where things are

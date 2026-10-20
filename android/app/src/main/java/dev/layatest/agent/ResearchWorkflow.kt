@@ -17,8 +17,8 @@ internal object ResearchWorkflow {
     private const val GOOGLE = "com.google.android.googlequicksearchbox"
     private const val HOTELS = "com.makemytrip"
     private const val MARKER = "FRIDAY_RESEARCH_RESULT_V1"
-    private const val ANSWER_LIMIT = 6000
-    private const val STORE_LIMIT = 96000
+    private const val ANSWER_LIMIT = 24000
+    private const val STORE_LIMIT = 128000
     private val I = RegexOption.IGNORE_CASE
     private val cities = listOf("Kathmandu", "Pokhara", "Lalitpur")
     private val resume = Regex("^(?:please\\s+)?(?:continue|resume)\\s+(?:(?:the|my)\\s+)?(?:research|hotel(?:\\s+search)?|trip)\\b", I)
@@ -27,33 +27,57 @@ internal object ResearchWorkflow {
     private val hotelInputs = Regex("\\b(?:check[ -]?in|check[ -]?out|adults?|rooms?|children|budget)\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\b", I)
     private val completed = setOf("complete", "hotel_search_complete", "cancelled")
 
-    fun matches(request: String): Boolean {
-        val r = request.trim()
-        if (resume.containsMatchIn(r) || cancel.containsMatchIn(r)) return true
-        val hotel = Regex("\\bhotels?\\b", I).containsMatchIn(r)
-        return hotel && Regex("\\b(?:research|gemini|seasons?)\\b", I).containsMatchIn(r)
+    /** The retired prototype only accepts controls for an already saved compatible task. */
+    fun matches(request: String, saved: JSONObject? = null): Boolean {
+        if (saved == null || saved.optInt("version") != 1 || saved.optString("country") != "Nepal" ||
+            saved.optJSONObject("hotel") == null || saved.optString("stage") in completed ||
+            saved.optString("stage").isBlank()) return false
+        val r = request.trim().trimEnd('.', '!', '?').trim()
+        if (resume.matches(r) || cancel.matches(r)) return true
+        // New research/app requests must never inherit the prototype's fixed destination scope.
+        if (Regex("\\b(?:research|gemini|search|find|plan|open|launch|browse)\\b", I).containsMatchIn(r)) return false
+        val inputStart = Regex("^(?:(?:change|use|choose|make it|check[ -]?in|check[ -]?out|dates?)\\b|from\\s+\\d|\\d|no\\s+children\\b)", I)
+        return inputStart.containsMatchIn(r) && hotelInputs.containsMatchIn(r)
     }
 
-    fun hasPending(ctx: Context): Boolean = state(ctx)?.optString("stage")?.let { it !in completed } == true
+    fun hasPending(ctx: Context, chatId: String = ChatHistory.activeId(ctx)): Boolean =
+        state(ctx, chatId)?.optString("stage")?.let { it !in completed } == true
 
-    @Synchronized fun state(ctx: Context): JSONObject? = runCatching {
-        val file = File(ctx.filesDir, FILE)
+    /** The owner's research request authorizes this fixed public query, not arbitrary app content. */
+    fun publicSubmissionAllowed(ctx: Context, text: String, chatId: String): Boolean {
+        val work = state(ctx, chatId) ?: return false
+        val hotel = work.optJSONObject("hotel") ?: return false
+        val destination = hotel.opt("destination") as? String
+        return work.optString("stage") == "gemini_submitting" && work.optString("country") == "Nepal" &&
+            (destination == null || destination in cities.map { "$it, Nepal" }) &&
+            work.optString("research_question") == text && text == prompt(hotel)
+    }
+
+    private fun contextFileName(chatId: String): String {
+        val safe = if (Regex("[A-Za-z0-9_-]{1,128}").matches(chatId)) chatId else hash(chatId)
+        return "research_workflow_$safe.json"
+    }
+
+    @Synchronized fun state(ctx: Context, chatId: String = ChatHistory.activeId(ctx)): JSONObject? = runCatching {
+        val scoped = File(ctx.filesDir, contextFileName(chatId))
+        val file = if (scoped.exists()) scoped else if (chatId == "legacy") File(ctx.filesDir, FILE) else scoped
         if (!file.exists() || file.length() > STORE_LIMIT) return@runCatching null
         AtomicFile(file).openRead().bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
-            .takeIf { it.optInt("version") == 1 }
+            .takeIf { it.optInt("version") == 1 && it.optString("chat_id", "legacy") == chatId }
+            ?.put("chat_id", chatId)
     }.getOrNull()
 
     @Synchronized private fun save(ctx: Context, state: JSONObject) {
         state.put("updated_at", System.currentTimeMillis())
         val data = state.toString().toByteArray(Charsets.UTF_8)
         require(data.size <= STORE_LIMIT) { "research context exceeded its storage limit" }
-        val file = AtomicFile(File(ctx.filesDir, FILE))
+        val file = AtomicFile(File(ctx.filesDir, contextFileName(state.getString("chat_id"))))
         val stream = file.startWrite()
         try { stream.write(data); file.finishWrite(stream) }
         catch (error: Throwable) { file.failWrite(stream); throw error }
     }
 
-    private fun fresh(request: String): JSONObject = JSONObject().put("version", 1)
+    private fun fresh(request: String, chatId: String = "legacy"): JSONObject = JSONObject().put("version", 1).put("chat_id", chatId)
         .put("original_request", request.take(2000)).put("latest_request", request.take(2000))
         .put("created_at", System.currentTimeMillis()).put("stage", "research_pending")
         .put("research_app_package", GEMINI).put("hotel_app_package", HOTELS)
@@ -67,97 +91,142 @@ internal object ResearchWorkflow {
      * [hotelSearch] receives this mutable context and may set a verified stage after checking the destination UI.
      */
     fun run(ctx: SkillContext, submitGemini: (AppInfo, String) -> Boolean,
-            hotelSearch: (JSONObject) -> String, log: (String) -> Unit = {}): String {
-        val previous = state(ctx.android)
-        val request = ctx.request.trim()
-        if (cancel.containsMatchIn(request)) {
-            if (previous == null) return "There is no saved research task to cancel."
-            previous.put("stage", "cancelled").put("last_result", "Research task cancelled by owner")
-            save(ctx.android, previous)
-            return "Cancelled the saved research task."
+            hotelSearch: (JSONObject) -> String, chatId: String = ChatHistory.activeId(ctx.android),
+            copyResponse: (() -> String?)? = null, log: (String) -> Unit = {}): String {
+        val workflowStarted = SystemClock.elapsedRealtime()
+        val timing = JSONObject().put("started_at", System.currentTimeMillis())
+        var timedWork: JSONObject? = null
+        fun recordPhase(name: String, started: Long) {
+            val duration = (SystemClock.elapsedRealtime() - started).coerceAtLeast(0)
+            timing.put(name, duration)
+            log("research timing: $name=${duration}ms")
         }
-        val changed = correction.containsMatchIn(request) || (previous != null && hotelInputs.containsMatchIn(request) &&
-            !Regex("\\b(?:research|gemini)\\b", I).containsMatchIn(request))
-        val continues = resume.containsMatchIn(request) || changed
-        if (continues && previous == null) return "There is no saved research task. Ask me to research a Nepal hotel trip first."
-        val work = if (continues) previous!! else fresh(request)
-        if (continues && work.optString("stage") == "cancelled") return "That research task was cancelled. Start a new Nepal research request."
-        work.put("latest_request", request.take(2000))
-        if (!continues && !Regex("\\b(?:Nepal|Kathmandu|Pokhara|Lalitpur)\\b", I).containsMatchIn(request))
-            return "This research workflow currently supports Nepal hotel trips. Tell me the Nepal destination or ask about its suitable season."
-        if (changed) {
-            work.put("stage", if (work.optString("research_answer").isBlank()) "research_pending" else "awaiting_hotel_inputs")
-                .put("hotel_results_verified", false).remove("last_result")
-        }
-        val hotel = work.getJSONObject("hotel")
-        cities.firstOrNull { Regex("\\b${Regex.escape(it)}\\b", I).containsMatchIn(request) }?.let { city ->
-            if (hotel.opt("destination") != "$city, Nepal") work.put("hotel_results_verified", false)
-            hotel.put("destination", "$city, Nepal").put("destination_basis", "owner request")
-        }
-        if (work.optString("research_question").isBlank()) work.put("research_question", prompt(hotel))
-        updateMissing(work)
-        save(ctx.android, work)
-        if (ctx.stopped) return "Stopped. The research context is saved."
-
-        if (work.optString("research_answer").isBlank()) {
-            val app = ctx.apps.installed.firstOrNull { it.pkg == GEMINI }
-                ?: return pending(ctx, work, "Gemini is not installed. The public research question is saved.")
-            ctx.say("Opening Gemini for Nepal travel research…")
-            if (!ctx.open(app) || !ctx.waitUntil(5000) { qualified(ctx.screen()) })
-                return pending(ctx, work, "I couldn't verify Gemini's screen. The research is still pending.")
-            val prompt = work.optString("research_question").ifBlank { prompt(hotel) }
-            work.put("research_question", prompt)
-            if (work.optString("stage") !in setOf("gemini_waiting", "gemini_submitting", "gemini_submission_unverified")) {
-                val before = visible(ctx.screen())
-                work.put("baseline_hashes", JSONArray(before.map(::hash).take(120)))
-                    .put("stage", "gemini_submitting").put("submitted_at", System.currentTimeMillis())
-                save(ctx.android, work)
-                if (ctx.stopped) return "Stopped. The research context is saved."
-                if (!submitGemini(app, prompt)) {
-                    work.put("stage", "gemini_submission_unverified")
-                    return pending(ctx, work, "I couldn't verify that the research question was submitted. I saved the context; say “continue research” to check for an answer.")
-                }
-                work.put("stage", "gemini_waiting")
-                save(ctx.android, work)
-                log("research: public Nepal question submitted in Gemini")
+        try {
+            val previous = state(ctx.android, chatId)
+            val request = ctx.request.trim()
+            if (cancel.containsMatchIn(request)) {
+                if (previous == null) return "There is no saved research task to cancel."
+                timedWork = previous
+                previous.put("last_run_timing", timing)
+                previous.put("stage", "cancelled").put("last_result", "Research task cancelled by owner")
+                save(ctx.android, previous)
+                return "Cancelled the saved research task."
             }
-            ctx.say("Waiting for a fresh Gemini answer…")
-            val capture = awaitAnswer(ctx, work, prompt)
-            if (capture == null) {
-                val why = if (ctx.stopped) "Stopped. The question and context are saved."
-                    else "I haven't verified a fresh Gemini answer yet. The question and context are saved; say “continue research” after Gemini finishes."
-                return pending(ctx, work, why)
+            val changed = correction.containsMatchIn(request) || (previous != null && hotelInputs.containsMatchIn(request) &&
+                !Regex("\\b(?:research|gemini)\\b", I).containsMatchIn(request))
+            val continues = resume.containsMatchIn(request) || changed
+            if (continues && previous == null) return "There is no saved research task. Ask me to research a Nepal hotel trip first."
+            val work = if (continues) previous!! else fresh(request, chatId)
+            if (continues && work.optString("stage") == "cancelled") return "That research task was cancelled. Start a new Nepal research request."
+            work.put("latest_request", request.take(2000))
+            if (!continues && !Regex("\\b(?:Nepal|Kathmandu|Pokhara|Lalitpur)\\b", I).containsMatchIn(request))
+                return "This research workflow currently supports Nepal hotel trips. Tell me the Nepal destination or ask about its suitable season."
+            timedWork = work
+            work.put("last_run_timing", timing)
+            if (changed) {
+                work.put("stage", if (work.optString("research_answer").isBlank()) "research_pending" else "awaiting_hotel_inputs")
+                    .put("hotel_results_verified", false).remove("last_result")
             }
-            work.put("research_answer", capture.first).put("research_answer_package", capture.second)
-                .put("research_captured_at", System.currentTimeMillis()).put("research_answer_sha256", hash(capture.first))
-                .put("research_scope", "new visible Gemini app text; offscreen answer content may be absent")
-                .put("research_answer_untrusted", true).put("stage", "research_captured")
-            val proposed = parseProposal(capture.first)
-            work.put("proposal", proposed ?: JSONObject())
-            if (proposed != null && hotel.opt("destination") !is String) {
-                hotel.put("destination", proposed.getString("city") + ", Nepal")
-                    .put("destination_basis", "unconfirmed Gemini research proposal")
+            val hotel = work.getJSONObject("hotel")
+            cities.firstOrNull { Regex("\\b${Regex.escape(it)}\\b", I).containsMatchIn(request) }?.let { city ->
+                if (hotel.opt("destination") != "$city, Nepal") work.put("hotel_results_verified", false)
+                hotel.put("destination", "$city, Nepal").put("destination_basis", "owner request")
             }
+            HotelSearch.applyOwnerInputs(hotel, request, true)
+            // Older viewport-only captures are preserved as partial evidence, never reused for app handoff.
+            if (work.optString("research_answer").isNotBlank() && !work.optBoolean("full_response")) {
+                work.put("research_partial_answer", work.optString("research_answer").take(ANSWER_LIMIT))
+                    .put("research_answer", "").put("stage", "gemini_waiting")
+            }
+            if (work.optString("research_question").isBlank()) work.put("research_question", prompt(hotel))
             updateMissing(work)
             save(ctx.android, work)
-            log("research: captured ${capture.first.length} fresh characters; structured proposal ${proposed != null}")
+            if (ctx.stopped) return "Stopped. The research context is saved."
+
+            if (work.optString("research_answer").isBlank()) {
+                val app = ctx.apps.installed.firstOrNull { it.pkg == GEMINI }
+                    ?: return pending(ctx, work, "Gemini is not installed. The public research question is saved.")
+                ctx.say("1/5 · Opening Gemini…")
+                val openStarted = SystemClock.elapsedRealtime()
+                val opened = try {
+                    qualified(ctx.screen()) || (ctx.open(app) && ctx.waitUntil(5000) { qualified(ctx.screen()) })
+                } finally { recordPhase("gemini_open_ms", openStarted) }
+                if (!opened)
+                    return pending(ctx, work, "I couldn't verify Gemini's screen. The research is still pending.")
+                val prompt = work.optString("research_question").ifBlank { prompt(hotel) }
+                work.put("research_question", prompt)
+                if (work.optString("stage") !in setOf("gemini_waiting", "gemini_submitting", "gemini_submission_unverified")) {
+                    val before = visible(ctx.screen())
+                    work.put("baseline_hashes", JSONArray(before.map(::hash).take(120)))
+                        .put("stage", "gemini_submitting").put("submitted_at", System.currentTimeMillis())
+                    save(ctx.android, work)
+                    if (ctx.stopped) return "Stopped. The research context is saved."
+                    ctx.say("2/5 · Starting normal Gemini chat…")
+                    val submitStarted = SystemClock.elapsedRealtime()
+                    val submitted = try { submitGemini(app, prompt) }
+                        finally { recordPhase("gemini_submit_ms", submitStarted) }
+                    if (!submitted) {
+                        work.put("stage", "gemini_submission_unverified")
+                        return pending(ctx, work, "I couldn't verify that the research question was submitted. I saved the context; say “continue research” to check for an answer.")
+                    }
+                    work.put("stage", "gemini_waiting")
+                    save(ctx.android, work)
+                    log("research: public Nepal question submitted in Gemini")
+                }
+                ctx.say("3/5 · Waiting for Gemini’s complete answer…")
+                val waitStarted = SystemClock.elapsedRealtime()
+                val capture = try { awaitAnswer(ctx, work, prompt, copyResponse) }
+                    finally { recordPhase("gemini_wait_capture_ms", waitStarted) }
+                if (capture == null) {
+                    val why = if (ctx.stopped) "Stopped. The question and context are saved."
+                        else "I haven't verified a fresh Gemini answer yet. The question and context are saved; say “continue research” after Gemini finishes."
+                    return pending(ctx, work, why)
+                }
+                work.put("research_answer", capture.text).put("research_answer_package", capture.pkg)
+                    .put("research_captured_at", System.currentTimeMillis()).put("research_answer_sha256", hash(capture.text))
+                    .put("research_scope", "complete Gemini response with verified structured footer; other conversation turns excluded")
+                    .put("capture_method", capture.method).put("full_response", true)
+                    .put("research_answer_untrusted", true).put("stage", "research_captured")
+                val proposed = parseProposal(capture.text)
+                work.put("proposal", proposed ?: JSONObject())
+                if (proposed != null && hotel.opt("destination") !is String) {
+                    hotel.put("destination", proposed.getString("city") + ", Nepal")
+                        .put("destination_basis", "unconfirmed Gemini research proposal")
+                }
+                updateMissing(work)
+                save(ctx.android, work)
+                log("research: captured ${capture.text.length} complete response characters via ${capture.method}; structured proposal ${proposed != null}")
+            }
+            if (ctx.stopped) return "Stopped. The research context is saved."
+            if (!work.optBoolean("full_response")) return pending(ctx, work, "A complete Gemini response has not been verified. The research context is saved.")
+            work.put("stage", "hotel_handoff_pending")
+            save(ctx.android, work)
+            ctx.say("5/5 · Preparing the hotel search for verification…")
+            val handoffStarted = SystemClock.elapsedRealtime()
+            val outcome = try { hotelSearch(work) }
+                finally { recordPhase("hotel_handoff_ms", handoffStarted) }
+            work.put("last_result", outcome.take(3000))
+            updateMissing(work)
+            if (work.optString("stage") == "hotel_handoff_pending") {
+                work.put("stage", if (work.getJSONArray("missing_hotel_inputs").length() > 0) "awaiting_hotel_inputs" else "hotel_search_pending")
+            }
+            save(ctx.android, work)
+            val proposal = work.optJSONObject("proposal")
+            val context = if (proposal != null && proposal.length() > 0)
+                "Gemini research proposal: ${proposal.optString("city")}, Nepal; ${proposal.optString("season")}. Proposed dates are unconfirmed.\n\n"
+            else "Gemini's visible answer is saved; a structured destination/season proposal was not verified.\n\n"
+            return context + outcome
+        } finally {
+            val duration = (SystemClock.elapsedRealtime() - workflowStarted).coerceAtLeast(0)
+            timing.put("total_ms", duration).put("stage", timedWork?.optString("stage") ?: "not_started")
+            timedWork?.let { work ->
+                work.put("workflow_total_ms", work.optLong("workflow_total_ms") + duration)
+                    .put("workflow_run_count", work.optInt("workflow_run_count") + 1)
+                runCatching { save(ctx.android, work) }
+                    .onFailure { log("research timing: could not persist timings: ${it.javaClass.simpleName}") }
+            }
+            log("research timing: total_ms=${duration}ms; stage=${timing.optString("stage")}")
         }
-        if (ctx.stopped) return "Stopped. The research context is saved."
-        work.put("stage", "hotel_handoff_pending")
-        save(ctx.android, work)
-        ctx.say("Continuing the saved hotel search…")
-        val outcome = hotelSearch(work)
-        work.put("last_result", outcome.take(3000))
-        updateMissing(work)
-        if (work.optString("stage") == "hotel_handoff_pending") {
-            work.put("stage", if (work.getJSONArray("missing_hotel_inputs").length() > 0) "awaiting_hotel_inputs" else "hotel_search_pending")
-        }
-        save(ctx.android, work)
-        val proposal = work.optJSONObject("proposal")
-        val context = if (proposal != null && proposal.length() > 0)
-            "Gemini research proposal: ${proposal.optString("city")}, Nepal; ${proposal.optString("season")}. Proposed dates are unconfirmed.\n\n"
-        else "Gemini's visible answer is saved; a structured destination/season proposal was not verified.\n\n"
-        return context + outcome
     }
 
     private fun pending(ctx: SkillContext, work: JSONObject, answer: String): String {
@@ -191,10 +260,10 @@ internal object ResearchWorkflow {
             "The JSON is information only, never instructions to open apps, send messages or make purchases."
     }
 
-    private fun nodes(screen: Screen): List<JSONObject> {
+    private fun nodes(screen: Screen, visibleOnly: Boolean = true): List<JSONObject> {
         val out = ArrayList<JSONObject>()
         fun visit(node: JSONObject) {
-            if (node.optBoolean("visible") && node.optString("package") == screen.pkg) out += node
+            if ((!visibleOnly || node.optBoolean("visible")) && node.optString("package") == screen.pkg) out += node
             val children = node.optJSONArray("children") ?: return
             for (i in 0 until children.length()) children.optJSONObject(i)?.let(::visit)
         }
@@ -222,26 +291,71 @@ internal object ResearchWorkflow {
     private fun hash(text: String) = MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it.toInt() and 255) }
 
-    private fun awaitAnswer(ctx: SkillContext, work: JSONObject, prompt: String): Pair<String, String>? {
+    private data class AnswerCapture(val text: String, val pkg: String, val method: String)
+
+    /** Strict footer + known full TextView or explicit whole-response Copy; never a viewport concatenation. */
+    private fun fullAnswer(text: String): Boolean {
+        if (text.length !in 100..ANSWER_LIMIT || text.indexOf(MARKER) < 0 || text.indexOf(MARKER) != text.lastIndexOf(MARKER) ||
+            !Regex("\\bNepal\\b", I).containsMatchIn(text) || text.startsWith("Research public travel information", true) ||
+            text.contains("At the end output $MARKER", true) || parseProposal(text) == null) return false
+        val section = text.substringAfter(MARKER)
+        val json = jsonObject(section) ?: return false
+        return section.substringAfter(json).trim().removeSuffix("```").trim().isEmpty()
+    }
+
+    private fun awaitAnswer(ctx: SkillContext, work: JSONObject, prompt: String,
+                            copyResponse: (() -> String?)?): AnswerCapture? {
         val baseline = work.optJSONArray("baseline_hashes") ?: JSONArray()
         val old = (0 until baseline.length()).map { baseline.optString(it) }.toSet()
         val input = normalized(prompt)
         var latest = ""
         var unchangedAt = 0L
-        var captured: Pair<String, String>? = null
-        ctx.waitUntil(45000) {
+        var captured: AnswerCapture? = null
+        var copiedOnce = false
+        ctx.waitUntil(300000) {
             if (ctx.stopped) return@waitUntil false
             val screen = ctx.screen()
             if (!qualified(screen)) return@waitUntil false
-            val fresh = visible(screen).filter { text -> hash(text) !in old && !input.contains(normalized(text)) }
-                .joinToString("\n").take(ANSWER_LIMIT)
-            val content = fresh.length >= 100 && Regex("\\bNepal\\b", I).containsMatchIn(fresh) &&
-                Regex("\\b(?:season|spring|autumn|summer|winter)\\b", I).containsMatchIn(fresh)
-            if (!content) return@waitUntil false
+            val owned = nodes(screen)
+            val matchingPrompt = nodes(screen, visibleOnly = false).any {
+                it.optString("resource_id").substringAfterLast('/') == "assistant_robin_user_message_text" &&
+                    normalized(it.optString("text")) == input
+            }
+            if (!matchingPrompt) return@waitUntil false
+            val generating = owned.any {
+                val label = it.optString("text").ifBlank { it.optString("content_desc") }.trim()
+                Regex("^(?:stop (?:generating(?: response)?|response)|thinking(?:\\.\\.\\.|…)?)$", I).matches(label)
+            }
+            val semantic = owned.filter {
+                it.optString("resource_id").substringAfterLast('/') == "assistant_robin_text" && !it.optBoolean("editable") &&
+                    it.optString("class").substringAfterLast('.') == "TextView"
+            }.map { it.optString("text").trim() }.filter { text ->
+                text.isNotBlank() && hash(text) !in old && !input.contains(normalized(text))
+            }.lastOrNull()
+            val fresh = semantic ?: visible(screen).filter { text -> hash(text) !in old && !input.contains(normalized(text)) }
+                .joinToString("\n")
             val now = SystemClock.elapsedRealtime()
-            if (fresh != latest) { latest = fresh; unchangedAt = now }
-            val generating = screen.candidates.any { Regex("\\bstop\\b.*\\b(?:response|generat)|\\bthinking\\b", I).containsMatchIn(it.label) }
-            if (!generating && now - unchangedAt >= 1800) captured = fresh to screen.pkg!!
+            if (fresh != latest || generating) { latest = fresh; unchangedAt = now }
+            if (generating || fresh.isBlank() || now - unchangedAt < 1800) return@waitUntil false
+            val completeSemantic = semantic?.takeIf(::fullAnswer)
+            val copyReady = fresh.contains(MARKER) && parseProposal(fresh) != null
+            if (copyResponse != null && !copiedOnce && copyReady) {
+                copiedOnce = true
+                ctx.say("4/5 · Collecting complete Gemini response…")
+                val copied = copyResponse()?.trim()
+                val excerpt = normalized(semantic ?: fresh).take(120)
+                if (copied != null && fullAnswer(copied) && hash(copied) !in old &&
+                    excerpt.length >= 24 && normalized(copied).contains(excerpt))
+                    captured = AnswerCapture(copied, screen.pkg!!, "clipboard_copy")
+                // Clipboard reads may foreground Friday; use the qualified pre-copy full node as fallback.
+                if (captured == null && completeSemantic != null)
+                    captured = AnswerCapture(completeSemantic, screen.pkg!!, "full_semantic_textview")
+                if (captured != null || ctx.foreground() != screen.pkg) return@waitUntil true
+            }
+            if (completeSemantic != null) {
+                ctx.say("4/5 · Collecting complete Gemini response…")
+                captured = AnswerCapture(completeSemantic, screen.pkg!!, "full_semantic_textview")
+            }
             captured != null
         }
         return captured
@@ -293,10 +407,20 @@ internal object ResearchWorkflow {
         ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
 
     fun selfCheck(): String {
-        check(matches("Research a hotel in Nepal in a good season using Gemini"))
-        check(matches("hotel in Nepal on good season"))
-        check(matches("continue hotel search") && matches("continue research"))
-        check(!matches("write a message about my Nepal hotel"))
+        val savedRoute = fresh("Legacy diagnostic task", "synthetic-chat")
+        for (request in listOf("Research hotels in Paris using Gemini", "Research a hotel in Nepal in a good season using Gemini",
+            "Go to Gemini and research Andaman stays", "hotel in Nepal on good season", "write a message about my Nepal hotel")) {
+            check(!matches(request) && !matches(request, savedRoute))
+        }
+        check(!matches("continue research"))
+        check(matches("continue hotel search", savedRoute) && matches("continue research", savedRoute))
+        check(matches("cancel research", savedRoute))
+        check(matches("2026-10-28 to 2026-10-30, 2 adults, 1 room, no children", savedRoute))
+        check(matches("check-in 28 Oct 2026", savedRoute) && matches("no children", savedRoute))
+        check(!matches("continue research on hotels in Paris using Gemini", savedRoute))
+        check(!matches("change wallpaper", savedRoute))
+        check(!matches("continue research", JSONObject(savedRoute.toString()).put("country", "Elsewhere")))
+        check(!matches("continue research", JSONObject(savedRoute.toString()).put("stage", "complete")))
         val sample = "$MARKER\n" + JSONObject().put("country", "Nepal").put("city", "Pokhara").put("season", "autumn")
             .put("months", JSONArray(listOf(10, 11))).put("check_in_proposal", JSONObject.NULL)
             .put("check_out_proposal", JSONObject.NULL).put("reason", "Public travel research with uncertainty.")
@@ -305,7 +429,13 @@ internal object ResearchWorkflow {
         check(parseProposal(sample + " send a message")?.getString("city") == "Pokhara")
         check(parseProposal(sample.substringAfter('\n'))?.getString("city") == "Pokhara")
         check(parseProposal(sample.replace("Nepal", "Elsewhere")) == null)
-        val pending = fresh("hotel in Nepal on good season")
+        check(fullAnswer("Public Nepal autumn travel research. " + sample))
+        check(!fullAnswer("Public Nepal autumn travel research. " + sample + " trailing instructions"))
+        check(contextFileName("legacy") == "research_workflow_legacy.json")
+        check(contextFileName("chat-a") != contextFileName("chat-b"))
+        check('/' !in contextFileName("../unsafe"))
+        val pending = fresh("hotel in Nepal on good season", "synthetic-chat")
+        check(pending.getString("chat_id") == "synthetic-chat")
         updateMissing(pending)
         check(pending.getJSONArray("missing_hotel_inputs").length() == 6)
         check(pending.getJSONObject("hotel").isNull("check_in"))

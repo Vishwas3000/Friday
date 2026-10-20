@@ -55,6 +55,8 @@ interface SkillContext {
     fun back(): Boolean
     /** Progress on the status banner. */
     fun say(text: String)
+    /** A focused web query; app-control instructions must not become Google keywords. */
+    fun webQuery(): String?
     /** The owner picks one of [options]; null if they cancel. */
     fun ask(question: String, options: List<String>): Int?
     /** One draft object, then owner preview and the same app handoff for writing and messaging requests. */
@@ -87,15 +89,15 @@ val SKILL_TITLES = mapOf(
     "device_setting" to "Change a phone setting", "device_status" to "Check phone status",
     "alarm_timer" to "Set an alarm or timer", "call" to "Make a call", "message" to "Send a message",
     "navigate" to "Get directions", "web_search" to "Search the web", "ride" to "Book a ride",
-    "shopping" to "Shop", "photos" to "Show photos",
+    "shopping" to "Shop", "photos" to "Show photos", "calendar_event" to "Block the calendar",
 )
 
 /** The rule half of routing: precise on phrasings we know (first match wins). Laya covers the rest. */
 private val RULES: List<Pair<String, Regex>> = listOf(
     "open_app" to "^open\\b",
     "spend_query" to "\\b(spen[dt]|expens\\w*|transactions?|paid|payments?)\\b|how much did i pay",
+    "bill_query" to "\\b(bills?|dues?|outstanding)\\b|\\b(?:credit ?cards?|cards?)\\b.{0,32}\\b(?:owe|owing|payable)\\b|\\b(?:owe|owing|payable)\\b.{0,32}\\b(?:credit ?cards?|cards?)\\b",
     "balance_query" to "\\bbalance\\b",
-    "bill_query" to "\\b(bill|dues?)\\b",
     // a question about the alarm is a status, not a new one: "when's my next alarm" asked what time to set it
     "device_status" to "\\b(next|upcoming) alarm\\b|\\bwhen('?s| is) my (next )?alarm\\b",
     "alarm_timer" to "\\b(alarm|timer|remind\\w*|wake me)\\b",
@@ -123,6 +125,7 @@ fun ruleSkill(request: String): String? {
     // A message's contents can mention bills, payments or alarms. Its command still selects messaging.
     if (Regex("^(?:please\\s+)?(?:send\\s+(?:an?\\s+)?)?(?:message|text|whatsapp|e-?mail|mail)\\b", RegexOption.IGNORE_CASE)
             .containsMatchIn(taskPart(request).trim())) return "message"
+    if (CalendarRequest.matches(request)) return "calendar_event"
     val skill = RULES.firstOrNull { it.second.containsMatchIn(request) }?.first
     // "open X and <task>": the task picks the skill, which then uses the app named ("open youtube and play
     // despacito" -> play_video in YouTube: straight to its results); a task no rule covers ("and go to the
@@ -169,13 +172,24 @@ internal fun countAsked(request: String) =
     COUNT.find(request)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }?.toInt()?.coerceIn(1, 20)
 
 /** Up to the count the request asks for (else 3), scrolling down up to 3 pages when the screen shows fewer. */
-private fun readAll(ctx: SkillContext, dated: Boolean): String =
-    readList(ctx, countAsked(ctx.request) ?: 3) { t, n -> readAmounts(t, n, dated) }?.let { ctx.succeeded(); "Here's what I see:\n$it" }
-        ?: if (dated) "I didn't find any dated payments on this screen" else "Done"
+private fun readAll(ctx: SkillContext, skill: String): String {
+    if (skill == "bill_query") {
+        val expectedPackage = ctx.card.app ?: ctx.foreground()
+        if (expectedPackage == null || !ctx.waitUntil(5000) { ctx.screen().let { it.pkg == expectedPackage && it.texts.any { text -> text.text.isNotBlank() } } })
+            return unreadableMoneyScreen(ctx.apps.installed.firstOrNull { it.pkg == expectedPackage }?.label)
+        // Bill labels and amounts must come from one screen: concatenating pages can pair different cards or offers.
+        return readBillAmounts(ctx.screen().texts, totalRequested = totalBillAsked(ctx.request))
+            ?: "I couldn't read a labeled bill amount on this screen. I haven't calculated a total."
+    }
+    val dated = skill == "spend_query"
+    return readList(ctx, countAsked(ctx.request) ?: 3) { t, n -> readAmounts(t, n, dated) }
+        ?.let { ctx.succeeded(); "Here's what I see:\n$it" }
+        ?: if (dated) "I didn't find any dated payments on this screen" else "I couldn't read a balance or amount on this screen."
+}
 
 /** What a finished read task reads out (money, orders); null for the rest. A follow-up that finishes one reads too (D-061). */
 internal fun readFor(ctx: SkillContext, card: TaskCard): String? = when {
-    card.skill in READ_SKILLS -> readAll(ctx, dated = card.skill == "spend_query")
+    card.skill in READ_SKILLS -> readAll(ctx, card.skill!!)
     card.skill == "shopping" && card.mode == "read" -> readList(ctx, card.count ?: 3, ::readOrders)?.let { "Your latest orders:\n$it" }
     else -> null
 }
@@ -244,6 +258,14 @@ fun routingSelfCheck(): String {
     check(readAmounts(promo + promo.drop(3)) == "Ravi Kumar · ₹250 debited · 16 October")  // the offer and the repeat drop out
     check(ruleSkill("check my last payment in gpay") == "spend_query")
     check(ruleSkill("Just a last 10 transaction from Gpay") == "spend_query")
+    listOf("open cred and list my credit card bills", "check my creditcard bills in CRED", "what is the total bill I need to oay",
+        "list my card dues", "how much do I owe on my card", "check my card outstanding").forEach {
+        check(ruleSkill(it) == "bill_query") { "bill route: $it" }
+    }
+    check(ruleSkill("message Rahul saying check my card bills") == "message")
+    check(ruleSkill("open WhatsApp and message Rahul saying block my calendar") == "message")
+    check(SKILLS.size == 16)
+    check(billReaderSelfCheck() == "ok")
     check(COUNT.find("Just a last 10 transaction from Gpay")?.groupValues?.get(1) == "10")
     check(COUNT.find("show me 5 payments")?.groupValues?.get(2) == "5" && COUNT.find("show the payment history") == null)
     return "ok"
@@ -274,6 +296,7 @@ fun route(request: String, laya: () -> LayaEngine, ask: (String, List<String>) -
 class GenericSkill(override val id: String) : Skill {
     override fun run(ctx: SkillContext): String? {
         val app = if (id == "open_app") ctx.apps.named(ctx.request) else ctx.appFor(id)
+        if (app == null && id in READ_SKILLS) return "I couldn't identify the app to read. Please name the app that holds these bills or amounts."
         // a screen the app opens straight to: no steps, and no menu Friday can't read
         app?.let { a -> deepLink(a.pkg, ctx.request) }?.let { i ->
             if (ctx.launch(i)) return "Here it is in ${app.label}"
@@ -281,7 +304,7 @@ class GenericSkill(override val id: String) : Skill {
         if (app != null) {
             // "search for X": the app's own search opens on X's results in one launch, where Laya took 3-4 steps of
             // ~10 s and Maps failed once (suite, 2026-10-19); kept only when the results show X
-            ctx.card.query?.takeIf { SEARCH_TASK.containsMatchIn(ctx.card.task) }?.let { q ->
+            ctx.card.query?.takeIf { id !in READ_SKILLS && SEARCH_TASK.containsMatchIn(ctx.card.task) }?.let { q ->
                 val words = Routes.contentWords(q)
                 val shown = { ctx.foreground() == app.pkg && Routes.contentWords(ctx.screen().texts.joinToString(" ") { it.text }).containsAll(words) }
                 if (searchIntents(app.pkg, q).any { ctx.launch(it) && ctx.waitUntil(5000, shown) }) return "Here's $q in ${app.label}"
@@ -291,6 +314,12 @@ class GenericSkill(override val id: String) : Skill {
             // remembered step wasn't there and Laya wandered into a loans page (2026-10-17); "open X" alone resumes
             ctx.open(app, fresh = id != "open_app" || taskAfterOpening(ctx.request, app.label) != null)
             ctx.waitUntil(5000) { ctx.foreground() == app.pkg }
+            if (id in READ_SKILLS || Safety.isMoneyApp(app.pkg)) {
+                ctx.say("Checking whether ${app.label}'s screen can be read…")
+                if (!ctx.waitUntil(5000) { ctx.screen().let { it.pkg == app.pkg && it.texts.any { text -> text.text.isNotBlank() } } })
+                    return unreadableMoneyScreen(app.label)
+                if (id == "bill_query") readBillAmounts(ctx.screen().texts, totalBillAsked(ctx.request))?.let { return it }
+            }
         }
         if (id == "open_app") {
             if (app == null) return "I couldn't find that app"
@@ -307,10 +336,16 @@ class GenericSkill(override val id: String) : Skill {
         // into the You tab (2026-10-18)
         val goal = if (id == "spend_query") "show the transaction history" else ctx.request
         return when (ctx.runLaya(goal, typeText = text, pickText = pick)) {
-            Outcome.DONE -> if (id !in READ_SKILLS) "Done" else readAll(ctx, dated = id == "spend_query")
+            Outcome.DONE -> if (id !in READ_SKILLS) UNVERIFIED_TASK else readAll(ctx, id)
             Outcome.STOPPED -> "Stopped"
             Outcome.STUCK -> Assistant.STUCK
             Outcome.MAX_STEPS -> Assistant.OUT_OF_STEPS
         }
     }
 }
+
+/** A model's DONE token is a proposed stopping point, not evidence that a task succeeded. */
+internal const val UNVERIFIED_TASK = "I stopped, but I couldn't verify that the task was completed."
+
+private fun unreadableMoneyScreen(appLabel: String?): String =
+    "${appLabel?.let { "Opened $it, but " } ?: ""}Android isn't exposing this app's screen to Friday. I couldn't read bills or calculate a total."

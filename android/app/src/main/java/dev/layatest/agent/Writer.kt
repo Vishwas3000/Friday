@@ -148,7 +148,12 @@ internal class Writer private constructor(private val handle: Long) : AutoClosea
             if (!model.isFile) return done("unavailable").put("error", "${request.model} is not installed")
             if (stopped()) return done("cancelled")
             val memory = ActivityManager.MemoryInfo().also { ctx.getSystemService(ActivityManager::class.java).getMemoryInfo(it) }
-            if (memory.availMem < 1_500_000_000L) return done("unavailable").put("error", "Not enough free memory to write right now")
+            val requiredMemory = 1_500_000_000L
+            out.put("memory_sampled_at", System.currentTimeMillis()).put("memory_available_bytes", memory.availMem)
+                .put("memory_threshold_bytes", memory.threshold).put("memory_total_bytes", memory.totalMem)
+                .put("memory_low", memory.lowMemory).put("memory_required_bytes", requiredMemory).put("model_bytes", model.length())
+            if (memory.availMem < requiredMemory) return done("unavailable").put("error_code", "memory_pressure")
+                .put("error", "Not enough free memory to write right now")
             val deadline = started + request.timeoutMs
             fun remaining() = maxOf(1, deadline - SystemClock.elapsedRealtime())
             val cancelled = AtomicBoolean(false)

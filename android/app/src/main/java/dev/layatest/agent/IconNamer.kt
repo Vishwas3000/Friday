@@ -36,7 +36,8 @@ object IconNamer {
      * [cands] with their unnamed icons named, from the cache or the model; [note] gets a trace line when the model ran.
      * Nothing runs unless an unnamed icon is on screen, the model is on the phone and no money app is on screen.
      */
-    fun relabel(svc: AgentService, pkg: String?, state: JSONObject, cands: List<ScreenCandidate>, note: (String) -> Unit): List<ScreenCandidate> {
+    fun relabel(svc: AgentService, pkg: String?, state: JSONObject, cands: List<ScreenCandidate>,
+                beforeScreenshot: () -> Unit = {}, note: (String) -> Unit): List<ScreenCandidate> {
         val side = state.getJSONArray("screen").let { minOf(it.getInt(0), it.getInt(1)) } / 4
         val icons = cands.filter { isIcon(it, side) }
         if (icons.isEmpty()) return cands
@@ -50,7 +51,7 @@ object IconNamer {
         val known = cached(svc, stamp)
         val now = HashMap<String, String>()  // this screen's names, cached or not
         val unseen = icons.filter { !kept(it) || !known.has(Meanings.key(pkg, it)) }
-        if (unseen.isNotEmpty()) classify(svc, stamp, unseen.map { it.bounds }, note)?.let { words ->
+        if (unseen.isNotEmpty()) classify(svc, stamp, unseen.map { it.bounds }, beforeScreenshot, note)?.let { words ->
             // icons sharing an id (a list's rows) keep a name only if the ones it was sure of agree: a generic id
             // ("image") on different icons names none of them
             val learned = unseen.indices.groupBy { Meanings.key(pkg, unseen[it]) }
@@ -75,7 +76,8 @@ object IconNamer {
     }
 
     /** One screenshot, [boxes] cropped from it, one batch: each box's word or null. Null if it couldn't run. */
-    @Synchronized private fun classify(svc: AgentService, stamp: String, boxes: List<IntArray>, note: (String) -> Unit): List<String?>? {
+    @Synchronized private fun classify(svc: AgentService, stamp: String, boxes: List<IntArray>, beforeScreenshot: () -> Unit,
+                                       note: (String) -> Unit): List<String?>? {
         val t0 = SystemClock.elapsedRealtime()
         var load = ""
         if (stamp != loaded) {
@@ -87,6 +89,7 @@ object IconNamer {
         }
         val m = model ?: return null
         // a failed shot names nothing and caches nothing: the next screen tries again
+        beforeScreenshot()
         val shot = svc.screenshot().getOrElse { Log.w(TAG, "no screenshot", it); return null }
         val crops = boxes.map { crop(shot, it) }
         val size = "${shot.width}x${shot.height}"

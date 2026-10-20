@@ -2,8 +2,11 @@ package dev.layatest.agent
 
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.os.Looper
+import android.os.SystemClock
+import android.text.TextUtils
 import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.View
@@ -11,6 +14,8 @@ import android.view.WindowManager
 import android.view.WindowManager.LayoutParams
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import org.json.JSONArray
 import java.util.concurrent.ArrayBlockingQueue
@@ -97,7 +102,15 @@ class Overlay(private val svc: AgentService) {
             setOnClickListener { runCatching { wm.removeView(panel) }; then?.let { Thread(it, "friday-feedback").start() } }
         }
         panel = card(ctx).apply {
-            addView(TextView(ctx).apply { this.text = text; setTextColor(Color.WHITE); textSize = 18f })
+            // Full research responses must remain readable without pushing the dismissal buttons offscreen.
+            addView(object : ScrollView(ctx) {
+                override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                    val limit = (wm.maximumWindowMetrics.bounds.height() * 0.55).toInt()
+                    super.onMeasure(widthMeasureSpec, View.MeasureSpec.makeMeasureSpec(limit, View.MeasureSpec.AT_MOST))
+                }
+            }.apply {
+                addView(TextView(ctx).apply { this.text = text; setTextColor(Color.WHITE); textSize = 18f })
+            })
             // carry on from here by voice or text: "it's under the You tab", "now open the second one" (D-061)
             reply?.let { addView(button("Reply: tell me what next", it)) }
             addView(LinearLayout(ctx).apply {
@@ -111,7 +124,7 @@ class Overlay(private val svc: AgentService) {
         svc.main.postDelayed({ runCatching { wm.removeView(panel) } }, 60_000)
     }
 
-    fun banner() = Banner()
+    fun banner(onStop: (() -> Unit)? = null) = Banner(onStop)
 
     fun teachBanner(goal: String, onDone: () -> Unit, onCancel: () -> Unit) = TeachBanner(goal, onDone, onCancel)
 
@@ -153,46 +166,110 @@ class Overlay(private val svc: AgentService) {
     }
 
     /**
-     * A small status pill with Stop while Friday works. [hide] removes it and waits until it's gone,
-     * before every screen read and tap: some apps ignore touches while another window covers them.
+     * Active work has a spinner, current status, elapsed time and Stop. [hide] removes the pill before
+     * actions because some apps ignore covered touches; [resume] restores it during subsequent waiting.
      */
-    inner class Banner {
+    inner class Banner(private val onStop: (() -> Unit)? = null) {
         @Volatile var stopped = false
             private set
         @Volatile private var msg = ""
+        @Volatile private var removed = false
+        private val startedAt = SystemClock.elapsedRealtime()
         private var view: View? = null
         private var label: TextView? = null
-
-        fun say(text: String) {
-            msg = text
-            svc.main.post { ensure(); label?.text = text }
+        private var elapsed: TextView? = null
+        private var spinner: ProgressBar? = null
+        private val tick = object : Runnable {
+            override fun run() {
+                if (removed || view == null) return
+                updateElapsed()
+                svc.main.postDelayed(this, 1000)
+            }
         }
 
-        fun stop() { stopped = true }
+        fun say(text: String) {
+            if (removed) return
+            msg = text
+            svc.main.post { if (!removed) { ensure(); updateStatus() } }
+        }
+
+        fun stop() {
+            stopped = true
+            onStop?.invoke()
+            svc.main.post { updateStatus() }
+        }
+
+        /** Restore the last status after an action; read-only polling should leave this visible. */
+        fun resume() = svc.main.post { if (!removed && msg.isNotEmpty()) { ensure(); updateStatus() } }
 
         fun hide() {
-            onMain { view?.let { runCatching { wm.removeView(it) } }; view = null }
+            onMain { detach() }
             Thread.sleep(120)
         }
 
-        fun remove() = onMain { view?.let { runCatching { wm.removeView(it) } }; view = null }
+        fun remove() {
+            removed = true
+            onMain { detach() }
+        }
+
+        private fun detach() {
+            svc.main.removeCallbacks(tick)
+            view?.let { runCatching { wm.removeView(it) } }
+            view = null
+            label = null
+            elapsed = null
+            spinner = null
+        }
+
+        private fun updateStatus() {
+            label?.text = if (stopped) "Stopping…" else msg
+            spinner?.visibility = if (stopped) View.GONE else View.VISIBLE
+            updateElapsed()
+        }
+
+        private fun updateElapsed() {
+            val seconds = ((SystemClock.elapsedRealtime() - startedAt) / 1000).coerceAtLeast(0)
+            elapsed?.text = "${if (stopped) "Stopping" else "Working"} · ${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+        }
 
         private fun ensure() {
-            if (view != null) return
+            if (removed || view != null) return
             val ctx = theme()
+            val density = svc.resources.displayMetrics.density
+            fun dp(value: Int) = (value * density).toInt()
             val pill = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(36, 6, 6, 6)
+                setPadding(dp(14), dp(6), dp(6), dp(6))
                 background = GradientDrawable().apply { setColor(0xEE202124.toInt()); cornerRadius = 60f }
-                val l = TextView(ctx).apply { text = msg; setTextColor(Color.WHITE); textSize = 14f }
-                label = l
-                addView(l)
-                addView(Button(ctx).apply { text = "Stop"; setOnClickListener { stopped = true; label?.text = "Stopping…" } })
+                addView(ProgressBar(ctx, null, android.R.attr.progressBarStyleSmall).apply {
+                    isIndeterminate = true
+                    indeterminateTintList = ColorStateList.valueOf(Color.WHITE)
+                    contentDescription = "Friday is working"
+                    spinner = this
+                }, LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(10) })
+                addView(LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(TextView(ctx).apply {
+                        setTextColor(Color.WHITE); textSize = 14f; maxLines = 2
+                        ellipsize = TextUtils.TruncateAt.END
+                        accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+                        label = this
+                    })
+                    addView(TextView(ctx).apply {
+                        setTextColor(0xFFBDC1C6.toInt()); textSize = 12f
+                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                        elapsed = this
+                    })
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(Button(ctx).apply { text = "Stop"; setOnClickListener { stop() } })
             }
-            view = pill
-            wm.addView(pill, params(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT,
+            wm.addView(pill, params((wm.maximumWindowMetrics.bounds.width() - dp(24)).coerceAtLeast(dp(200)), LayoutParams.WRAP_CONTENT,
                 Gravity.TOP or Gravity.CENTER_HORIZONTAL, 0, 110, touchable = true))
+            view = pill
+            updateStatus()
+            updateElapsed()
+            svc.main.postDelayed(tick, 1000)
         }
     }
 

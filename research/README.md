@@ -1,4 +1,4 @@
-# Research: can Laya run an Android phone, fully locally?
+# Friday research: an on-device Android assistant
 
 _Last updated: 2026-10-20 · Trust tags: [primary] read at source · [secondary] search/blog/forum · [measured] run here · [UNCERTAIN] unconfirmed or conflicting_
 
@@ -6,14 +6,26 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 
 ## Current task work (20 October)
 
+- [Shared capability checkpoint](41-capability-checkpoint.md): one saved execution loop for Research and registered device capabilities, exact calendar readback, conservative bill extraction, 35 passing synthetic coordinator checks and 19 passing component groups on the installed Pixel build. Live outcomes and limitations are separate from those checks.
+- [Evaluation harness](../docs/NAVIGATION_HARNESS.md) and [24-case manifest](../evals/navigation/cases.json): independent outcome checks, replayable private records, timings, intervention counts and explicit skipped/unavailable coverage. Three cases currently support automatic live navigation; the other cases require controlled observations.
+- [Navigation architecture and harness plan](38-navigation-architecture-and-harness-plan.md): prioritize trustworthy task measurement, then compare stronger teachers against the same runtime before training.
+- [Teacher models](39-teacher-model-options.md) and [data/training plan](40-navigation-data-and-training.md): primary-source model and dataset inventory, license limits, input compatibility and a measured single-4090 pilot. No new model has been trained or deployed from this research.
+- [V-Droid review](42-vdroid-paper-review.md) and [AnyAppBench review](43-anyappbench-paper-review.md): candidate scoring and task memory experiments, independent completion checks, and matching the same task across apps.
+- [Coordinator implementation plan](../docs/COORDINATOR_PLAN.md): architecture boundaries, persistent contracts, staged migration and acceptance gates. The earlier durable Research acceptance sequence remains documented separately from the shared capability checkpoint.
+- [Pixel live acceptance and wider tests](37-pixel-research-live-acceptance.md): whole-answer correction, chat isolation, Stop, assisted restart recovery, rechecks, Maps, Gmail and the memory-blocked Writer run, with per-step timings and explicit failure/intervention records. M1 acceptance remains unpassed.
+- [Nepal, Andaman and Mongolia live diagnostics](36-nepal-live-flow-and-timing.md): measured stage timings, app-state observations, routing failures and the remaining autonomous acceptance gaps.
 - [Hotel failure analysis and improvement backlog](29-task-completion-speed-and-accuracy.md): measured routing, date, candidate, progress and result-collection failures on the connected Pixel; the hotel task remains incomplete.
 - [Online use-case catalog](30-online-usecase-catalog.md) and [JSON specifications](online-usecases.json): 60 proposed cases across 8 domains, 12 initial acceptance cases, source links, typed handoffs and independent completion checks. These specifications have not been run.
 - [Cheap SLM text generation](31-slm-text-generation.md): Writer design, candidates and quality cases. The [implemented Writer and first live results](33-writer-live-tests.md) record actual outcomes separately from the plan.
 - [Hotel device walkthrough](32-hotel-device-walkthrough.md): observed checkpoints, guided versus autonomous actions, calendar target loss, and remaining date/guest/result checks.
+- [Message reading and research handoff](34-cross-app-reading-and-research.md): implemented bounded message-reading and Nepal research prototype; full Gemini response capture and hotel date/result-header guards are under live verification. The Nepal end-to-end task is not yet verified.
+- [Task coordinator research and proposed redesign](35-task-coordinator-research.md): six primary Android-agent projects, runtime choices, durable task schema, recovery and acceptance cases. Research is complete; the owner has started M1 development. Generic Research is implemented and undergoing acceptance; later capability migrations remain planned.
 
-The historical measurements below retain their stated dates and hardware conditions.
+Research and supported device entries use a local Kotlin and Room coordinator with saved steps and reconciliation. Interpretation still uses deterministic parsers; arbitrary multi-app plans and legacy workflow migration remain incomplete. Whole-response Copy corrected the earlier partial answer after manual conversation setup. Live tests also exposed model memory pressure, missing app readback and content-constraint failures. Automatic conversation location and clean restart acceptance remain open. Student training is recorded in [28](28-laya-student.md); D-062 keeps S11-A deployment pending phone validation.
 
-## Answer in one screen
+The earlier findings and measurements below retain their stated dates and hardware conditions; they do not describe the completion status of the current Nepal workflow.
+
+## Earlier findings and measurement context
 
 1. **What Laya is.** ConvAI's open-source decision model: Apache-2.0, released 2026-09-18, `laya` on PyPI.
    - It answers multiple-choice questions about a text state in one pass and **never generates text** [primary].
@@ -26,7 +38,7 @@ The historical measurements below retain their stated dates and hardware conditi
    - **Results:** on the Pixel 8, 4 of 5 live episodes reached the target screen. Two stopped cleanly with DONE (Clock → Timers; Settings → About phone).
    - **Failures:** "search for …" goals (BACK loops on the home screen), and weak DONE.
    - **Speed:** about 3 s per step over adb. About 90% of that is `uiautomator dump`, and Laya takes 0.12–0.85 s on the M5 GPU.
-3. **Nobody has published this before.** No one has shown Laya, or any decision model of its kind, driving a real phone locally with a task success rate [primary, search-based; UNCERTAIN as a "first"].
+3. **Related agent designs.** Historical Laya-specific comparisons are in [03](03-prior-art.md). The [current coordinator research](35-task-coordinator-research.md) compares six projects with Android evidence; their results use different models and protocols and are not Friday success rates.
    - **Closest design:** Jev-Mobile (arXiv 2609.30186). A planner model sets goals and a decision model picks the taps. It scored 0.79 on AndroidWorld vs 0.84 for a model that runs every step, with 94.5% less executor time. It is all cloud.
    - **Closest local work:** V-Droid (tree-only, AW 59.5) [primary, 03].
 4. **Android allows it, through an AccessibilityService** (the TalkBack API), without root [primary, 02]:
@@ -35,11 +47,10 @@ The historical measurements below retain their stated dates and hardware conditi
    - Unicode typing via `ACTION_SET_TEXT` works in Compose, Chrome and WebView.
    - Global back, home, recents, notifications, quick settings and lock are available.
    - Apps launch with `getLaunchIntentForPackage`.
-   - **Enabling it on Android 16:** the restricted-settings check is gone from the accessibility bind path, so `adb install` plus `settings put secure enabled_accessibility_services` should enable our own service with no extra tap [primary code; **UNCERTAIN until run here**].
-   - **Google Play bans autonomous accessibility agents** (2025-10-30), so this ships as a personal sideloaded app [primary, 03].
+   - **Setup:** follow the [Android guide](../docs/app.md) for enabling Friday's service. The development build is sideloaded; Google Play eligibility has not been established.
    - **Hard limits:**
      - It cannot get past the PIN lock.
-     - FLAG_SECURE blanks screenshots, but the tree is still readable.
+     - Secure windows can block screenshots; accessible text availability must be checked per screen.
      - The system hides permission dialogs and installer buttons (`accessibilityDataSensitive`) from non-assistive services. We keep that wall on purpose (D-014).
      - Some banking apps block accessibility services through in-app security SDKs, and ICICI iMobile won't run with Developer options on. For GPay, PhonePe and Paytm there is no public evidence of an accessibility block (GPay blocks overlays and "unsafe apps"). Readability is measured per app with the owner, not assumed (research/11, D-029). Where an app blocks, we don't fight it.
      - Flutter, canvas and some WebView UIs have poor trees [primary/secondary, 02, 03].
@@ -111,8 +122,16 @@ The historical measurements below retain their stated dates and hardware conditi
 | [31-slm-text-generation.md](31-slm-text-generation.md) | Cheap local Writer feasibility, 16 text-quality cases, output contracts, resource costs and candidate comparison plan |
 | [32-hotel-device-walkthrough.md](32-hotel-device-walkthrough.md) | Literal Pixel checkpoints and evidence: 31 calendar day nodes become zero date candidates; check-in selected, remaining stay details and results pending |
 | [33-writer-live-tests.md](33-writer-live-tests.md) | Writer implementation, Pixel build/deployment checks, initial 20-case results, observed quality failures and refinement status |
-
-
+| [34-cross-app-reading-and-research.md](34-cross-app-reading-and-research.md) | Bounded message reading and Nepal research prototype, implemented handoff guards and pending live acceptance |
+| [35-task-coordinator-research.md](35-task-coordinator-research.md) | Primary Android-agent research, durable coordinator design and staged implementation/acceptance boundaries |
+| [36-nepal-live-flow-and-timing.md](36-nepal-live-flow-and-timing.md) | Measured Nepal, Andaman and Mongolia checkpoints, false completion, correction and remaining gaps |
+| [37-pixel-research-live-acceptance.md](37-pixel-research-live-acceptance.md) | Wider Pixel regression cases, per-step timings, verified results, failed checks and assisted recovery evidence |
+| [38-navigation-architecture-and-harness-plan.md](38-navigation-architecture-and-harness-plan.md) | Shared-runtime design, independent outcome measurement and staged model comparisons |
+| [39-teacher-model-options.md](39-teacher-model-options.md) | Released GUI teachers, primary-source results, checkpoint licenses and 4090 pilot limits |
+| [40-navigation-data-and-training.md](40-navigation-data-and-training.md) | Dataset availability, observability, splits, licenses and SFT/distillation experiments |
+| [41-capability-checkpoint.md](41-capability-checkpoint.md) | Implemented shared device capabilities, scoped checks, current live outcomes and open work |
+| [42-vdroid-paper-review.md](42-vdroid-paper-review.md) | Candidate scoring, completion verification, typed memory and controlled Friday experiments |
+| [43-anyappbench-paper-review.md](43-anyappbench-paper-review.md) | Cross-app robustness, independent task oracles, failure diagnosis and paired evaluations |
 
 ## Quick reference: measured on our hardware (2026-10-16)
 | What | Number |
