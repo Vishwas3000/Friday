@@ -51,6 +51,7 @@ The action model, tokenizer and text weights are installed separately. See the [
 | [Task coordinator research](research/35-task-coordinator-research.md) | Proposed redesign, model limits and acceptance cases |
 | [Coordinator implementation plan](docs/COORDINATOR_PLAN.md) | Persistent task contracts, migration milestones, progress and acceptance gates |
 | [Evaluation harness](docs/NAVIGATION_HARNESS.md) | Independent outcome checks, replayable records, timing and explicit coverage limits |
+| [Feature test coverage](docs/FEATURE_TEST_COVERAGE.md) | Current parallel regression results, failed checks and feature acceptance gaps |
 | [Navigation and training plan](research/38-navigation-architecture-and-harness-plan.md) | Harness, teacher-model and dataset decisions, with staged experiments |
 | [Live task diagnostics](research/36-nepal-live-flow-and-timing.md) | Actual Nepal and Andaman failures, stage timings and remaining verification |
 | [Decisions](docs/DECISIONS.md) | Design choices and their rationale |

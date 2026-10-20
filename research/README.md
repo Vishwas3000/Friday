@@ -6,6 +6,7 @@ Distilled from the topic files below. Decisions that follow from it are in [../d
 
 ## Current task work (20 October)
 
+- [Feature coverage and parallel regression](../docs/FEATURE_TEST_COVERAGE.md): fresh coordinator, evaluator, build, UI, navigation and Writer checks; retains grader/lint failures, wrong app/query outcomes, exact-text errors, semantic writing failures and explicit remaining acceptance gaps.
 - [Shared capability checkpoint](41-capability-checkpoint.md): one saved execution loop for Research and registered device capabilities, exact calendar readback, conservative bill extraction, 35 passing synthetic coordinator checks and 19 passing component groups on the installed Pixel build. Live outcomes and limitations are separate from those checks.
 - [Evaluation harness](../docs/NAVIGATION_HARNESS.md) and [24-case manifest](../evals/navigation/cases.json): independent outcome checks, replayable private records, timings, intervention counts and explicit skipped/unavailable coverage. Three cases currently support automatic live navigation; the other cases require controlled observations.
 - [Navigation architecture and harness plan](38-navigation-architecture-and-harness-plan.md): prioritize trustworthy task measurement, then compare stronger teachers against the same runtime before training.
