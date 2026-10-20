@@ -189,9 +189,11 @@ The report includes per-source, task-family and app splits. App splits can overl
 | `duplicate_writes` | Extra independently observed saved event IDs/provider user turns; null when not observed. |
 | `manual_interventions` | Collector-recorded help such as conversation selection, permission action or corrected setup. |
 
-`goal_success_rate_all_recorded` includes skipped and unavailable records as zero successes. Full-suite latest-result coverage divides by **all 24 manifest cases**, including cases never run. For repeated cases, the last record in input order is the latest result. Behavior observations have their own denominator; unavailable checks are not quietly counted as passes. Synthetic/test-environment/live results never share a headline success rate.
+`goal_success_rate_all_recorded` includes skipped and unavailable records as zero successes. Full-suite latest-result coverage divides by **all 24 manifest cases**, including cases never run. For repeated cases, the last record in input order is the latest result. Behavior observations have their own denominator; proven oracle failures, including wrong calendar dates, count as observed behavior failures. Unavailable checks remain unknown. Synthetic/test-environment/live results never share a headline success rate.
 
-Wall time includes harness before/after collection for a live run; `task_call_ms` separately records the synchronous `ask` duration. Action/model/wait times stay null unless an independent collector supplies actual measurements. They are not derived by subtracting unrelated durations or assigning all wall time to inference. Reports show known/unknown sample counts for every timing category.
+Wall time includes harness before/after collection for a live run; `task_call_ms` separately records the synchronous `ask` duration. Action/model/wait times stay null unless an independent collector supplies actual measurements. Negative, nonfinite, boolean and text timing values also grade as null. They are not derived by subtracting unrelated durations or assigning all wall time to inference. Reports show known/unknown sample counts for every timing category.
+
+If provided, `assistant`, `execution` and `timing` must be JSON objects. Malformed sections produce a structured validation error. Represent an unknown measurement with null inside `timing`, rather than a null section.
 
 ## Current limits
 

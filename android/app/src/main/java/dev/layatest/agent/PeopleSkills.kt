@@ -189,12 +189,13 @@ internal fun callee(request: String) = dropFillers(Slots(request).after("call", 
 private fun dialable(slot: String) = slot.replace(Regex("[\\s()-]"), "").takeIf { it.matches(Regex("\\+?[\\d*#]{3,}")) }
 
 /** The command word is email ("email john…", "send a mail to…"), not a chat word that comes first. */
-private fun isEmail(request: String) = MSG_CMD.find(request)?.value?.endsWith("mail", ignoreCase = true) == true
+internal fun isEmail(request: String) = MSG_CMD.find(request)?.value?.endsWith("mail", ignoreCase = true) == true
 
 /** "email john about the trip saying …" -> "the trip". */
 internal fun emailSubject(request: String) = Slots(request).after("about", cutAt = setOf("that", "saying", "in", "on", "via", "using", "through"))
 
 internal fun exactDraftText(request: String): String? {
+    if (Regex("^(?:please\\s+)?(?:do not|don't|never|avoid)\\b", RegexOption.IGNORE_CASE).containsMatchIn(taskPart(request))) return null
     val start = request.indexOfFirst { it == '"' || it == '“' }
     val composing = Regex("^(?:please\\s+)?(?:write|draft|compose|create|generate|suggest|polish|rewrite|rephrase)\\b", RegexOption.IGNORE_CASE)
         .containsMatchIn(taskPart(request))
@@ -205,11 +206,18 @@ internal fun exactDraftText(request: String): String? {
         val bodyAt = body?.let { request.indexOf(it) }?.takeIf { it >= 0 }
         val inSource = (source != null && before.substring(source.range.last + 1).isNotBlank()) ||
             (bodyAt != null && bodyAt < index && before.substring(bodyAt).isNotBlank())
-        return (start < 0 || index < start) && !inSource
+        val negated = Regex("\\b(?:not|never|don't|do not|without|avoid)\\s+(?:(?:copy|use|write|say|saying|be|it|this|text)\\s+)*$", RegexOption.IGNORE_CASE)
+            .containsMatchIn(before)
+        return (start < 0 || index < start) && !inSource && !negated
     }
     Regex("\\b(?:verbatim|exactly)\\s*:\\s*(.+)", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
         .find(request)?.let { directive ->
-            if (directiveAt(directive.range.first)) return directive.groupValues[1]
+            if (directiveAt(directive.range.first)) {
+                val value = directive.groupValues[1]
+                val outer = value.trim()
+                return if (outer.length >= 2 && ((outer.first() == '"' && outer.last() == '"') ||
+                        (outer.first() == '“' && outer.last() == '”'))) outer.substring(1, outer.lastIndex) else value
+            }
         }
     val quotedDirective = if (start < 0) null else Regex("\\b(?:verbatim|exactly)\\s*$", RegexOption.IGNORE_CASE).find(request.take(start))
     if (composing && (quotedDirective == null || !directiveAt(quotedDirective.range.first))) return null
@@ -264,6 +272,12 @@ fun peopleSelfCheck(): String {
     check(exactDraftText("write a WhatsApp message to Rahul saying The label reads exactly: Handle with care.") == null)
     check(exactDraftText("write a WhatsApp message to Rahul exactly: Handle with care.") == "Handle with care.")
     check(exactDraftText("message Rahul saying exactly: Handle with care.") == "Handle with care.")
+    check(exactDraftText("Draft a message exactly: \"QA: Keep ₹1,250.\"") == "QA: Keep ₹1,250.")
+    check(exactDraftText("Draft a message exactly: “Don't change this.”") == "Don't change this.")
+    check(exactDraftText("Draft a message exactly: \" Keep \"quoted\" punctuation!\nNext line. \"") == " Keep \"quoted\" punctuation!\nNext line. ")
+    check(exactDraftText("Draft a message exactly: \"An unmatched quote.") == "\"An unmatched quote.")
+    check(exactDraftText("Draft a message not exactly: \"Make this friendly\"") == null)
+    check(exactDraftText("Don't draft a message exactly: \"This is not a command\"") == null)
     check(destination("navigate to MG road") == "MG road")
     check(destination("I want to go to Indiranagar") == "Indiranagar")
     check(destination("book a cab to the airport for 6 am") == "the airport")

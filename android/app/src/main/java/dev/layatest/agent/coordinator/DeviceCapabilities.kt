@@ -1,5 +1,10 @@
 package dev.layatest.agent.coordinator
 
+import dev.layatest.agent.ActionCapabilities
+import dev.layatest.agent.HotelCapabilities
+import dev.layatest.agent.MessageCapabilities
+import dev.layatest.agent.ResearchCapabilities
+import dev.layatest.agent.RequestResolver
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -38,6 +43,17 @@ internal object DeviceCapabilities {
         Capability("app.open", "Open selected app", "navigation", "app.foreground", 10000),
         Capability("app.search", "Search selected app", "navigation", "app.exact_search_results", 30000),
         Capability("text.draft", "Generate requested text", "local_compute", "writer.generated_text", 90000),
+        Capability("intent.resolve", "Resolve the request and chat references", "local_compute", "intent.grounded_source_spans", 35000),
+        Capability("research.prepare", "Prepare normal Gemini chat", "navigation", "gemini.normal_blank", 15000),
+        Capability("research.submit", "Submit saved research question", "external_write", "gemini.exact_user_turn", 15000),
+        Capability("research.capture", "Collect the complete research answer", "read", "gemini.full_response_footer", 300000),
+        Capability("messages.read", "Read visible messages", "read", "messages.scoped_source", 90000),
+        Capability("message.prepare", "Prepare the draft in its app", "external_write", "message.exact_unsent_composer", 90000),
+        Capability("hotel.resolve_inputs", "Resolve supplied stay details", "local_compute", "hotel.owner_inputs", 5000),
+        Capability("hotel.search", "Search and verify hotel results", "navigation", "hotel.exact_results", 120000),
+        Capability("device.status", "Read device status", "read", "android.native_status", 10000),
+        Capability("app.navigate", "Navigate the selected app", "navigation", "app.observed_destination", 90000),
+        Capability("app.action", "Run the requested app action", "external_write", "app.observed_action", 90000),
         Capability("task.publish", "Save verified result to this chat", "local_write", "chat.publication_key", 5000),
     ).associateBy { it.id }
 
@@ -49,10 +65,16 @@ internal object DeviceCapabilities {
         if (input.optString("validation_error").isNotBlank()) return input.getString("validation_error")
         if (capability !in registry) return "Missing capability: $capability"
         if (input.has("_input_bind")) return "Reserved input binding cannot be supplied by a plan"
-        if (capability in setOf("calendar.create", "bills.read", "app.open", "app.search") &&
+        if (capability in setOf("calendar.create", "bills.read", "app.open", "app.search", "app.navigate", "app.action", "messages.read", "message.prepare", "hotel.search") &&
             (!string(input, "package") || !Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+").matches(input.getString("package"))))
             return "Which installed app or provider should I use?"
         return when (capability) {
+            "research.prepare", "research.submit", "research.capture" -> ResearchCapabilities.inputError(capability, input)
+            "intent.resolve" -> RequestResolver.inputError(input)
+            "messages.read", "message.prepare" -> MessageCapabilities.inputError(capability, input)
+            "hotel.resolve_inputs" -> null // The resolver saves missing fields as output for the next turn.
+            "hotel.search" -> HotelCapabilities.prepare(input).takeIf { it.stay == null }?.message
+            "device.status", "app.navigate", "app.action" -> ActionCapabilities.inputError(capability, input)
             "calendar.create" -> when {
                 !string(input, "title") -> "What title should I give the calendar event?"
                 !integer(input, "start_ms") || !integer(input, "end_ms") || input.optLong("end_ms") <= input.optLong("start_ms") -> "What exact start and end date/time should I use?"
@@ -83,8 +105,21 @@ internal object DeviceCapabilities {
         if (!evidence.optBoolean("verified") || evidence.optString("input_bind") != input.optString("_input_bind") ||
             !integer(evidence, "captured_at") || evidence.optLong("captured_at") < attemptStarted || evidence.optLong("captured_at") > System.currentTimeMillis())
             return "Fresh evidence is not bound to these saved inputs"
-        if (input.has("package") && evidence.optString("source_package") != input.getString("package")) return "Evidence came from a different app"
+        if (input.has("package") && capability != "hotel.resolve_inputs" && evidence.optString("source_package") != input.getString("package")) return "Evidence came from a different app"
         return when (capability) {
+            "intent.resolve" -> {
+                val sources = input.getJSONArray("sources").let { a -> (0 until a.length()).map { index ->
+                    a.getJSONObject(index).let { RequestResolver.Source(it.getString("id"), it.getString("text")) }
+                } }
+                val intent = output.optJSONObject("intent") ?: return "No interpreted intent was returned."
+                if (evidence.optString("source_package") != "local.intent" || evidence.optString("capture_method") != "grounded_intent" ||
+                    evidence.optString("intent_sha256") != digest(canonical(intent))) "Intent evidence is missing or changed."
+                else RequestResolver.validate(input.getString("request"), sources, intent)
+            }
+            "research.prepare", "research.submit", "research.capture" -> ResearchCapabilities.verificationError(capability, input, result)
+            "messages.read", "message.prepare" -> MessageCapabilities.verificationError(capability, input, result)
+            "hotel.resolve_inputs", "hotel.search" -> HotelCapabilities.verificationError(capability, input, result)
+            "device.status", "app.navigate", "app.action" -> ActionCapabilities.verificationError(capability, input, result)
             "calendar.create" -> when {
                 !string(output, "event_id") || evidence.optString("event_id") != output.getString("event_id") -> "No matching saved event identifier was verified"
                 evidence.optString("capture_method") != "calendar_provider_readback" || !output.optBoolean("busy") -> "Saved busy event readback was not verified"
@@ -132,6 +167,11 @@ internal object DeviceCapabilities {
     }
 
     fun answer(capability: String, output: JSONObject): String = when (capability) {
+        "research.capture" -> output.getString("answer")
+        "research.prepare", "research.submit", "intent.resolve" -> ""
+        "messages.read", "message.prepare" -> MessageCapabilities.answer(capability, output)
+        "hotel.resolve_inputs", "hotel.search" -> HotelCapabilities.answer(capability, output)
+        "device.status", "app.navigate", "app.action" -> ActionCapabilities.answer(capability, output)
         "calendar.create" -> {
             val allDay = output.getBoolean("all_day")
             val zone = if (allDay) ZoneOffset.UTC else ZoneId.of(output.getString("zone"))
@@ -144,7 +184,7 @@ internal object DeviceCapabilities {
                 output.getString("title") + " — " + date + " (" + time + "; Busy). Saved fields verified." +
                 if (output.optBoolean("inferred_year")) " I used the next occurrence of that date." else ""
         }
-        "app.open" -> "Opened ${output.getString("package")}."
+        "app.open" -> "Opened ${output.optString("label").ifBlank { "the selected app" }}."
         "app.search" -> "Search results verified for “${output.getString("query")}”."
         "text.draft" -> output.getString("text")
         "bills.read" -> buildString {

@@ -100,13 +100,25 @@ internal object PlanValidator {
             require(step.state != "COMPLETED" || dependencies.all { seen.getValue(it).state == "COMPLETED" }) { "Completed step has an unfinished dependency" }
             val bindings = definition.getJSONObject("bindings")
             bindings.keys().forEach { target ->
-                require(target !in setOf("package", "validation_error", "_input_bind")) { "App authority cannot come from observed app/model output" }
+                require(target !in setOf("package", "spec", "request", "sources", "recipient", "validation_error", "_input_bind")) { "App, recipient and research authority cannot come from observed app/model output" }
                 val source = bindings.getJSONObject(target)
                 require(source.getString("step_id") in dependencies)
+                if (target == "intent") require(source.getString("field") == "intent" &&
+                    seen.getValue(source.getString("step_id")).capability == "intent.resolve") {
+                    "An app intent must come from the registered grounded resolver"
+                }
                 require(Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*").matches(source.getString("field")))
             }
             val inputs = definition.getJSONObject("inputs")
             require(!inputs.has("_input_bind"))
+            require(!inputs.has("intent")) { "An interpreted app intent needs a verified resolver dependency" }
+            if (step.capability in setOf("intent.resolve", "app.action", "app.navigate", "device.status"))
+                require(inputs.getString("request") == task.request) { "Saved action differs from the owner request" }
+            if (step.capability.startsWith("research.")) {
+                require(GeminiResearch.specFromJson(inputs.getJSONObject("spec")).query == task.request) {
+                    "Saved question differs from the owner request"
+                }
+            }
             if (bindings.length() == 0) {
                 val error = DeviceCapabilities.inputError(step.capability, inputs)
                 require(error == null || inputs.optString("validation_error") == error) { error.orEmpty() }

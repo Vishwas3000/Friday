@@ -2,7 +2,6 @@ package dev.layatest.agent
 
 import org.json.JSONArray
 import org.json.JSONObject
-import java.time.Instant
 
 internal data class MessageReadRequest(
     val original: String,
@@ -12,9 +11,12 @@ internal data class MessageReadRequest(
     val limit: Int = 8,
 )
 
-internal data class MessageReadCapture(val source: String, val count: Int, val scope: String, val truncated: Boolean)
+internal data class MessageReadCapture(
+    val source: String, val count: Int, val scope: String, val truncated: Boolean,
+    val evidence: JSONObject = JSONObject(),
+)
 
-/** Reads one visible app viewport. The caller supplies guarded navigation and a text-only summary callback. */
+/** Captures one verified visible app viewport. Summarization is a separate coordinator step. */
 internal object ReadMessages {
     private const val SOURCE_LIMIT = 1450
     private val verbs = Regex("^(?:(?:please|can you|could you)\\s+)*(?:check|read|show|review|summari[sz]e|catch me up)\\b", RegexOption.IGNORE_CASE)
@@ -65,54 +67,11 @@ internal object ReadMessages {
         return MessageReadRequest(request, apps, appName, person, count)
     }
 
-    fun run(ctx: SkillContext, request: MessageReadRequest,
-            navigate: (AppInfo, String, String?) -> Outcome,
-            summarize: (String) -> JSONObject): String {
-        val app = when {
-            request.apps.size == 1 -> request.apps.single()
-            request.apps.size > 1 -> ctx.ask("Which app should I read first?", request.apps.map { it.label })?.let { request.apps.getOrNull(it) }
-            request.requestedApp != null -> return "I couldn't find the requested app “${request.requestedApp}”. No messages were read."
-            else -> {
-                val choices = (ctx.apps.candidates("message") + ctx.apps.installed.filter { it.pkg in aliases.values.flatten() }).distinctBy { it.pkg }
-                if (choices.isEmpty()) return "Name the installed app whose messages you want me to read."
-                ctx.ask("Which app should I read?", choices.map { it.label })?.let { choices.getOrNull(it) }
-            }
-        } ?: return "Choose an app to continue; no messages were read."
-        if (ctx.stopped) return "Stopped"
-        ctx.say("Opening ${app.label}…")
-        if (!ctx.open(app) || !ctx.waitUntil(5000) { ctx.foreground() == app.pkg }) return "I couldn't open ${app.label}. No messages were read."
-        ctx.say(if (request.recipient == null) "Finding messages…" else "Finding ${request.recipient}…")
-        val goal = if (request.recipient == null) "open the messages inbox in ${app.label} to read visible previews; stop once the inbox is visible"
-            else "open the existing conversation with ${request.recipient} in ${app.label} to read it; stop when the conversation is visible"
-        var screen = ctx.screen()
-        if (!alreadyReadable(screen, app, request.recipient, request.limit)) {
-            val outcome = navigate(app, goal, request.recipient)
-            if (ctx.stopped || outcome == Outcome.STOPPED) return "Stopped"
-            screen = ctx.screen()
-        }
-        val capturedAt = Instant.now().toString()
-        ctx.say("Reading visible text…")
-        if (screen.pkg != app.pkg) return "${app.label}'s message screen wasn't verified. No summary was produced."
-        val nodes = appNodes(screen)
-        if (Safety.isAuthPrompt(screen.pkg, nodes.map { ownText(it) })) return "Unlock ${app.label} to continue. No summary was produced."
-        if (request.recipient != null && !recipientVisible(screen, request.recipient))
-            return "I couldn't verify the conversation with ${request.recipient} in ${app.label}. No message summary was produced."
-        val capture = extract(screen, app, request.recipient, request.limit)
-        if (capture.count == 0) return "No readable message text was exposed on the current ${app.label} screen. Older messages, images and audio were not read."
-        val scope = "Source: ${app.label} (${app.pkg}); captured_at: $capturedAt; ${capture.scope}; ${capture.count} visible text units${if (capture.truncated) "; truncated" else ""}. One screen only; older or offscreen messages were not read. Speaker and delivery status are unverified."
-        if (ctx.stopped) return "Stopped"
-        ctx.say("Summarizing visible text…")
-        val result = summarize(capture.source)
-        if (ctx.stopped || result.optString("status") == "cancelled") return "Stopped"
-        if (result.optString("status") != "ok" || result.optString("text").isBlank())
-            return "$scope\n\nI couldn't produce a summary (${result.optString("status", "error")})."
-        return "$scope\n\n${result.getString("text")}"
-    }
-
     private fun appNodes(screen: Screen): List<JSONObject> {
         val found = ArrayList<JSONObject>()
         fun visit(node: JSONObject) {
-            if (node.optBoolean("visible") && node.optString("package") == screen.pkg) found += node
+            if (!node.optBoolean("visible") || node.optString("package") != screen.pkg) return
+            found += node
             val children = node.optJSONArray("children") ?: return
             for (i in 0 until children.length()) visit(children.getJSONObject(i))
         }
@@ -128,31 +87,67 @@ internal object ReadMessages {
     private fun isHeader(node: JSONObject) = headerRole.containsMatchIn(role(node)) &&
         !Regex("\\b(?:row|list|preview|snippet)\\b", RegexOption.IGNORE_CASE).containsMatchIn(role(node))
 
-    private fun alreadyReadable(screen: Screen, app: AppInfo, recipient: String?, limit: Int): Boolean {
+    internal fun headerEvidenceValid(node: JSONObject) = isHeader(node)
+    internal fun itemEvidenceValid(node: JSONObject, conversation: Boolean): Boolean = !node.optBoolean("editable") &&
+        !Regex("Button|ImageButton|EditText", RegexOption.IGNORE_CASE).containsMatchIn(node.optString("class")) &&
+        if (conversation) messageRole.containsMatchIn(role(node)) && !controls.containsMatchIn(role(node))
+        else previewRole.containsMatchIn(role(node))
+
+    internal fun inboxEvidenceValid(node: JSONObject): Boolean {
+        val inboxLabels = setOf("inbox", "chats", "messages", "direct", "mail")
+        return Regex("\\b(?:inbox|(?:conversations?|chats?|threads?|messages?) list)\\b", RegexOption.IGNORE_CASE).containsMatchIn(role(node)) ||
+            (isHeader(node) && ownText(node).lowercase() in inboxLabels) ||
+            (node.optBoolean("selected") && Regex("\\b(?:tab|navigation)\\b", RegexOption.IGNORE_CASE).containsMatchIn(role(node)) && ownText(node).lowercase() in inboxLabels)
+    }
+
+    fun alreadyReadable(screen: Screen, app: AppInfo, recipient: String?, limit: Int): Boolean {
         if (screen.pkg != app.pkg) return false
         if (recipient != null) return recipientVisible(screen, recipient) &&
             extract(screen, app, recipient, limit).let { it.count > 0 && it.scope.startsWith("visible conversation text") }
+        return inboxVisible(screen) && extract(screen, app, null, limit).count > 0
+    }
+
+    private fun inboxVisible(screen: Screen): Boolean {
         val nodes = appNodes(screen)
         val inboxLabels = setOf("inbox", "chats", "messages", "direct", "mail")
         if (nodes.any { isHeader(it) && ownText(it).isNotBlank() && ownText(it).lowercase() !in inboxLabels }) return false
-        val inboxSurface = nodes.any { node ->
-            val metadata = role(node)
-            Regex("\\b(?:inbox|(?:conversations?|chats?|threads?|messages?) list)\\b", RegexOption.IGNORE_CASE).containsMatchIn(metadata) ||
-                (isHeader(node) && ownText(node).lowercase() in inboxLabels) ||
-                (node.optBoolean("selected") && Regex("\\b(?:tab|navigation)\\b", RegexOption.IGNORE_CASE).containsMatchIn(metadata) &&
-                    ownText(node).lowercase() in inboxLabels)
-        }
+        val inboxSurface = nodes.any(::inboxEvidenceValid)
         return inboxSurface && nodes.any { !it.optBoolean("editable") && previewRole.containsMatchIn(role(it)) && ownText(it).isNotBlank() }
     }
 
-    fun recipientVisible(screen: Screen, recipient: String): Boolean {
-        val height = screen.state?.optJSONArray("screen")?.optInt(1) ?: return false
-        return appNodes(screen).any { node ->
+    private fun recipientHeader(screen: Screen, recipient: String): JSONObject? {
+        val height = screen.state?.optJSONArray("screen")?.optInt(1) ?: return null
+        return appNodes(screen).firstOrNull { node ->
             val top = node.optJSONArray("bounds")?.optInt(1, height) ?: height
             top < height / 3 && isHeader(node) &&
                 ownText(node).removePrefix("@").equals(recipient.removePrefix("@"), true)
         }
     }
+
+    fun recipientVisible(screen: Screen, recipient: String) = recipientHeader(screen, recipient) != null
+
+    fun screenProblem(screen: Screen, app: AppInfo): String? = when {
+        screen.pkg != app.pkg -> "The selected app's foreground screen wasn't verified."
+        appNodes(screen).isEmpty() -> "Android isn't exposing the selected app's screen to Friday. No messages were read."
+        Safety.isAuthPrompt(screen.pkg, appNodes(screen).map(::ownText)) -> "Unlock the selected app to read messages."
+        else -> null
+    }
+
+    fun captureProblem(screen: Screen, app: AppInfo, recipient: String?, limit: Int): String? = when {
+        screenProblem(screen, app) != null -> screenProblem(screen, app)
+        recipient != null && !recipientVisible(screen, recipient) -> "The requested conversation header wasn't verified. No messages were read."
+        !alreadyReadable(screen, app, recipient, limit) -> "Readable message boundaries weren't verified on this screen. No summary was produced."
+        else -> null
+    }
+
+    fun observe(screen: Screen, app: AppInfo, recipient: String?, limit: Int = 8): MessageReadCapture? =
+        if (captureProblem(screen, app, recipient, limit) == null) extract(screen, app, recipient, limit) else null
+
+    private fun nodeEvidence(node: JSONObject) = JSONObject().put("text", ownText(node))
+        .put("package", node.optString("package")).put("resource_id", node.optString("resource_id"))
+        .put("hint", node.optString("hint")).put("class", node.optString("class"))
+        .put("editable", node.optBoolean("editable")).put("selected", node.optBoolean("selected"))
+        .put("bounds", node.optJSONArray("bounds"))
 
     fun extract(screen: Screen, app: AppInfo, recipient: String?, limit: Int = 8): MessageReadCapture {
         if (screen.pkg != app.pkg) return MessageReadCapture("", 0, "requested app not verified", false)
@@ -160,7 +155,7 @@ internal object ReadMessages {
             !node.optBoolean("editable") && ownText(node).isNotBlank() &&
                 !Regex("Button|ImageButton|EditText", RegexOption.IGNORE_CASE).containsMatchIn(node.optString("class"))
         }.sortedWith(compareBy({ it.optJSONArray("bounds")?.optInt(1) ?: 0 }, { it.optJSONArray("bounds")?.optInt(0) ?: 0 }))
-            .distinctBy { it.optJSONArray("bounds").toString() + "|" + ownText(it) }
+            .distinctBy { it.optJSONArray("bounds")?.toString().orEmpty() + "|" + ownText(it) }
         val messageNodes = nodes.filter { messageRole.containsMatchIn(role(it)) && !controls.containsMatchIn(role(it)) }
         val previews = nodes.filter { previewRole.containsMatchIn(role(it)) }
         val (selected, scope) = when {
@@ -171,6 +166,7 @@ internal object ReadMessages {
                 "visible screen text only; message boundaries unverified"
         }
         val items = JSONArray()
+        val observedItems = JSONArray()
         val source = JSONObject().put("app", app.label).put("package", app.pkg).put("scope", scope)
             .put("order", "visible top-to-bottom screen order").put("speaker_attribution", "not verified; sent and received text may both be present")
             .put("items", items)
@@ -186,8 +182,14 @@ internal object ReadMessages {
                 truncated = true
                 break
             }
+            observedItems.put(nodeEvidence(node).put("captured_text", text))
         }
-        return MessageReadCapture(source.toString(), items.length(), scope, truncated)
+        val evidence = JSONObject().put("screen_text", appNodes(screen).map(::ownText).filter(String::isNotBlank).joinToString("\n"))
+            .put("message_items", observedItems).put("screen_height", screen.state?.optJSONArray("screen")?.optInt(1))
+            .put("inbox_visible", recipient == null && inboxVisible(screen))
+            .put("inbox_fields", JSONArray().also { proof -> appNodes(screen).filter(::inboxEvidenceValid).forEach { proof.put(nodeEvidence(it)) } })
+        recipient?.let { recipientHeader(screen, it)?.let { header -> evidence.put("header", nodeEvidence(header)) } }
+        return MessageReadCapture(source.toString(), items.length(), scope, truncated, evidence)
     }
 
     /** Also used for remembered paths; caller must require typed text to equal recipientSearch, or forbid typing. */
@@ -228,13 +230,35 @@ internal object ReadMessages {
         val capture = extract(screen, apps.first(), "Rahul")
         check(capture.count == 2 && capture.source.indexOf("First synthetic") < capture.source.indexOf("Second synthetic"))
         check("SECRET" !in capture.source && capture.source.length <= SOURCE_LIMIT)
+        check(observe(screen, apps.first(), "Rahul") != null)
+        check(observe(screen, apps[1], "Rahul") == null)
+        check(observe(screen, apps.first(), null) == null)
+        val input = JSONObject().put("package", "com.whatsapp").put("recipient", "Rahul").put("limit", 8)
+        val output = JSONObject().put("package", "com.whatsapp").put("source", capture.source).put("count", capture.count)
+            .put("scope", capture.scope).put("truncated", capture.truncated)
+        val proof = JSONObject(capture.evidence.toString()).put("verified", true).put("source_package", "com.whatsapp")
+            .put("capture_method", "accessibility_message_viewport").put("coverage", "visible_screen")
+            .put("source_sha256", dev.layatest.agent.coordinator.DeviceCapabilities.digest(capture.source))
+            .put("source_text_sha256", dev.layatest.agent.coordinator.DeviceCapabilities.digest(capture.evidence.getString("screen_text")))
+        val verified = dev.layatest.agent.coordinator.CapabilityResult(output = output, evidence = proof)
+        check(MessageCapabilities.verificationError("messages.read", input, verified) == null)
+        check(MessageCapabilities.verificationError("messages.read", JSONObject(input.toString()).put("recipient", "Someone else"), verified) != null)
+        proof.put("screen_text", "Changed after capture")
+        check(MessageCapabilities.verificationError("messages.read", input, verified) != null)
+        root.put("visible", false)
+        check(observe(screen, apps.first(), "Rahul") == null)
+        root.put("visible", true).put("package", "another.app")
+        check(observe(screen, apps.first(), "Rahul") == null)
+        root.put("package", "com.whatsapp")
         title.put("text", "Someone else")
         check(!recipientVisible(screen, "Rahul"))
+        check(observe(screen, apps.first(), "Rahul") == null)
         title.put("text", "Rahul").put("resource_id", "conversations_row_contact_name")
         check(!recipientVisible(screen, "Rahul"))
         title.put("text", "Chats").put("resource_id", "toolbar_title")
         first.put("resource_id", "conversations_row_message")
         check(alreadyReadable(screen, apps.first(), null, 8))
+        check(observe(screen, apps.first(), null) != null)
         first.put("text", "x".repeat(1000))
         check(extract(screen, apps.first(), "Rahul").truncated)
         val react = ScreenCandidate("Like", "Button", true, false, false, false, false, false, false, true, IntArray(4))

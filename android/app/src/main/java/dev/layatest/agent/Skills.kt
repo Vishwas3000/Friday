@@ -38,6 +38,8 @@ interface SkillContext {
     fun open(app: AppInfo, fresh: Boolean = false): Boolean
     /** startActivity with NEW_TASK; false if nothing handles the intent. */
     fun launch(intent: Intent): Boolean
+    /** Authorize immediately before a native mutation; the coordinator records its dispatch receipt. */
+    fun authorizeMutation(): Boolean = !stopped
     fun foreground(): String?
     /** Poll [cond] every 300 ms until true, [timeoutMs] passes or the owner taps Stop. */
     fun waitUntil(timeoutMs: Long, cond: () -> Boolean): Boolean
@@ -88,7 +90,7 @@ val SKILL_TITLES = mapOf(
     "spend_query" to "Check spending", "balance_query" to "Check a balance", "bill_query" to "Check a card bill",
     "device_setting" to "Change a phone setting", "device_status" to "Check phone status",
     "alarm_timer" to "Set an alarm or timer", "call" to "Make a call", "message" to "Send a message",
-    "navigate" to "Get directions", "web_search" to "Search the web", "ride" to "Book a ride",
+    "navigate" to "Get directions", "web_search" to "Search the web", "app_search" to "Search an app", "ride" to "Book a ride",
     "shopping" to "Shop", "photos" to "Show photos", "calendar_event" to "Block the calendar",
 )
 

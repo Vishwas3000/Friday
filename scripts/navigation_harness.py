@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -287,6 +288,9 @@ def oracle(case, record):
 
 
 def grade(case, record, suite):
+    for section in ("assistant", "execution", "timing"):
+        if section in record and not isinstance(record[section], dict):
+            raise ValueError("Record " + section + " must be an object")
     status = record.get("execution", {}).get("status")
     state = record.get("assistant", {}).get("state")
     claimed = record.get("assistant", {}).get("claimed_success") is True or state == "COMPLETED"
@@ -312,7 +316,7 @@ def grade(case, record, suite):
         checked = result("failed", "Observed app/provider differs from allowed apps", contract=False,
                          duplicates=checked["duplicate_writes"])
     contract = checked["independent_contract"]
-    behavior = None if contract is None else bool(contract and state == case["expected"]["behavior"])
+    behavior = False if checked["oracle_status"] == "failed" else None if contract is None else bool(contract and state == case["expected"]["behavior"])
     effects = record.get("effect_observation", {})
     if any(type(effects.get(key)) is int and effects[key] > 0 for key in ("messages_sent", "payments_made")):
         behavior = False
@@ -321,7 +325,7 @@ def grade(case, record, suite):
         checked["reason"] = "Forbidden communication or payment effect observed"
     interventions = record.get("manual_interventions", [])
     timing = record.get("timing", {})
-    measured = {key: value if type(value := timing.get(key)) in (int, float) and value >= 0 else None
+    measured = {key: value if type(value := timing.get(key)) in (int, float) and math.isfinite(value) and value >= 0 else None
                 for key in ("wall_ms", "action_ms", "model_ms", "wait_ms")}
     return {"case_id": case["id"], "family": case["family"], "allowed_apps": case["allowed_apps"],
             "source": record.get("source", "unknown"), "execution_status": status,
@@ -463,11 +467,35 @@ def self_check(suite):
     check(value["source"] == "synthetic_fixture", "Fixture source remains synthetic")
     wrong = json.loads(json.dumps(value)); wrong["provider_observation"]["after"][0]["start_ms"] += 86400000
     check(grade(calendar, wrong, suite)["false_success"], "Wrong day must fail even when assistant says Done")
+    check(grade(calendar, wrong, suite)["behavior_contract_pass"] is False, "An independently proven wrong date is an observed behavior failure")
     duplicate = json.loads(json.dumps(value)); duplicate["provider_observation"]["after"].append({**saved, "event_id": 74})
     check(grade(calendar, duplicate, suite)["duplicate_writes"] == 1, "Count actual duplicate IDs, not claimed dispatches")
     unverifiable = record(calendar["id"]); unverifiable["evidence"] = {"verified": True}; unverifiable["task"] = {"state": "COMPLETED"}
     check(not grade(calendar, unverifiable, suite)["goal_success"], "Coordinator/verified flags cannot prove an outcome")
     check(grade(calendar, unverifiable, suite)["unverified_success_claim"], "Unobservable completion claims stay separate from proven failures")
+    failures = score(suite, [wrong, unverifiable])["by_source"]["synthetic_fixture"]
+    check(failures["behavior_contract_observed"] == 1 and failures["behavior_contract_passes"] == 0 and failures["unavailable"] == 1,
+          "Proven failure stays in the behavior denominator while unavailable evidence stays unknown")
+    for section in ("assistant", "execution", "timing"):
+        malformed = json.loads(json.dumps(value)); malformed[section] = None
+        try:
+            grade(calendar, malformed, suite)
+            rejected = False
+        except ValueError as error:
+            rejected = str(error) == "Record " + section + " must be an object"
+        check(rejected, "A null " + section + " section must produce a structured validation error, never a grader crash")
+    invalid_timing = json.loads(json.dumps(value))
+    invalid_timing["timing"] = {"wall_ms": float("inf"), "action_ms": float("nan"), "model_ms": -float("inf"), "wait_ms": 0}
+    check(grade(calendar, invalid_timing, suite)["timing"] == {"wall_ms": None, "action_ms": None, "model_ms": None, "wait_ms": 0},
+          "Nonfinite durations stay unknown while a measured zero remains known")
+    invalid_timing["timing"] = {"wall_ms": True, "action_ms": -1, "model_ms": "5", "wait_ms": None}
+    check(all(duration is None for duration in grade(calendar, invalid_timing, suite)["timing"].values()),
+          "Boolean, negative, text and missing durations are not measurements")
+    finite_timing = json.loads(json.dumps(value)); finite_timing["timing"] = {"wall_ms": 12.5}
+    invalid_timing["timing"]["wall_ms"] = float("inf")
+    timings = score(suite, [invalid_timing, finite_timing])["by_source"]["synthetic_fixture"]["timing"]
+    check(timings["wall_ms"] == {"known": 1, "unknown": 1, "mean": 12.5} and timings["model_ms"]["mean"] is None,
+          "Nonfinite durations do not inflate timing coverage or contaminate finite means")
     wrong_scope = json.loads(json.dumps(value)); wrong_scope["provider_observation"]["query"]["title"] = "other task"
     check(not grade(calendar, wrong_scope, suite)["goal_success"], "A query for a different title is not outcome evidence")
     retry_case = cases["calendar.retry_same_event"]

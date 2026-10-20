@@ -2,6 +2,7 @@ package dev.layatest.agent
 
 import android.content.Intent
 import android.net.Uri
+import org.json.JSONArray
 import org.json.JSONObject
 
 internal data class DraftDestination(val app: AppInfo?, val appName: String?, val recipient: String?, val email: Boolean) {
@@ -18,7 +19,7 @@ internal object DraftHandoff {
     private val composer = Regex("message|compose|body|entry", RegexOption.IGNORE_CASE)
     private val otherField = Regex("search|query|subject|recipient|address|(?:^|[/_ ])(?:to|cc|bcc)(?:$|[_ ])", RegexOption.IGNORE_CASE)
     private val recipientRole = Regex("recipient|chip|contact.*name|conversation.*(?:name|title)|chat.*title|toolbar.*title|(?:^|[/_])to(?:$|_)", RegexOption.IGNORE_CASE)
-    private val chatApps = setOf("com.whatsapp", "com.whatsapp.w4b", "com.google.android.apps.messaging")
+    private val changingAction = Regex("\\b(?:reply|react|reaction|like|heart|vote|mute|unmute|archive|trash|delete|remove|forward|send|post|follow|unfollow|block|unblock|record|attach|camera|microphone|download|save|pin|unpin|report|clear|edit|join|leave|subscribe|unsubscribe|call|dial|voicecall|videocall)\\b", RegexOption.IGNORE_CASE)
 
     internal fun header(request: String): String {
         sourceStart.find(request)?.range?.first?.let { return request.take(it) }
@@ -52,6 +53,7 @@ internal object DraftHandoff {
 
     private fun normalize(s: String) = s.lowercase().replace(Regex("\\s+app$"), "").replace(Regex("[^\\p{L}\\p{N}]"), "")
     private fun address(s: String?) = s?.takeIf { email.matches(it) }
+    internal fun emailRecipient(s: String) = address(s) != null
     private fun phone(s: String?): String? = s?.takeIf { it.matches(Regex("\\+?[\\d ()-]+")) }
         ?.replace(Regex("[ ()-]"), "")?.takeIf { it.count(Char::isDigit) in 3..15 }
 
@@ -86,93 +88,6 @@ internal object DraftHandoff {
         return Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/${number.drop(1)}?text=${Uri.encode(body)}")).setPackage(app.pkg)
     }
 
-    fun run(ctx: SkillContext, kind: String, written: JSONObject,
-            approve: (String) -> String,
-            navigate: (AppInfo, String) -> Outcome,
-            typeBody: (AppInfo, String, ScreenCandidate, String) -> Boolean): String {
-        val draft = Writer.answer(written)
-        if (written.optString("status") != "ok") return draft
-        fun result(status: String) = "$draft\n\n$status"
-        val parsed = parse(ctx.request, kind, ctx.apps.installed)
-        if (!parsed.requested) return draft
-        val dest = if (!parsed.email && parsed.appName == null && parsed.recipient != null) {
-            val choices = ctx.apps.candidates("message").distinctBy { it.pkg }
-            val app = ctx.apps.default("message") ?: choices.singleOrNull()
-                ?: ctx.ask("Which app should receive the draft for ${parsed.recipient}?", choices.map { it.label })?.let { choices.getOrNull(it) }
-            if (app == null) return result("Choose a messaging app to continue. The draft is kept here; nothing was sent.")
-            parsed.copy(app = app, appName = app.label)
-        } else parsed
-        if (dest.appName != null && dest.app == null) return result("I couldn't find the named app “${dest.appName}”. The draft is kept here.")
-        if (Safety.isMoneyApp(dest.app?.pkg)) return result("Friday never types drafts in money apps. The draft is kept here.")
-        val body = if (kind == "email") written.getString("body") else written.getString("text")
-        val target = dest.app?.label ?: if (dest.email) "your email app" else "the app chooser"
-        when (approve("Review this draft before putting it in $target${dest.recipient?.let { " for $it" }.orEmpty()}:\n\n$draft\n\nThis prepares a draft; it does not send it.")) {
-            "run" -> {}
-            "stop" -> return result("Stopped before handoff. The draft is kept here.")
-            else -> return result("Handoff skipped. The draft is kept here.")
-        }
-        if (ctx.stopped) return result("Stopped before handoff. The draft is kept here.")
-
-        if (!dest.email && dest.app?.pkg in chatApps && dest.recipient != null && phone(dest.recipient) == null) {
-            val app = dest.app!!
-            ctx.say("Opening ${app.label}…")
-            if (!ctx.open(app) || !ctx.waitUntil(5000) { ctx.foreground() == app.pkg })
-                return result("I couldn't open ${app.label}. The draft is kept here.")
-            ctx.say("Finding ${dest.recipient}…")
-            val outcome = navigate(app, dest.recipient)
-            if (ctx.stopped || outcome == Outcome.STOPPED) return result("Stopped. The draft is kept here.")
-            val screen = ctx.screen()
-            val field = bodyField(screen)
-            if (screen.pkg == app.pkg && field != null && recipientVisible(screen, dest.recipient)) {
-                ctx.say("Filling draft…")
-                if (typeBody(app, dest.recipient, field, body)) {
-                    ctx.say("Checking draft…")
-                    val readback = ctx.screen()
-                    if (readback.pkg == app.pkg && recipientVisible(readback, dest.recipient) && bodyVisible(readback, body))
-                        return result("Draft text and recipient checked in ${app.label}. Review it there and tap Send when ready; nothing was sent.")
-                }
-                return result("The draft was not confirmed in ${app.label}; existing text is replaced only with your approval. Check the recipient and text there; the original is kept here. Nothing was sent.")
-            }
-            return share(ctx, dest, body, draft)
-        }
-
-        val intent = try { when {
-            dest.email -> emailIntent(dest, written.getString("subject"), body)
-            whatsappIntent(dest, body) != null -> whatsappIntent(dest, body)!!
-            dest.app?.pkg == "com.google.android.apps.messaging" && phone(dest.recipient) != null ->
-                Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", phone(dest.recipient), null))
-                    .setPackage(dest.app.pkg).putExtra("sms_body", body)
-            else -> return share(ctx, dest, body, draft)
-        } } catch (invalid: IllegalArgumentException) {
-            return result("I couldn't prepare the email: ${invalid.message}. The draft is kept here; nothing was sent.")
-        }
-        ctx.say("Opening $target…")
-        if (!ctx.launch(intent)) return result("I couldn't open a matching composer in $target. The draft is kept here.")
-        ctx.say("Checking draft…")
-        ctx.waitUntil(3000) { dest.app == null || ctx.foreground() == dest.app.pkg }
-        val screen = ctx.screen()
-        val correctApp = dest.app == null || screen.pkg == dest.app.pkg
-        val bodyChecked = correctApp && bodyVisible(screen, body)
-        val recipientChecked = dest.recipient != null && correctApp && recipientVisible(screen, dest.recipient)
-        val subjectChecked = !dest.email || subjectVisible(screen, written.getString("subject"))
-        return result(when {
-            bodyChecked && recipientChecked && subjectChecked -> "Draft fields and recipient checked in $target. Review it there and tap Send when ready; nothing was sent."
-            bodyChecked && recipientChecked -> "The body and recipient are visible in $target; I couldn't verify the subject. Check it there before sending. Nothing was sent."
-            bodyChecked -> "Draft text is visible in $target. ${dest.recipient?.let { "Select and check $it as the recipient." } ?: "Choose a recipient."} Nothing was sent."
-            else -> "Composer handoff requested in $target. I couldn't verify the populated fields; check the recipient and text there. The original draft is kept here. Nothing was sent."
-        })
-    }
-
-    private fun share(ctx: SkillContext, dest: DraftDestination, body: String, draft: String): String {
-        if (ctx.stopped) return "$draft\n\nStopped before handoff."
-        val send = shareIntent(dest, body)
-        val intent = if (dest.app == null) Intent.createChooser(send, "Choose an app for the draft") else send
-        val target = dest.app?.label ?: "the app chooser"
-        ctx.say("Opening $target…")
-        if (!ctx.launch(intent)) return "$draft\n\n$target couldn't accept the draft. The original is kept here."
-        return "$draft\n\nDraft handoff opened in $target. ${dest.recipient?.let { "Choose and check $it as the recipient." } ?: "Choose a recipient or destination."} Text and recipient are not yet verified. Nothing was sent."
-    }
-
     private fun bodyRole(id: String, hint: String): Boolean = when {
         otherField.containsMatchIn(id) -> false
         composer.containsMatchIn(id) -> true
@@ -184,7 +99,8 @@ internal object DraftHandoff {
     private fun appNodes(screen: Screen): List<JSONObject> {
         val out = ArrayList<JSONObject>()
         fun walk(node: JSONObject) {
-            if (node.optBoolean("visible") && node.optString("package") == screen.pkg) out += node
+            if (!node.optBoolean("visible") || node.optString("package") != screen.pkg) return
+            out += node
             val children = node.optJSONArray("children") ?: return
             for (i in 0 until children.length()) walk(children.getJSONObject(i))
         }
@@ -198,21 +114,81 @@ internal object DraftHandoff {
             bodyRole(it.optString("resource_id"), it.optString("hint").ifBlank { it.optString("content_desc") }) }
     }
 
-    private fun subjectVisible(screen: Screen, subject: String) = appNodes(screen).any {
-        it.optString("text") == subject && Regex("subject", RegexOption.IGNORE_CASE)
-            .containsMatchIn(it.optString("resource_id") + " " + it.optString("hint") + " " + it.optString("content_desc"))
+    /** Exact field evidence only; app launch or a share intent is not proof of a prepared draft. */
+    internal fun preparedEvidence(screen: Screen, inputs: JSONObject): JSONObject? {
+        if (screen.pkg != inputs.optString("package")) return null
+        val nodes = appNodes(screen)
+        if (nodes.isEmpty() || Safety.isAuthPrompt(screen.pkg, nodes.map { it.optString("text") })) return null
+        val text = inputs.optString("text")
+        val body = nodes.firstOrNull { it.optBoolean("editable") && it.optString("text") == text &&
+            bodyRole(it.optString("resource_id"), it.optString("hint").ifBlank { it.optString("content_desc") }) } ?: return null
+        val recipient = inputs.optString("recipient")
+        val height = screen.state?.optJSONArray("screen")?.optInt(1) ?: return null
+        val recipients = nodes.filter { node ->
+            val top = node.optJSONArray("bounds")?.optInt(1, height) ?: height
+            top < height / 3 && fieldRoleValid(node, body = false) &&
+                node.optString("text").ifBlank { node.optString("content_desc") }.isNotBlank()
+        }
+        val header = recipients.firstOrNull { node ->
+            recipientMatches(node.optString("text").ifBlank { node.optString("content_desc") }, recipient)
+        } ?: return null
+        // Duplicate nodes for one recipient are common; additional concrete addresses/chips aren't safe.
+        if (recipients.any { additionalRecipient(it, recipient) }) return null
+        val subject = if (inputs.optString("kind") == "email") nodes.firstOrNull {
+            it.optBoolean("editable") && it.optString("text") == inputs.optString("subject") &&
+                Regex("subject", RegexOption.IGNORE_CASE).containsMatchIn(it.optString("resource_id") + " " + it.optString("hint"))
+        } ?: return null else null
+        fun field(node: JSONObject) = JSONObject().put("text", node.optString("text").ifBlank { node.optString("content_desc") })
+            .put("package", node.optString("package")).put("resource_id", node.optString("resource_id"))
+            .put("hint", node.optString("hint").ifBlank { node.optString("content_desc") }).put("editable", node.optBoolean("editable"))
+            .put("bounds", node.optJSONArray("bounds"))
+        return JSONObject().put("screen_text", nodes.map { it.optString("text").ifBlank { it.optString("content_desc") } }
+            .filter(String::isNotBlank).joinToString("\n"))
+            .put("screen_height", height).put("recipient_field", field(header)).put("body_field", field(body))
+            .put("recipient_fields", JSONArray().also { proof -> recipients.forEach { proof.put(field(it)) } })
+            .also { proof -> subject?.let { proof.put("subject_field", field(it)) } }
+    }
+
+    internal fun recipientMatches(observed: String, recipient: String): Boolean {
+        val number = phone(recipient)
+        return when {
+            number != null -> phone(observed) == number
+            address(recipient) != null -> email.findAll(observed).toList().let { matches ->
+                matches.size == 1 && matches.single().value.equals(recipient, true)
+            }
+            else -> observed.trim().removePrefix("@").equals(recipient.trim().removePrefix("@"), true)
+        }
+    }
+
+    internal fun additionalRecipient(node: JSONObject, recipient: String): Boolean {
+        val value = node.optString("text").ifBlank { node.optString("content_desc") }
+        return (email.containsMatchIn(value) || Regex("chip", RegexOption.IGNORE_CASE).containsMatchIn(node.optString("resource_id"))) &&
+            !recipientMatches(value, recipient)
+    }
+
+    internal fun fieldRoleValid(field: JSONObject, body: Boolean): Boolean = if (body)
+        field.optBoolean("editable") && bodyRole(field.optString("resource_id"), field.optString("hint"))
+        else recipientRole.containsMatchIn(field.optString("resource_id") + " " + field.optString("hint")) &&
+            !Regex("(?:^|[/_ ])(?:row|list|preview|snippet)(?:$|[_ ])", RegexOption.IGNORE_CASE).containsMatchIn(field.optString("resource_id"))
+
+    internal fun draftText(screen: Screen): String? = appNodes(screen).firstOrNull { it.optBoolean("editable") &&
+        bodyRole(it.optString("resource_id"), it.optString("hint").ifBlank { it.optString("content_desc") }) }?.optString("text")
+
+    internal fun screenProblem(screen: Screen, pkg: String): String? = when {
+        screen.pkg != pkg -> "The selected app's foreground screen wasn't verified. The saved draft is kept here."
+        appNodes(screen).isEmpty() -> "Android isn't exposing the selected app's screen to Friday. The saved draft is kept here."
+        Safety.isAuthPrompt(screen.pkg, appNodes(screen).map { it.optString("text").ifBlank { it.optString("content_desc") } }) ->
+            "Unlock the selected app to prepare the saved draft."
+        else -> null
     }
 
     internal fun recipientVisible(screen: Screen, recipient: String): Boolean {
         val height = screen.state?.optJSONArray("screen")?.optInt(1) ?: return false
-        val number = phone(recipient)
         return appNodes(screen).any { node ->
             val top = node.optJSONArray("bounds")?.optInt(1, height) ?: height
             val role = node.optString("resource_id") + " " + node.optString("hint")
             val text = node.optString("text").ifBlank { node.optString("content_desc") }
-            top < height / 3 && recipientRole.containsMatchIn(role) && if (number != null) phone(text) == number
-                else if (address(recipient) != null) email.findAll(text).any { it.value.equals(recipient, true) }
-                else text.trim().equals(recipient, true)
+            top < height / 3 && recipientRole.containsMatchIn(role) && fieldRoleValid(node, body = false) && recipientMatches(text, recipient)
         }
     }
 
@@ -221,7 +197,8 @@ internal object DraftHandoff {
         foreground != pkg -> "recipient navigation left the selected app"
         op in setOf("OPEN_APP", "HOME", "LONG_PRESS") -> "recipient navigation must stay in the selected app"
         op == "INPUT_TEXT" && (target?.editable != true || !search.containsMatchIn(target.label + " " + target.rid)) -> "only recipient search text may be entered before the chat is checked"
-        op == "CLICK" && (target == null || target.label.isBlank() || Safety.RISKY.containsMatchIn(target.label + " " + target.rid.replace('_', ' '))) -> "recipient navigation stops before a sending or unlabelled action"
+        op == "CLICK" && (target == null || target.label.isBlank() || Safety.RISKY.containsMatchIn(target.label + " " + target.rid.replace('_', ' ')) ||
+            changingAction.containsMatchIn((target.label + " " + target.rid).replace(Regex("([a-z])([A-Z])"), "$1 $2").replace(Regex("[^\\p{L}\\p{N}]+"), " "))) -> "recipient navigation stops before a changing or unlabelled action"
         else -> null
     }
 
@@ -296,8 +273,27 @@ internal object DraftHandoff {
             .put(JSONObject().put("type", 2).put("root", node("ime", "Rahul", "conversation_contact_name"))))
         val screen = Screen("com.whatsapp", emptyList(), emptyList(), state)
         check(recipientVisible(screen, "Rahul") && bodyVisible(screen, body))
+        val input = JSONObject().put("package", "com.whatsapp").put("recipient", "Rahul").put("kind", "message").put("text", body)
+        val proof = preparedEvidence(screen, input)!!
+            .put("verified", true).put("source_package", "com.whatsapp").put("capture_method", "accessibility_draft_fields")
+        proof.put("source_text_sha256", dev.layatest.agent.coordinator.DeviceCapabilities.digest(proof.getString("screen_text")))
+        val output = JSONObject(input.toString()).put("subject", "").put("prepared", true).put("sent", false)
+        val verified = dev.layatest.agent.coordinator.CapabilityResult(output = output, evidence = proof)
+        check(MessageCapabilities.verificationError("message.prepare", input, verified) == null)
+        output.put("text", "A different draft")
+        check(MessageCapabilities.verificationError("message.prepare", input, verified) != null)
+        output.put("text", body).put("sent", true)
+        check(MessageCapabilities.verificationError("message.prepare", input, verified) != null)
+        output.put("sent", false)
+        check(preparedEvidence(screen, JSONObject(input.toString()).put("kind", "email").put("subject", "Missing subject")) == null)
+        root.put("visible", false)
+        check(preparedEvidence(screen, input) == null)
+        root.put("visible", true)
+        check(!recipientMatches("alex@example.test, other@example.test", "alex@example.test"))
+        check(MessageCapabilities.inputError("message.prepare", JSONObject(input.toString()).put("kind", "email").put("subject", "Title")) != null)
         title.put("text", "Someone else")
         check(!recipientVisible(screen, "Rahul"))
+        check(preparedEvidence(screen, input) == null)
         entry.put("resource_id", "recipient_entry")
         check(!bodyVisible(screen, body))
         entry.put("resource_id", "entry").put("package", "com.android.systemui")

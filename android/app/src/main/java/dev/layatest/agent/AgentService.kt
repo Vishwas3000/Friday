@@ -376,7 +376,7 @@ class AgentService : AccessibilityService() {
                     right = a.learned?.takeIf { !a.kept }?.let { { a.keep("confirmed"); toast("Got it — I'll do it this way next time") } },
                     wrong = if (did != null) { { a.reject(); toast("Noted — I won't do it that way again") } } else null,
                     showMe = if (did != null) { { startTeaching(goal.trim()) } } else null,
-                    reply = session?.let { { reply() } })
+                    reply = { reply() })
             } catch (e: Throwable) {
                 toast("error: ${e.message}")
             } finally {

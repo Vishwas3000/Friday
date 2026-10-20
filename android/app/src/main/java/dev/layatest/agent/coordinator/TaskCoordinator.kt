@@ -410,7 +410,8 @@ object TaskCoordinator {
                 FactRecord(task.id, "step.${step.position}.output", "object", observed.output.toString(), "${step.capability}:${hash(observed.evidence.toString())}", "observed_untrusted"),
             ))
             val completed = store.dao.steps(task.id).filter { it.capability != "task.publish" && it.state == "COMPLETED" }
-            val answer = completed.joinToString("\n\n") { DeviceCapabilities.answer(it.capability, JSONObject(it.output)) }
+            val answer = completed.filter { it.capability != "text.draft" || completed.none { s -> s.capability == "message.prepare" } }
+                .map { DeviceCapabilities.answer(it.capability, JSONObject(it.output)) }.filter { it.isNotBlank() }.joinToString("\n\n")
             val proofs = JSONArray(completed.map { s -> JSONObject().put("step_id", s.id).put("capability", s.capability)
                 .put("evidence_sha256", hash(s.evidence)).put("input_bind", JSONObject(s.evidence).getString("input_bind")) })
             task.copy(answer = answer, publicationKey = "${task.id}:${task.revision}", evidence = JSONObject().put("status", "verified_steps")

@@ -44,14 +44,16 @@ private val COMMIT = setOf("call", "message", "ride", "shopping", "calendar_even
 private val ON_OFF = Regex("\\b(?:turn|switch) (on|off)\\b|\\b(enable|disable)\\b", RegexOption.IGNORE_CASE)
 
 /** The card for [request], from the rules alone; [named] is the app it names (AppResolver.named on the phone). */
-fun understand(request: String, named: (String) -> AppInfo?): TaskCard {
+fun understand(request: String, named: (String) -> AppInfo?, search: ((String) -> AppSearch?)? = null): TaskCard {
     val task = taskPart(request)
-    val skill = ruleSkill(request)
-    val app = named(request)
+    val inApp = if (search != null) search(request) else parseAppSearch(request, named)
+    val skill = if (inApp != null) "app_search" else ruleSkill(request)
+    val app = if (inApp != null) inApp.app else named(request)
     val s = Slots(task)
     val control = ON_OFF.find(request)?.groupValues?.let { g -> if (g[1].ifEmpty { g[2] }.lowercase() in setOf("on", "enable")) "on" else "off" }
     val (person, body) = if (skill == "message") messageParts(task) else null to null
     val query = when (skill) {
+        "app_search" -> inApp?.query
         "play_music", "play_video" -> mediaQuery(request, app?.label).ifEmpty { null }
         "web_search" -> searchQuery(task)
         "shopping" -> if (isTracking(task)) null else shoppingItem(task)
@@ -79,6 +81,7 @@ fun understand(request: String, named: (String) -> AppInfo?): TaskCard {
             "device_setting" -> control?.let { "switch:$it" } ?: "front"
             "device_status" -> "api"
             "navigate", "web_search" -> "front"
+            "app_search" -> "search_results"
             "calendar_event" -> "calendar_provider_readback"
             in COMMIT -> "owner"
             else -> "subject"
@@ -88,9 +91,11 @@ fun understand(request: String, named: (String) -> AppInfo?): TaskCard {
 
 /** Asserts the card for a few requests (research/23 §2 examples); wired into the "selfcheck" bridge command. */
 fun cardSelfCheck(): String {
+    check(AppResolver.selfCheck() == "ok")
     val apps = listOf(AppInfo("YouTube", "com.google.android.youtube", ""), AppInfo("GPay", "com.google.android.apps.nbu.paisa.user", ""),
-        AppInfo("Clock", "com.google.android.deskclock", ""))
-    fun card(r: String) = understand(r) { req -> apps.firstOrNull { Regex("\\b${it.label}\\b", RegexOption.IGNORE_CASE).containsMatchIn(req) } }
+        AppInfo("Clock", "com.google.android.deskclock", ""), AppInfo("Google", "com.google.android.googlequicksearchbox", ""),
+        AppInfo("Maps", "com.google.android.apps.maps", ""))
+    fun card(r: String) = understand(r, named = { AppResolver.named(it, apps) }, search = { AppResolver.search(it, apps) })
     card("open youtube and play despacito").let { check(it.skill == "play_music" && it.query == "despacito" && it.done == "playing") { "card: $it" } }
     card("show me the last 10 transactions in gpay").let {
         check(it.skill == "spend_query" && it.count == 10 && it.mode == "read" && it.risk == "money" && it.done == "amount") { "card: $it" }
@@ -100,5 +105,13 @@ fun cardSelfCheck(): String {
     card("open google maps to navigate to MG road").let { check(it.skill == "navigate" && it.place == "MG road") { "card: $it" } }
     card("set a timer for 5").let { check(it.seconds == 300 && it.clock == null && it.done == "none") { "card: $it" } }
     card("turn off dark mode").let { check(it.skill == "device_setting" && it.control == "off" && it.done == "switch:off") { "card: $it" } }
+    card("Open Google Maps").let { check(it.skill == "open_app" && it.app == "com.google.android.apps.maps") { "card: $it" } }
+    card("Search Google Maps for Cubbon Park Bengaluru").let {
+        check(it.skill == "app_search" && it.app == "com.google.android.apps.maps" &&
+            it.query == "Cubbon Park Bengaluru" && it.done == "search_results") { "card: $it" }
+    }
+    card("Search for \"Google Maps alternatives\"").let {
+        check(it.skill == "web_search" && it.app == null) { "card: $it" }
+    }
     return "ok"
 }

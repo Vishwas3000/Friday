@@ -1,8 +1,45 @@
 # Feature test coverage
 
-Updated **2026-10-20**. Living inventory for the current parallel verification round. **Fresh** means executed in this round, with a saved result and source/build identity. Measured results below are pinned to source checkpoint `c3532e6`; the installed APK SHA-256 is `d619ea0afa59f095c0f856db73fda12755be03346f4b873ee259fa33496093f1`. Remaining checks are explicitly pending or not run. Inspecting an implementation or finding a test command is not a test pass.
+Updated **2026-10-20**. Living inventory. The original round below is retained as a baseline; the migration checkpoint has its own scope. **Fresh** means executed in this round, with a saved result and source/build identity. Measured results below are pinned to source checkpoint `c3532e6`; the installed APK SHA-256 is `d619ea0afa59f095c0f856db73fda12755be03346f4b873ee259fa33496093f1`. Remaining checks are explicitly pending or not run. Inspecting an implementation or finding a test command is not a test pass.
 
 Keep these outcomes separate: **component check**, **synthetic fixture**, **live goal pass**, **assisted check**, **blocked/unavailable**, **failed**, and **not run**. A correct blocked response can pass a behavior check without completing the requested task. Keep private captures and account data out of this document.
+
+## Interpretation and shared execution checkpoint
+
+The migration after `bc3a70d` replaces the separate new-request loops with one version-two coordinator plan. Old version-one Research tasks remain resumable; the prototype hotel state is preserved read-only. No saved chat or owner data is removed.
+
+```mermaid
+flowchart LR
+    Q[Request in selected chat] --> P[Bind apps, literal values and capability graph]
+    P --> R[Save plan in Room]
+    R --> I[Resolve item and section when needed]
+    I --> A[Run registered capability]
+    A --> V[Check fresh app or native evidence]
+    V --> C[Continue dependencies and publish to original chat]
+```
+
+Implemented changes:
+
+- App resolution uses complete name spans and canonical aliases; Google Maps cannot fall through to Google. Explicit app search retains the exact query slice. Balanced message delimiter quotes are removed once, preserving inner quotes and punctuation.
+- Research prepare/submit/capture, visible message reading, summarization, draft generation and unsent composer preparation are ordinary dependent steps. App packages and recipients cannot come from model output bindings.
+- Local `intent.resolve` returns separate mode/action/target/scope/source identity. Its proof binds exact source spans and hashes. Consumers must depend on this registered resolver; a source-bound interpretation remains an untrusted semantic proposal.
+- Up to two recent published, verified data results from the selected chat are retained. App-opening confirmations do not displace research. Excerpts are explicitly recorded, bounded to 900 characters each and a shared input budget; requests for omitted choices may require clarification.
+- Scoped media execution first verifies the section, then attempts an actual item. Completion requires selected-app playback metadata/state or strict player UI/title/control plus audio evidence. A selected tab, search result, active audio alone or model DONE cannot establish playback. Nested collections and hidden player metadata can remain blocked.
+- Package checks cover intents and UI dispatch. Navigation rejects act-mode intents and changing controls. Native setting writes and mutating alarm intents use dispatch authorization at their write boundary. Uncertain writes remain inspect-before-retry.
+- The five recorded harness defects are repaired: null object sections produce structured validation errors, proven oracle failures count as behavior failures, and nonfinite timing values remain unknown.
+
+| Check in this checkpoint | Result and limit |
+|---|---|
+| Android build | `:app:assembleDebug` succeeded; APK SHA-256 `d0f5b5f25ecd172c204ca022bed6ede99884587ee631fa76600c0e63a04db4d8`. Final APK installation remains pending after Pixel disconnection. |
+| Intermediate Pixel Room/fake-driver suite | **42/42 passed**, with the four focused Research selector groups. This precedes C43–C45 and final boundary/prompt edits. |
+| Intermediate Pixel component check | **19 groups passed**, including resolver/media fixtures. No broad app acceptance is implied. |
+| Expanded coordinator fixtures | **45 cases implemented**; latest complete Android rerun pending. Isolated emulator setup stopped before execution at its disk allocation guard. |
+| Host pure Kotlin fixtures | Four resolver/action/media/app-resolution groups passed, then Card routing plus four direct exact-text cases passed separately. The observed delimiter-quote failure is covered. These use compiled classes and real JSON-java; no Room, native inference or Android actions. |
+| Host harness | **50 synthetic grader assertions passed**; all 24 manifest cases validated, with only three eligible for live opening/search. Writer harness selfcheck passed. |
+| Real local intent inference | Pixel probes still selected headings, suggestions or invalid scopes; Qwen comparisons timed out or selected invalid data. Six host runs through the production JNI and latest readable-source prompt all reached valid JSON, but only 3/6 expected routes were correct after section normalization. Two incorrect Qwen selections were initially admitted by substring matching. Replaying the same six cached outputs through the final resolver yields four correct navigation routes and two safely rejected song selections, with no incorrect accepted intent in this small set. Earlier-song selection is still unsolved. Host wall times of 1.27–2.57 s are not Pixel measurements. |
+| Live goal acceptance | Maps opening/search, exact drafting, Research → chosen-song playback, and library playback need a final-build Pixel run. No messages, purchases or bookings were sent by this checkpoint. |
+
+The current planner still selects registered capabilities through existing interpretation rules. The local resolver does not provide a general-purpose model planner, and passing source hashes does not establish semantic accuracy. The acceptance gate remains actual requested outcomes across apps, as proposed in the [AnyAppBench review](../research/43-anyappbench-paper-review.md). Earlier failures below are preserved.
 
 ## Feature matrix
 

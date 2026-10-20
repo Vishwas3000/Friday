@@ -155,6 +155,7 @@ object DeviceSetting : Skill {
         val cm = ctx.android.getSystemService(CameraManager::class.java)
         val id = cm.cameraIdList.firstOrNull { cm.getCameraCharacteristics(it).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true }
             ?: return "This phone has no flashlight"
+        if (!ctx.authorizeMutation() || ctx.stopped) return "Stopped before changing the flashlight."
         cm.setTorchMode(id, on)
         return "Flashlight ${if (on) "on" else "off"}"
     }
@@ -177,7 +178,9 @@ object DeviceSetting : Skill {
         // shortcut: linear 0-255 from a percent; the slider is perceptual (50% ~ 22), so "50%" looks brighter than the slider's 50%
         val target = Regex("(\\d{1,3}) ?%").find(r)?.let { it.groupValues[1].toInt().coerceIn(1, 100) * 255 / 100 }
             ?: if (down) maxOf(1, cur / 2) else minOf(255, cur * 2 + 16)
+        if (!ctx.authorizeMutation() || ctx.stopped) return "Stopped before changing brightness."
         Settings.System.putInt(c.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+        if (ctx.stopped) return "Stopped before setting the brightness level; the display mode may have changed."
         Settings.System.putInt(c.contentResolver, Settings.System.SCREEN_BRIGHTNESS, target)
         return "Brightness ${if (target < cur) "lowered" else "raised"}"
     }

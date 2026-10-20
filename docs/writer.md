@@ -91,3 +91,12 @@ The diagnostic bridge accepts:
 Supported kinds are `message`, `rewrite`, `email`, `title`, `query` and `summary`. The response includes a status, model identity, timings and token counts. Only an `ok` response contains `text`, or `subject` and `body` for email. The diagnostic model filename is allowlisted; arbitrary file paths are rejected.
 
 Related design and evaluation notes: [research/13](../research/13-text-llm.md), [research/31](../research/31-slm-text-generation.md), [text fixtures](../tests/writer-cases.json).
+
+
+## Internal intent resolution
+
+The coordinator can call Writer with `kind=intent`, one attempt, at most 128 output tokens and a 30-second deadline. Its constrained JSON contains `mode`, `action`, `target`, `scope` and `source_id`; source identifiers are restricted to the supplied records and `request`. It reuses the installed local runtime and weights without a new production dependency.
+
+`RequestResolver` binds literal spans and hashes to the current request or selected-chat source excerpts. The resulting object is persisted before navigation and cannot choose an app package or recipient. Sections are kept separate from text entry; unresolved or unsupported interpretations wait for input.
+
+This is experimental. Real probes have returned plausible JSON with the wrong item or scope, and Qwen comparisons have timed out. Structural validation is distinct from semantic correctness; the final readable-source prompt and scoped-media flow need Pixel acceptance. See [current coverage](FEATURE_TEST_COVERAGE.md#interpretation-and-shared-execution-checkpoint).

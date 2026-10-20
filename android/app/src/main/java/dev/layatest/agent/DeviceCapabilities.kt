@@ -3,6 +3,9 @@ package dev.layatest.agent
 import dev.layatest.agent.coordinator.CapabilityDriver
 import dev.layatest.agent.coordinator.CapabilityResult
 import dev.layatest.agent.coordinator.StepRecord
+import dev.layatest.agent.coordinator.DeviceCapabilities as Contracts
+import android.content.Intent
+import android.net.Uri
 import org.json.JSONObject
 import java.security.MessageDigest
 
@@ -11,6 +14,13 @@ internal class DeviceCapabilities(
     private val ctx: SkillContext,
     private val write: (WriterRequest) -> JSONObject,
     private val interruptedNow: () -> Boolean,
+    private val research: ResearchCapabilities,
+    private val messages: MessageCapabilities,
+    private val actions: ActionCapabilities,
+    private val typeHotelDestination: (ScreenCandidate, String) -> Boolean,
+    private val navigateHotel: (AppInfo, String, String?) -> Outcome,
+    private val navigateSearch: (AppInfo, String) -> Outcome,
+    private val inSelectedApp: (String, Boolean, () -> CapabilityResult) -> CapabilityResult,
 ) : CapabilityDriver {
     override val stopped get() = ctx.stopped
     override val interrupted get() = interruptedNow()
@@ -21,7 +31,13 @@ internal class DeviceCapabilities(
         "app.open" -> opened(inputs)
         "app.search" -> searched(inputs)
         "bills.read" -> bills(inputs)
-        else -> null
+        else -> when {
+            step.capability.startsWith("research.") -> research.inspect(step.capability, inputs)
+            step.capability in setOf("messages.read", "message.prepare") -> messages.inspect(step.capability, inputs)
+            step.capability.startsWith("hotel.") -> HotelCapabilities.inspect(ctx, step.capability, inputs)
+            step.capability in setOf("device.status", "app.navigate", "app.action") -> actions.inspect(step.capability, inputs)
+            else -> null
+        }
     }
 
     override fun execute(step: StepRecord, inputs: JSONObject, beforeDispatch: () -> Boolean): CapabilityResult {
@@ -41,13 +57,22 @@ internal class DeviceCapabilities(
                 val query = inputs.getString("query")
                 if (Safety.isMoneyApp(app.pkg)) return blocked("UNSUPPORTED", "Search text entry in money apps is unavailable.")
                 ctx.say("Searching " + app.label + " for " + query + "…")
-                for (intent in searchIntents(app.pkg, query)) {
+                val intents = searchIntents(app.pkg, query) + Intent(Intent.ACTION_VIEW,
+                    Uri.parse("https://www.google.com/search?q=" + Uri.encode(query))).setPackage(app.pkg)
+                for (intent in intents) {
                     if (!beforeDispatch() || stopped) return blocked("CANCELLED", "Stopped before searching.")
                     if (ctx.launch(intent)) {
                         var result: CapabilityResult? = null
                         ctx.waitUntil(3000) { searched(inputs).also { result = it } != null }
                         result?.let { return it }
                     }
+                }
+                if (!beforeDispatch() || stopped) return blocked("CANCELLED", "Stopped before opening the search screen.")
+                if (ctx.foreground() != app.pkg && !ctx.open(app)) return blocked("BLOCKED", "I couldn't open " + app.label + ".")
+                ctx.waitUntil(4000) { ctx.foreground() == app.pkg }
+                if (ctx.foreground() == app.pkg) {
+                    navigateSearch(app, query)
+                    searched(inputs)?.let { return it }
                 }
                 blocked("BLOCKED", "I couldn't verify search results for the exact query in " + app.label + ".")
             }
@@ -77,6 +102,7 @@ internal class DeviceCapabilities(
             "text.draft" -> {
                 if (inputs.optBoolean("verbatim")) {
                     val output = JSONObject().put("status", "ok").put("text", inputs.getString("text"))
+                    if (inputs.optString("kind") == "email") output.put("body", inputs.getString("text")).put("subject", inputs.optString("subject"))
                     CapabilityResult("COMPLETED", output, evidence(inputs, "local.writer")
                         .put("generated", false).put("capture_method", "verbatim_text"), inputs.getString("text"))
                 } else {
@@ -91,7 +117,24 @@ internal class DeviceCapabilities(
                         .put("instruction_sha256", hash(inputs.getString("instruction"))), Writer.answer(result))
                 }
             }
-            else -> blocked("UNSUPPORTED", "Friday has no registered executor for this capability.")
+            "intent.resolve" -> {
+                ctx.say("Resolving the request and references from this chat…")
+                val result = RequestResolver.resolve(inputs.getString("request"), resolverSources(inputs), write)
+                val intent = result.intent ?: return blocked("WAITING_INPUT", result.error ?: "Name the item or destination to use.")
+                CapabilityResult(output = JSONObject().put("intent", intent), evidence = evidence(inputs, "local.intent")
+                    .put("capture_method", "grounded_intent").put("intent_sha256", Contracts.digest(Contracts.canonical(intent))))
+            }
+            else -> when {
+                step.capability.startsWith("research.") -> research.execute(step.capability, inputs, beforeDispatch)
+                step.capability in setOf("messages.read", "message.prepare") -> messages.execute(step.capability, inputs, beforeDispatch)
+                step.capability.startsWith("hotel.") -> HotelCapabilities.execute(ctx, step.capability, inputs,
+                    typeHotelDestination, navigateHotel, beforeDispatch)
+                step.capability == "device.status" -> actions.execute(step.capability, inputs, beforeDispatch)
+                step.capability in setOf("app.navigate", "app.action") -> inSelectedApp(inputs.getString("package"), step.capability == "app.navigate") {
+                    actions.execute(step.capability, inputs, beforeDispatch)
+                }
+                else -> blocked("UNSUPPORTED", "Friday has no registered executor for this capability.")
+            }
         }
     }
 
@@ -100,7 +143,7 @@ internal class DeviceCapabilities(
     private fun opened(inputs: JSONObject): CapabilityResult? {
         val pkg = inputs.optString("package")
         if (pkg.isBlank() || ctx.foreground() != pkg) return null
-        return CapabilityResult("COMPLETED", JSONObject().put("package", pkg),
+        return CapabilityResult("COMPLETED", JSONObject().put("package", pkg).put("label", app(inputs)?.label),
             evidence(inputs, pkg).put("foreground_package", pkg),
             "Opened " + (app(inputs)?.label ?: "the selected app") + ". Foreground checked.")
     }
@@ -164,4 +207,9 @@ internal class DeviceCapabilities(
     private fun blocked(state: String, reason: String) = CapabilityResult(state, message = reason)
     private fun hash(value: String) = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it.toInt() and 255) }
+
+    private fun resolverSources(input: JSONObject): List<RequestResolver.Source> {
+        val sources = input.getJSONArray("sources")
+        return (0 until sources.length()).map { sources.getJSONObject(it).let { RequestResolver.Source(it.getString("id"), it.getString("text")) } }
+    }
 }

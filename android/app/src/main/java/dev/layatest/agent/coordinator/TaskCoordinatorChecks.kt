@@ -5,6 +5,9 @@ import android.os.Looper
 import android.os.SystemClock
 import dev.layatest.agent.ChatHistory
 import dev.layatest.agent.GeminiResearch
+import dev.layatest.agent.HotelCapabilities
+import dev.layatest.agent.RequestResolver
+import dev.layatest.agent.ResearchCapabilities
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -515,6 +518,223 @@ internal object TaskCoordinatorChecks {
                     unpublished(id)
                 }
             }
+            case("C36_v2_research_graph_binds_receipt_and_publishes_once") {
+                val id = createDeviceResearch()
+                val driver = FakeCapabilityDriver()
+                check(TaskCoordinator.runDevice(ctx, id, driver).state == "COMPLETED")
+                val saved = store.snapshot(id)!!
+                check(JSONObject(saved.task.payload).getInt("version") == 2 && saved.task.capability == "device")
+                check(saved.steps.map { it.capability } == listOf("research.prepare", "research.submit", "research.capture", "task.publish"))
+                check(saved.steps.all { it.state == "COMPLETED" } && driver.writes == 1 && driver.executions == 3)
+                val receipt = JSONObject(saved.steps[1].output).getJSONObject("receipt")
+                val capturedInputs = JSONObject(store.dao.attempts(id).first { it.stepId == saved.steps[2].id }.detail).getJSONObject("inputs")
+                check(capturedInputs.getJSONObject("receipt").toString() == receipt.toString())
+                check(entries(id).single().getString("answer").contains("Synthetic research answer"))
+                check(store.dao.facts(id).any { it.key == "step.2.output" && it.status == "observed_untrusted" })
+                check(TaskCoordinator.runDevice(ctx, id, driver).state == "COMPLETED" && driver.writes == 1)
+                replayPublicationCheckpoint(id)
+                check(entries(id).size == 1 && ChatHistory.activeId(ctx) == selectedChat)
+            }
+            case("C37_v2_research_rejects_changed_owner_app_hash_and_receipt") {
+                val valid = store.snapshot(createDeviceResearch())!!
+                val payload = JSONObject(valid.task.payload).put("owner_request", "A different owner question")
+                rejects { PlanValidator.validate(valid.copy(task = valid.task.copy(request = "A different owner question", payload = payload.toString()))) }
+                for (variant in listOf("wrong_app", "prompt_hash", "answer_hash", "completion_marker", "receipt")) {
+                    val id = createDeviceResearch()
+                    val driver = FakeCapabilityDriver().apply { result = { step, input -> deviceResult(step, input).also {
+                        if (variant == "receipt" && step.capability == "research.submit")
+                            it.output.getJSONObject("receipt").put("prompt_sha256", hash("a different submitted question"))
+                        if (step.capability == "research.capture") when (variant) {
+                            "wrong_app" -> it.evidence.put("source_package", "synthetic.other")
+                            "prompt_hash" -> it.evidence.put("prompt_sha256", hash("another prompt"))
+                            "answer_hash" -> it.evidence.put("answer_sha256", hash("another answer"))
+                            "completion_marker" -> it.evidence.put("completion_marker", "invalid_fixture_marker")
+                            else -> Unit
+                        }
+                    } } }
+                    check(TaskCoordinator.runDevice(ctx, id, driver).state == "BLOCKED") { variant }
+                    check(driver.writes == 1)
+                    unpublished(id)
+                }
+            }
+            case("C38_generated_draft_is_bound_to_exact_unsent_app_composer") {
+                val id = createDevice(draftSteps())
+                val driver = FakeCapabilityDriver()
+                check(TaskCoordinator.runDevice(ctx, id, driver).state == "COMPLETED")
+                val saved = store.snapshot(id)!!
+                val generated = JSONObject(saved.steps[0].output).getString("text")
+                val handoff = JSONObject(saved.steps[1].output)
+                val inputs = JSONObject(store.dao.attempts(id).first { it.stepId == saved.steps[1].id }.detail).getJSONObject("inputs")
+                check(inputs.getString("text") == generated && handoff.getString("text") == generated)
+                check(handoff.getString("recipient") == "Fixture Contact" && handoff.getBoolean("prepared") && !handoff.getBoolean("sent"))
+                check(driver.writes == 1 && entries(id).size == 1)
+            }
+            case("C39_handoff_rejects_wrong_app_recipient_hash_and_extra_recipient") {
+                for (variant in listOf("wrong_app", "wrong_recipient", "screen_hash", "extra_recipient")) {
+                    val id = createDevice(draftSteps())
+                    val driver = FakeCapabilityDriver().apply { result = { step, input -> deviceResult(step, input).also {
+                        if (step.capability == "message.prepare") when (variant) {
+                            "wrong_app" -> it.evidence.put("source_package", "synthetic.other")
+                            "screen_hash" -> it.evidence.put("source_text_sha256", hash("another screen"))
+                            "wrong_recipient" -> {
+                                it.evidence.getJSONObject("recipient_field").put("text", "Different Fixture")
+                                val screen = it.evidence.getString("screen_text") + "\nDifferent Fixture"
+                                it.evidence.put("screen_text", screen).put("source_text_sha256", hash(screen))
+                            }
+                            "extra_recipient" -> {
+                                it.evidence.getJSONArray("recipient_fields").put(messageField(input, "Different Fixture", "recipient_chip", 140))
+                                val screen = it.evidence.getString("screen_text") + "\nDifferent Fixture"
+                                it.evidence.put("screen_text", screen).put("source_text_sha256", hash(screen))
+                            }
+                        }
+                    } } }
+                    check(TaskCoordinator.runDevice(ctx, id, driver).state == "BLOCKED") { variant }
+                    check(driver.writes == 1)
+                    unpublished(id)
+                }
+            }
+            case("C40_visible_message_source_is_bound_to_summary_and_saved_as_untrusted") {
+                val id = createDevice(summarySteps())
+                var summarizedSource: String? = null
+                val driver = FakeCapabilityDriver().apply { result = { step, input -> deviceResult(step, input).also {
+                    if (step.capability == "text.draft") {
+                        summarizedSource = input.getString("text")
+                        val source = JSONObject(summarizedSource!!)
+                        check(source.getString("package") == "synthetic.messages" && source.getJSONArray("items").getString(0) == fixtureMessage)
+                        it.output.put("text", "Visible fixture text mentions CHECK-84 and 7 January 2027.")
+                    }
+                } } }
+                check(TaskCoordinator.runDevice(ctx, id, driver).state == "COMPLETED")
+                val saved = store.snapshot(id)!!
+                val read = JSONObject(saved.steps[0].output)
+                check(summarizedSource == read.getString("source") && read.getInt("count") == 1)
+                val proof = JSONObject(saved.steps[0].evidence)
+                check(proof.getString("coverage") == "visible_screen" && proof.getString("source_sha256") == hash(summarizedSource!!))
+                check(store.dao.facts(id).any { it.key == "step.0.output" && it.status == "observed_untrusted" })
+                check(driver.writes == 0 && entries(id).single().getString("answer").contains("One screen only"))
+            }
+            case("C41_bad_message_source_or_contact_never_reaches_summary") {
+                for (variant in listOf("wrong_app", "source_hash", "screen_hash", "wrong_recipient")) {
+                    val id = createDevice(summarySteps())
+                    val driver = FakeCapabilityDriver().apply { result = { step, input -> deviceResult(step, input).also {
+                        if (step.capability == "messages.read") when (variant) {
+                            "wrong_app" -> it.evidence.put("source_package", "synthetic.other")
+                            "source_hash" -> it.evidence.put("source_sha256", hash("another message source"))
+                            "screen_hash" -> it.evidence.put("source_text_sha256", hash("another screen"))
+                            "wrong_recipient" -> {
+                                it.evidence.getJSONObject("header").put("text", "Different Fixture")
+                                val screen = it.evidence.getString("screen_text") + "\nDifferent Fixture"
+                                it.evidence.put("screen_text", screen).put("source_text_sha256", hash(screen))
+                            }
+                        }
+                    } } }
+                    check(TaskCoordinator.runDevice(ctx, id, driver).state == "BLOCKED") { variant }
+                    check(driver.executions == 1 && driver.writes == 0)
+                    unpublished(id)
+                }
+            }
+            case("C42_research_recommendations_never_fill_missing_owner_stay_choices") {
+                val question = "Research a good season for hotels in Example City"
+                val origin = chat()
+                val owner = JSONObject().put("destination", "Example City")
+                val research = ResearchCapabilities.steps(ctx, origin, question)
+                val resolver = DeviceStep("hotel.resolve_inputs", JSONObject().put("package", HotelCapabilities.PACKAGE).put("owner_facts", owner),
+                    dependsOn = listOf(2), bindings = mapOf("research_answer" to OutputBinding(2, "answer")))
+                val search = DeviceStep("hotel.search", JSONObject().put("package", HotelCapabilities.PACKAGE), dependsOn = listOf(3),
+                    bindings = listOf("destination", "check_in", "check_out", "adults", "rooms", "children", "child_ages").associateWith { OutputBinding(3, it) })
+                val id = TaskCoordinator.createDevice(ctx, origin, question, research + resolver + search).also { origins[it] = origin }
+                val recommendation = "An example is 2027-11-12 to 2027-11-14, 2 adults, 1 room, 0 children. This is a recommendation, not an owner choice."
+                val driver = FakeCapabilityDriver().apply { result = { step, input ->
+                    if (step.capability == "hotel.resolve_inputs") HotelCapabilities.resolve(input)
+                    else deviceResult(step, input).also {
+                        if (step.capability == "research.capture") {
+                            it.output.put("answer", recommendation)
+                            it.evidence.put("answer_sha256", hash(recommendation))
+                        }
+                    }
+                } }
+                check(TaskCoordinator.runDevice(ctx, id, driver).state == "WAITING_INPUT")
+                val saved = store.snapshot(id)!!
+                val attempt = store.dao.attempts(id).first { it.stepId == saved.steps[3].id }
+                val detail = JSONObject(attempt.detail)
+                val candidate = detail.getJSONObject("candidate_output")
+                val missing = candidate.getJSONArray("missing_fields").let { a -> (0 until a.length()).map { a.getString(it) } }
+                check(missing.containsAll(listOf("check_in", "check_out", "adults", "rooms", "children")))
+                check(detail.getJSONObject("inputs").getString("research_answer") == recommendation)
+                check(detail.getJSONObject("inputs").getJSONObject("owner_facts").toString() == owner.toString())
+                check(listOf("check_in", "check_out", "adults", "rooms", "children").none { candidate.has(it) })
+                check(driver.executions == 4 && store.dao.attempts(id).none { it.stepId == saved.steps[4].id })
+                check(!detail.getJSONObject("candidate_evidence").getBoolean("research_used_for_choices"))
+                unpublished(id)
+            }
+            case("C43_grounded_intent_binding_survives_save_and_rejects_changed_source") {
+                val origin = chat()
+                val id = TaskCoordinator.createDevice(ctx, origin, fixtureIntentRequest, intentSteps()).also { origins[it] = origin }
+                var received: JSONObject? = null
+                val driver = FakeCapabilityDriver().apply { result = { step, input ->
+                    if (step.capability == "intent.resolve") resolvedIntentResult(input, intentAnswer())
+                    else {
+                        check(step.capability == "app.action")
+                        received = JSONObject(input.toString())
+                        CapabilityResult("BLOCKED", message = "Synthetic consumer has no live media completion oracle.")
+                    }
+                } }
+                check(TaskCoordinator.runDevice(ctx, id, driver).state == "BLOCKED")
+                val saved = store.snapshot(id)!!
+                val intent = JSONObject(saved.steps[0].output).getJSONObject("intent")
+                val actionInputs = JSONObject(store.dao.attempts(id).first { it.stepId == saved.steps[1].id }.detail).getJSONObject("inputs")
+                check(saved.steps[0].state == "COMPLETED" && driver.executions == 2 && driver.writes == 1)
+                check(received!!.getString("package") == "synthetic.media" && received!!.getString("request") == fixtureIntentRequest)
+                check(DeviceCapabilities.canonical(actionInputs.getJSONObject("intent")) == DeviceCapabilities.canonical(intent))
+                check(intent.getString("target") == "Amber Horizon" && intent.getString("source_id") == "fixture-source")
+                check(intent.getJSONObject("proof").getString("source_text_sha256") == hash(fixtureIntentSource))
+                check(RequestResolver.validate(fixtureIntentRequest, intentSources(intentInput()), intent) == null)
+                val changed = JSONObject(saved.task.payload)
+                changed.getJSONArray("steps").getJSONObject(0).getJSONObject("inputs").getJSONArray("sources").getJSONObject(0)
+                    .put("text", fixtureIntentSource + "Changed source content.")
+                store.transaction { store.dao.updateTask(saved.task.copy(payload = changed.toString())) }
+                check(TaskCoordinator.runDevice(ctx, id, driver).state == "BLOCKED")
+                check(driver.executions == 2 && driver.writes == 1)
+                check(RequestResolver.validate(fixtureIntentRequest,
+                    intentSources(changed.getJSONArray("steps").getJSONObject(0).getJSONObject("inputs")), intent) != null)
+                unpublished(id)
+            }
+            case("C44_malformed_unresolved_or_forged_intent_never_dispatches_action") {
+                for (variant in listOf("malformed", "unresolved", "missing_source", "forged_proof")) {
+                    val origin = chat()
+                    val id = TaskCoordinator.createDevice(ctx, origin, fixtureIntentRequest, intentSteps()).also { origins[it] = origin }
+                    val driver = FakeCapabilityDriver().apply { result = { step, input ->
+                        check(step.capability == "intent.resolve") { "Invalid intent reached the action driver" }
+                        val answer = intentAnswer()
+                        when (variant) {
+                            "malformed" -> answer.put("target", 7)
+                            "unresolved" -> answer.put("target", "any one of above").put("source_id", "request")
+                            "missing_source" -> answer.put("source_id", "unavailable-source")
+                        }
+                        resolvedIntentResult(input, answer).also {
+                            if (variant == "forged_proof") {
+                                val intent = it.output.getJSONObject("intent")
+                                intent.getJSONObject("proof").put("source_text_sha256", hash("a different source"))
+                                it.evidence.put("intent_sha256", DeviceCapabilities.digest(DeviceCapabilities.canonical(intent)))
+                            }
+                        }
+                    } }
+                    check(TaskCoordinator.runDevice(ctx, id, driver).state == if (variant == "forged_proof") "BLOCKED" else "WAITING_INPUT") { variant }
+                    check(driver.executions == 1 && driver.writes == 0)
+                    check(store.dao.attempts(id).none { it.stepId.endsWith(":1") })
+                    unpublished(id)
+                }
+            }
+            case("C45_selected_app_recipient_sources_and_request_cannot_be_output_bound") {
+                val origin = chat()
+                for (field in listOf("package", "recipient", "sources", "request")) {
+                    val steps = intentSteps().toMutableList()
+                    steps[1] = steps[1].copy(bindings = steps[1].bindings + (field to OutputBinding(0, "intent.target")))
+                    val error = runCatching { DevicePlanner.plan(origin, fixtureIntentRequest, steps) }.exceptionOrNull()
+                    check(error is IllegalArgumentException && error.message.orEmpty().contains("authority")) { "$field authority binding was accepted" }
+                }
+                check(store.latestForChat(origin) == null)
+            }
         }
 
         private fun chat(): String = ("coordinator_check_" + UUID.randomUUID()).also {
@@ -529,6 +749,11 @@ internal object TaskCoordinatorChecks {
         private fun createDevice(steps: List<DeviceStep>): String {
             val chat = chat()
             return TaskCoordinator.createDevice(ctx, chat, "Synthetic capability fixture", steps).also { origins[it] = chat }
+        }
+        private fun createDeviceResearch(): String {
+            val question = "Explain tides for a synthetic coordinator fixture"
+            val origin = chat()
+            return TaskCoordinator.createDevice(ctx, origin, question, ResearchCapabilities.steps(ctx, origin, question)).also { origins[it] = origin }
         }
         private fun entries(id: String) = ChatHistory.entriesAll(ctx).filter {
             it.optString("chat_id") == origins.getValue(id) && it.optString("task_id") == id
@@ -619,6 +844,49 @@ internal object TaskCoordinatorChecks {
     private fun calendarInput() = JSONObject().put("package", "com.android.providers.calendar").put("title", "Synthetic calendar check")
         .put("start_ms", 1799280000000L).put("end_ms", 1799366400000L).put("all_day", true).put("zone", "Asia/Kolkata").put("local_date", "2027-01-07")
 
+    private const val fixtureMessage = "CHECK-84: The fixture appointment is on 7 January 2027."
+    private fun draftSteps() = listOf(
+        DeviceStep("text.draft", JSONObject().put("kind", "message").put("instruction", "Write a brief synthetic fixture greeting")),
+        DeviceStep("message.prepare", JSONObject().put("package", "synthetic.messages").put("recipient", "Fixture Contact").put("kind", "message"),
+            dependsOn = listOf(0), bindings = mapOf("text" to OutputBinding(0, "text"))),
+    )
+    private fun summarySteps() = listOf(
+        DeviceStep("messages.read", JSONObject().put("package", "synthetic.messages").put("recipient", "Fixture Contact").put("limit", 1)),
+        DeviceStep("text.draft", JSONObject().put("kind", "summary").put("instruction", "Summarize the captured source without adding facts"),
+            dependsOn = listOf(0), bindings = mapOf("text" to OutputBinding(0, "source"))),
+    )
+    private fun messageField(input: JSONObject, text: String, role: String, top: Int, editable: Boolean = false) = JSONObject()
+        .put("text", text).put("package", input.getString("package")).put("resource_id", input.getString("package") + ":id/" + role)
+        .put("hint", "").put("editable", editable).put("class", if (editable) "android.widget.EditText" else "android.widget.TextView")
+        .put("bounds", JSONArray(listOf(10, top, 1000, top + 60)))
+
+    private const val fixtureIntentRequest = "play any one of above in my collection"
+    private const val fixtureIntentSource = "Verified fixture choices:\n1. Amber Horizon\n2. Quiet River\n"
+    private fun intentInput() = JSONObject().put("request", fixtureIntentRequest).put("sources", JSONArray()
+        .put(JSONObject().put("id", "fixture-source").put("text", fixtureIntentSource)))
+    private fun intentSteps() = listOf(
+        DeviceStep("intent.resolve", intentInput()),
+        DeviceStep("app.action", JSONObject().put("package", "synthetic.media").put("request", fixtureIntentRequest).put("skill", "play_music"),
+            dependsOn = listOf(0), bindings = mapOf("intent" to OutputBinding(0, "intent"))),
+    )
+    private fun intentAnswer() = JSONObject().put("status", "ok").put("mode", "act").put("action", "play")
+        .put("target", "Amber Horizon").put("scope", "my collection").put("source_id", "fixture-source")
+    private fun intentSources(input: JSONObject) = input.getJSONArray("sources").let { a -> (0 until a.length()).map { index ->
+        a.getJSONObject(index).let { RequestResolver.Source(it.getString("id"), it.getString("text")) }
+    } }
+    private fun resolvedIntentResult(input: JSONObject, answer: JSONObject): CapabilityResult {
+        val resolution = RequestResolver.resolve(input.getString("request"), intentSources(input)) { writer ->
+            check(writer.kind == "intent" && writer.instruction == input.getString("request") && writer.errors().isEmpty())
+            check(JSONArray(writer.text).getJSONObject(0).getString("text") == input.getJSONArray("sources").getJSONObject(0).getString("text"))
+            JSONObject(answer.toString())
+        }
+        val intent = resolution.intent ?: return CapabilityResult("WAITING_INPUT", message = resolution.error.orEmpty())
+        return CapabilityResult(output = JSONObject().put("intent", intent), evidence = JSONObject().put("verified", true)
+            .put("captured_at", System.currentTimeMillis()).put("input_bind", input.getString("_input_bind"))
+            .put("source_package", "local.intent").put("capture_method", "grounded_intent")
+            .put("intent_sha256", DeviceCapabilities.digest(DeviceCapabilities.canonical(intent))))
+    }
+
     private class FakeCapabilityDriver : CapabilityDriver {
         var stoppedFlag = false
         var interruptedFlag = false
@@ -638,7 +906,7 @@ internal object TaskCoordinatorChecks {
         }
         override fun execute(step: StepRecord, inputs: JSONObject, beforeDispatch: () -> Boolean): CapabilityResult {
             executions++
-            if (step.capability == "calendar.create") {
+            if (DeviceCapabilities.registry[step.capability]?.effect == "external_write") {
                 beforeWrite?.invoke()
                 if (!beforeDispatch()) return CapabilityResult("CANCELLED", message = "Dispatch refused")
                 writes++
@@ -666,6 +934,49 @@ internal object TaskCoordinatorChecks {
                 evidence.put("generated", !input.optBoolean("verbatim"))
                 if (input.optBoolean("verbatim")) evidence.put("capture_method", "verbatim_text")
                 else evidence.put("model", "synthetic_fixture").put("instruction_sha256", hash(input.getString("instruction")))
+            }
+            "research.prepare", "research.submit", "research.capture" -> {
+                val spec = GeminiResearch.specFromJson(input.getJSONObject("spec"))
+                evidence.put("source_package", Capabilities.GEMINI).put("prompt_sha256", hash(spec.prompt))
+                when (step.capability) {
+                    "research.prepare" -> {
+                        output.put("prepared", true)
+                        evidence.put("normal_chat_verified", true).put("capture_method", "normal_new_chat_readback")
+                    }
+                    "research.submit" -> {
+                        output.put("receipt", JSONObject().put("prompt_sha256", hash(spec.prompt)).put("marker", spec.marker)
+                            .put("verified_at", System.currentTimeMillis())).put("reused", false)
+                        evidence.put("exact_user_turn_verified", true).put("capture_method", "exact_user_turn_readback")
+                    }
+                    "research.capture" -> {
+                        val answer = "Synthetic research answer. No app or model was used."
+                        output.put("answer", answer)
+                        evidence.put("full_response", true).put("matching_user_turn_verified", true).put("status", "ok")
+                            .put("capture_method", "provider_copy_response").put("completion_marker", spec.marker)
+                            .put("owner_query_sha256", hash(spec.query)).put("answer_sha256", hash(answer))
+                    }
+                }
+            }
+            "message.prepare" -> {
+                val recipient = messageField(input, input.getString("recipient"), "conversation_name", 70)
+                val body = messageField(input, input.getString("text"), "compose_body", 600, editable = true)
+                val screen = input.getString("recipient") + "\n" + input.getString("text")
+                output.put("package", input.getString("package")).put("recipient", input.getString("recipient"))
+                    .put("kind", input.getString("kind")).put("text", input.getString("text")).put("subject", input.optString("subject"))
+                    .put("prepared", true).put("sent", false).put("reused", false)
+                evidence.put("capture_method", "accessibility_draft_fields").put("screen_text", screen).put("source_text_sha256", hash(screen))
+                    .put("screen_height", 1920).put("recipient_field", recipient).put("recipient_fields", JSONArray().put(recipient)).put("body_field", body)
+            }
+            "messages.read" -> {
+                val scope = "visible conversation text; requested contact header checked"
+                val source = JSONObject().put("package", input.getString("package")).put("scope", scope)
+                    .put("requested_conversation", input.getString("recipient")).put("items", JSONArray().put(fixtureMessage)).toString()
+                val screen = input.getString("recipient") + "\n" + fixtureMessage
+                output.put("package", input.getString("package")).put("source", source).put("count", 1).put("scope", scope).put("truncated", false)
+                evidence.put("capture_method", "accessibility_message_viewport").put("coverage", "visible_screen")
+                    .put("screen_text", screen).put("source_text_sha256", hash(screen)).put("source_sha256", hash(source)).put("screen_height", 1920)
+                    .put("header", messageField(input, input.getString("recipient"), "conversation_name", 70))
+                    .put("message_items", JSONArray().put(messageField(input, fixtureMessage, "message_text", 300).put("captured_text", fixtureMessage)))
             }
             "bills.read" -> {
                 val text = "Grand total due: ₹75"
