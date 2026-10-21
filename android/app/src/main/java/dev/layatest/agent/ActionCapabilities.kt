@@ -17,11 +17,13 @@ import java.util.Locale
 internal class ActionCapabilities(private val ctx: SkillContext,
                                  private val act: (String, JSONObject, () -> Boolean) -> String?) {
     fun inspect(capability: String, input: JSONObject): CapabilityResult? =
-        if (capability == "app.action" && input.optString("skill") in MediaActions.skills) MediaActions.inspect(ctx, input)
+        if (inputError(capability, input) != null) null
+        else if (capability == "app.action" && input.optString("skill") in MediaActions.skills) MediaActions.inspect(ctx, input)
         else observe(capability, input)
 
     fun execute(capability: String, input: JSONObject, beforeDispatch: () -> Boolean): CapabilityResult {
         if (ctx.stopped) return CapabilityResult("CANCELLED", message = "Stopped before the app action.")
+        inputError(capability, input)?.let { return CapabilityResult("WAITING_INPUT", message = it) }
         if (capability == "device.status") return status(input)
         if (input.getString("request") != ctx.request)
             return CapabilityResult("UNSUPPORTED", message = "The saved action differs from the owner request.")
@@ -139,11 +141,14 @@ internal class ActionCapabilities(private val ctx: SkillContext,
                 (!input.has("intent") && input.optString("goal").isBlank())) ->
                 "Which screen or tab should I open in that app?"
             capability == "app.action" && input.optString("skill") !in actionSkills -> "This app action is not registered."
+            capability == "app.action" && input.optString("skill") == "alarm_timer" && ruleSkill(input.getString("request")) != "alarm_timer" ->
+                "Please explicitly ask for an alarm, timer or reminder before I create one. A time reply alone cannot authorize an alarm."
             capability == "app.action" && input.optString("skill") in MediaActions.skills -> MediaActions.inputError(input)
             else -> null
         }
 
         fun verificationError(capability: String, input: JSONObject, result: CapabilityResult): String? {
+            inputError(capability, input)?.let { return it }
             if (capability == "app.action" && input.optString("skill") in MediaActions.skills)
                 return MediaActions.verificationError(input, result)
             if (capability == "app.navigate") navigationModeError(input)?.let { return it }
@@ -183,6 +188,15 @@ internal class ActionCapabilities(private val ctx: SkillContext,
 
         /** Pure navigation contract fixtures; no Context, dispatcher or app operation is used. */
         fun selfCheck(): String {
+            for (request in listOf("2:00 p.m. ist", "30 minutes", "Friday", "block my calendar on Friday at 2pm")) {
+                val alarm = JSONObject().put("request", request).put("package", "synthetic.clock")
+                    .put("skill", "alarm_timer").put("hour", 14).put("minute", 0)
+                check(inputError("app.action", alarm) != null)
+                val plan = dev.layatest.agent.coordinator.DevicePlanner.plan("synthetic-chat", request, "app.action", alarm)
+                check(plan.task.state == "WAITING_INPUT" && plan.steps.first().state == "WAITING_INPUT")
+            }
+            for (request in listOf("set an alarm for 2pm", "start a 30 minute timer", "remind me to call Sam in 10 minutes"))
+                check(inputError("app.action", JSONObject().put("request", request).put("skill", "alarm_timer")) == null)
             val request = "open my collection"
             val intent = JSONObject().put("mode", "navigate").put("action", "open").put("target", "")
                 .put("scope", "my collection").put("source_id", "request")

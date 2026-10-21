@@ -197,4 +197,11 @@ If provided, `assistant`, `execution` and `timing` must be JSON objects. Malform
 
 ## Current limits
 
+The 21 October [session regression](../research/41-capability-checkpoint.md#time-zone-clarification-regression)
+also covers a calendar question followed by a short time-zone reply in the same Friday chat. Keep the chat
+identity, prior task link, missing field and retained inputs in the trace. Check unintended actions even when
+the task reports `BLOCKED`: the original failure dispatched an alarm before withholding completion. The
+focused replay recorded no external dispatches and an unchanged matching calendar query; it is outside the
+24 manifest-case success totals. A calendar-only query cannot establish that no Clock alarm changed.
+
 The harness does not automate all 24 cases, control process death, scrape inaccessible apps, judge unrestricted generated prose, or reconstruct hidden account data. It provides strict outcome checks and a consistent record format for adding controlled environment runners. No training result, model-quality score, or end-to-end device acceptance follows from `--self-check` alone.

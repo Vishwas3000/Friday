@@ -88,6 +88,10 @@ event without an end time asks for a duration. The latest pending calendar reque
 its details, so a reply such as `30 minutes` can finish it. Date and zone are saved with the request to keep
 relative dates stable across a later reply. CalendarProvider readback must match the saved title, times,
 time zone and Busy status before Friday reports success; recovery checks for an existing event first.
+Time-zone clarifications accept a zone or a time with a zone and replace the saved temporal field, keeping
+the event date and purpose. The task card shows the retained calendar request alongside the reply. A failed
+field correction keeps the prior pending details for another reply. Alarm plans are checked before inspection,
+execution and verification; a stand-alone time cannot authorize an alarm, timer or reminder.
 
 Type a request in Friday and tap **Run on this phone**. `Assistant` handles it:
 1. **Route** to one of 16 skills (`Skills.kt`): keyword rules first, Laya for paraphrases, and below 0.7

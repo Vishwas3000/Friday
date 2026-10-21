@@ -34,6 +34,12 @@ internal object CalendarRequest {
     private val relativeDate = rx("\\b(day after tomorrow|today|tomorrow)\\b")
     private val weekdayDate = rx("\\b(?:(this|next|coming)\\s+)?($WEEKDAY)\\b\\.?")
     private val clock = rx("(?<![\\w:])(?:\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?m\\.?|\\d{1,2}:\\d{2})(?![\\w:])|\\b(?:noon|midnight)\\b")
+    private val zoneToken = rx("\\b(?:[A-Za-z_]+/[A-Za-z_/]+|(?:UTC|GMT)(?:[+-]\\d{1,2}(?::\\d{2})?)?|EST|EDT|PST|PDT|CST|CDT|MST|MDT|IST|JST|BST|CET|CEST|AEST|AEDT|NZST|NZDT)\\b")
+    private val namedZone = rx("\\b([a-z]+)(?:\\s+(?:standard|daylight))?\\s+time\\b")
+    private val shortZone = rx("^\\s*\\(?([a-z]{2,5})\\)?(?=\\s|$)")
+    private val localTimePhrases = setOf("block", "reserve", "start", "end", "local", "device")
+    private val timeGrammar = setOf("at", "and", "to", "until", "from", "on", "for", "named", "next", "the", "all", "with", "by", "in", "local")
+    private val timeWithZone = rx("(?:(?<time>${clock.pattern})\\s+)?(?<zone>${zoneToken.pattern}|(?:local|device)\\s+time)")
     private val duration = rx("\\bfor\\s+((?:\\d+(?:\\.\\d+)?\\s*(?:hours?|hrs?|minutes?|mins?)\\b\\s*(?:and\\s*)?)+)")
     private val durationPart = rx("(\\d+(?:\\.\\d+)?)\\s*(hours?|hrs?|minutes?|mins?)\\b")
     private val allDay = rx("\\b(?:all[ -]day|whole day|entire day)\\b")
@@ -133,23 +139,25 @@ internal object CalendarRequest {
                 return fail("The weekday does not match that date. Which one did you mean?")
         }
 
-        val zones = rx("\\b(?:[A-Za-z_]+/[A-Za-z_/]+|(?:UTC|GMT)(?:[+-]\\d{1,2}(?::\\d{2})?)?|EST|EDT|PST|PDT|CST|CDT|MST|MDT|IST|JST|BST|CET|CEST|AEST|AEDT|NZST|NZDT)\\b").findAll(fields).toList()
+        val zones = zoneToken.findAll(fields).toList()
         val localShort = day.atStartOfDay(zone).format(DateTimeFormatter.ofPattern("z", Locale.US))
+        val canCorrectZone = zoneRanges(fields).size == 1
+        val zoneQuestion = "Please confirm the event time in ${zone.id} ($localShort). " +
+            if (canCorrectZone) "Reply with $localShort to keep the requested time, or give the corrected time and zone."
+            else "Send the full corrected calendar request."
         if (zones.any { z -> !z.value.equals(zone.id, true) && !z.value.equals(localShort, true) &&
                 !runCatching { ZoneId.of(z.value.uppercase(Locale.ROOT), ZoneId.SHORT_IDS).rules == zone.rules }.getOrDefault(false) &&
                 !(z.value.equals("UTC", true) && day.atStartOfDay(zone).offset.totalSeconds == 0) })
-            return fail("I use the device time zone (${zone.id}). Please convert the requested time zone or change the device zone first.")
+            return fail(zoneQuestion, "zone".takeIf { canCorrectZone })
         fields = mask(fields, zones.map { it.range })
-        val localTimePhrases = setOf("block", "reserve", "start", "end", "local", "device")
-        val namedZone = rx("\\b([a-z]+)(?:\\s+(?:standard|daylight))?\\s+time\\b").findAll(fields)
+        val hasNamedZone = namedZone.findAll(fields)
             .any { it.groupValues[1].lowercase(Locale.ROOT) !in localTimePhrases }
-        val timeGrammar = setOf("at", "and", "to", "until", "from", "on", "for", "named", "next", "the", "all", "with", "by", "in", "local")
         val unknownShortZone = clock.findAll(fields).any { c ->
-            rx("^\\s*\\(?([a-z]{2,5})\\)?(?=\\s|$)").find(fields.substring(c.range.last + 1))
+            shortZone.find(fields.substring(c.range.last + 1))
                 ?.groupValues?.get(1)?.lowercase(Locale.ROOT)?.let { it !in timeGrammar } == true
         }
-        if (namedZone || unknownShortZone || rx("\\b(?:timezone|time zone)\\b").containsMatchIn(fields))
-            return fail("Please confirm the event times in the device time zone (${zone.id}).")
+        if (hasNamedZone || unknownShortZone || rx("\\b(?:timezone|time zone)\\b").containsMatchIn(fields))
+            return fail(zoneQuestion, "zone".takeIf { canCorrectZone })
         fields = mask(fields, rx("\\b(?:local|device)\\s+time\\b").findAll(fields).map { it.range }.toList())
 
         if (rx("\\b(?:seconds|secs)\\b|\\b\\d+(?:\\.\\d+)?\\s*(?:second|sec)\\b|\\b(?:for|and)\\s+(?:a|an|one)\\s+(?:second|sec)\\b").containsMatchIn(fields))
@@ -219,8 +227,23 @@ internal object CalendarRequest {
     /** A missing-field reply is data, never a new app instruction. The caller retains the parse reference date/zone. */
     fun continueRequest(previous: String, missing: String, answer: String): String? {
         if (!matches(previous) || answer.any(Char::isISOControl)) return null
-        val reply = answer.trim()
+        val reply = answer.trim().trimEnd('.', '!', '?').trimEnd()
         if (reply.isEmpty()) return null
+        if (missing == "zone") {
+            val replacement = timeWithZone.matchEntire(reply) ?: return null
+            val fields = mask(previous, quoted.findAll(previous).map { it.range }.toList())
+            val ranges = zoneRanges(fields)
+            if (ranges.size != 1) return null
+            val changes = mutableListOf(ranges.single() to replacement.groups["zone"]!!.value)
+            replacement.groups["time"]?.value?.let { value ->
+                if (time(value) == null) return null
+                val prior = clock.findAll(fields).singleOrNull() ?: return null
+                changes += prior.range to value
+            }
+            var corrected = previous
+            for ((range, value) in changes.sortedByDescending { it.first.first }) corrected = corrected.replaceRange(range, value)
+            return corrected
+        }
         val fragment = when (missing) {
             "end" -> {
                 val fullDuration = if (rx("^for\\s+").containsMatchIn(reply)) reply else "for $reply"
@@ -228,14 +251,20 @@ internal object CalendarRequest {
                     fullDuration
                 else {
                     val end = reply.replace(rx("^(?:until|to)\\s+"), "")
-                    if (!clock.matches(end) || time(end) == null || clock.findAll(mask(previous, quoted.findAll(previous).map { it.range }.toList())).count() != 1) return null
+                    val zoned = timeWithZone.matchEntire(end)
+                    val value = zoned?.groups?.get("time")?.value ?: end
+                    val prior = clock.findAll(mask(previous, quoted.findAll(previous).map { it.range }.toList())).singleOrNull() ?: return null
+                    if (!clock.matches(value) || time(value) == null) return null
+                    if (end == reply && time(value) == time(prior.value))
+                        return previous + zoned?.groups?.get("zone")?.value?.let { " $it" }.orEmpty()
                     "until $end"
                 }
             }
             "start" -> {
                 if (allDay.matches(reply)) reply else {
                     val start = reply.replace(rx("^(?:at|from)\\s+"), "")
-                    if (!clock.matches(start) || time(start) == null) return null
+                    val value = timeWithZone.matchEntire(start)?.groups?.get("time")?.value ?: start
+                    if (!clock.matches(value) || time(value) == null) return null
                     "at $start"
                 }
             }
@@ -254,7 +283,8 @@ internal object CalendarRequest {
     private fun title(cleaned: String, quotes: List<MatchResult>, blocked: Boolean): String? {
         if (quotes.size == 1) return quotes.single().groupValues.drop(1).firstOrNull { it.isNotBlank() }?.trim()
         if (quotes.size > 1) return null
-        val marker = rx("\\b(?:(?:called|titled|named|for)\\s+(?:(?:my|the|a|an)\\s+)?|" +
+        val marker = rx("\\b(?:(?:called|titled|named)\\s+(?:(?:my|the|a|an)\\s+)?|" +
+            "for\\s+(?!(?:on|at|from|until|to|and|or)\\b)(?:(?:my|the|a|an)\\s+)?|" +
             "to\\s+(?!(?:and|or|for|on|at|in|from|until|through|called|titled|named|using|with|next|following|overnight|all|whole|entire|block|reserve|$CALENDAR)\\b))(\\S.*)").find(cleaned)
         val selected = marker?.groupValues?.get(1) ?: if (blocked) return "Busy" else cleaned
             .replace(rx("^(?:(?:hey\\s+)?friday[, ]+)?(?:please\\s+|(?:can|could|will|would) you\\s+)*(?:schedule|create|add|make)\\s+(?:(?:a|an|the|my|new)\\s+)*(?:(?:event|appointment|meeting)\\s+)?"), "")
@@ -267,6 +297,25 @@ internal object CalendarRequest {
 
     private fun monthNumber(value: String): Int = listOf("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec").indexOf(value.take(3).lowercase(Locale.ROOT)) + 1
     private fun weekdayNumber(value: String): DayOfWeek = DayOfWeek.of(listOf("mon", "tue", "wed", "thu", "fri", "sat", "sun").indexOf(value.take(3).lowercase(Locale.ROOT)) + 1)
+    private fun zoneRanges(text: String): List<IntRange> {
+        val fields = mask(text, listOf(isoDate, monthDay, dayMonth, relativeDate, weekdayDate)
+            .flatMap { pattern -> pattern.findAll(text).map { it.range }.toList() })
+        val ranges = zoneToken.findAll(fields).map { it.range }.toMutableList()
+        ranges += namedZone.findAll(fields).filter { it.groupValues[1].lowercase(Locale.ROOT) !in localTimePhrases }.map { it.range }
+        for (c in clock.findAll(fields)) {
+            val start = c.range.last + 1
+            val match = shortZone.find(fields.substring(start)) ?: continue
+            val group = match.groups[1] ?: continue
+            if (group.value.lowercase(Locale.ROOT) !in timeGrammar) ranges += (start + group.range.first)..(start + group.range.last)
+        }
+        val merged = mutableListOf<IntRange>()
+        for (range in ranges.sortedBy { it.first }) {
+            val last = merged.lastOrNull()
+            if (last != null && overlap(last, range)) merged[merged.lastIndex] = last.first..maxOf(last.last, range.last)
+            else merged += range
+        }
+        return merged
+    }
     private fun durationMinutes(value: String): Long? = runCatching {
         durationPart.findAll(value).fold(BigDecimal.ZERO) { sum, part ->
             sum + part.groupValues[1].toBigDecimal() * if (part.groupValues[2].startsWith("h", true)) BigDecimal(60) else BigDecimal.ONE
@@ -308,6 +357,24 @@ internal object CalendarRequest {
         check(event("block my calendar tomorrow").start.toLocalDate() == today.plusDays(1))
         check(event("block my calendar today").start.toLocalDate() == today)
         val reference = LocalDate.of(2026, 10, 21)
+        val reported = "block my calendar for on Friday on 2:00 p.m. Indian time"
+        check(parse(reported, reference, zone).missing == "zone")
+        for (answer in listOf("2:00 p.m. ist", "IST", "2pm Asia/Kolkata", "2pm local time", "2:00 p.m. IST.")) {
+            val corrected = checkNotNull(continueRequest(reported, "zone", answer))
+            check(!corrected.contains("Indian time") && parse(corrected, reference, zone).missing == "end")
+            val event = checkNotNull(parse(continueRequest(corrected, "end", "30 minutes")!!, reference, zone).event)
+            check(event.title == "Busy" && event.start.toLocalDate() == LocalDate.of(2026, 10, 23) &&
+                event.start.toLocalTime() == LocalTime.of(14, 0) && event.end.toLocalTime() == LocalTime.of(14, 30))
+        }
+        check(continueRequest(reported, "zone", "2pm IST and open Clock") == null)
+        check(continueRequest(reported, "zone", "set an alarm for 2pm") == null)
+        check(continueRequest(reported, "zone", "tomorrow 2pm IST") == null)
+        check(parse("block my calendar on Friday at 2pm IST and Indian time", reference, zone).missing == null)
+        val dateAfterTime = "block my calendar at 2pm January 7 Indian time"
+        check(parse(continueRequest(dateAfterTime, "zone", "2pm IST")!!, reference, zone).missing == "end")
+        val corrected = continueRequest(reported, "zone", "2:00 p.m. ist")!!
+        check(parse(continueRequest(corrected, "end", "2:00 p.m. IST")!!, reference, zone).missing == "end")
+        check(parse(continueRequest(corrected, "end", "until 2:30pm IST")!!, reference, zone).event!!.end.toLocalTime() == LocalTime.of(14, 30))
         val natural = "block my calender on friday at 2pm to meet some one"
         check(matches(natural))
         check(parse(natural, reference, zone).let { it.error == "What end time or duration should I use?" && it.missing == "end" })

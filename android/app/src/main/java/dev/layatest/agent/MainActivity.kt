@@ -1,5 +1,7 @@
 package dev.layatest.agent
 
+import org.json.JSONObject
+
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
@@ -482,6 +484,9 @@ class MainActivity : Activity() {
         taskCard.visibility = if (snapshot == null) View.GONE else View.VISIBLE
         if (snapshot == null) return
         val task = snapshot.task
+        val calendarInputs = if (snapshot.steps.firstOrNull()?.capability == "calendar.create") runCatching {
+            JSONObject(task.payload).getJSONArray("steps").getJSONObject(0).getJSONObject("inputs")
+        }.getOrNull() else null
         val state = task.state.toString()
         val terminal = state in setOf("COMPLETED", "FAILED", "CANCELLED", "UNSUPPORTED")
         if (pending == task.request && task.createdAt >= pendingAt &&
@@ -494,13 +499,20 @@ class MainActivity : Activity() {
         }
         taskCard.addView(title)
         taskCard.addView(taskText(task.request))
+        calendarInputs?.optString("calendar_request")?.takeIf { it.isNotBlank() && it != task.request }?.let {
+            taskCard.addView(taskText("Calendar request: $it"))
+        }
         if (task.message.orEmpty().isNotBlank()) taskCard.addView(taskText(task.message.orEmpty()))
         for ((index, step) in snapshot.steps.sortedBy { it.position }.withIndex()) {
             taskCard.addView(taskText("${index + 1}. ${step.title} · ${step.state.toString().lowercase().replace('_', ' ')} · ${durationText(step.activeMs)}"))
         }
         if (!terminal && AgentService.instance?.busy != true && state in setOf("RUNNING", "VERIFYING", "WAITING_EXTERNAL", "OUTCOME_UNKNOWN"))
             taskCard.addView(taskText("Friday was interrupted. Resume checks the saved progress before continuing."))
-        if (state == "WAITING_INPUT") taskCard.addView(taskText("Enter your full request with the missing or corrected details, then tap Run."))
+        if (state == "WAITING_INPUT") {
+            val calendarReply = !calendarInputs?.optString("calendar_missing").isNullOrBlank()
+            taskCard.addView(taskText(if (calendarReply) "Reply with the missing calendar detail in this chat, then tap Run. The event details are kept."
+                else "Enter your full request with the missing or corrected details, then tap Run."))
+        }
         taskCard.addView(taskText("Recorded active time · ${durationText(task.activeMs)}"))
         if (!terminal) taskCard.addView(LinearLayout(this).apply {
             if (state !in setOf("WAITING_INPUT", "WAITING_APPROVAL")) addView(Button(this@MainActivity).apply {

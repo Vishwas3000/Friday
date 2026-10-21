@@ -105,25 +105,32 @@ internal object DevicePlans {
         var zone = ZoneId.systemDefault()
         var reference = LocalDate.now(zone)
         var priorId: String? = null
+        var previous: JSONObject? = null
+        var previousMissing: String? = null
         if (!CalendarRequest.matches(request)) {
             val prior = TaskStore.get(ctx.android).latestForChat(chatId)?.task ?: return null
             if (prior.capability != "device" || prior.state != "WAITING_INPUT") return null
             val definitions = JSONObject(prior.payload).optJSONArray("steps") ?: return null
             val saved = (0 until definitions.length()).map { definitions.getJSONObject(it) }
                 .singleOrNull { it.optString("capability") == "calendar.create" }?.optJSONObject("inputs") ?: return null
-            request = CalendarRequest.continueRequest(saved.optString("calendar_request"),
-                saved.optString("calendar_missing"), request) ?: return null
             zone = runCatching { ZoneId.of(saved.getString("calendar_zone")) }.getOrNull() ?: return null
-            reference = if (saved.optString("calendar_missing") == "date") LocalDate.now(zone)
-                else runCatching { LocalDate.parse(saved.getString("calendar_reference_date")) }.getOrNull() ?: return null
+            reference = runCatching { LocalDate.parse(saved.getString("calendar_reference_date")) }.getOrNull() ?: return null
+            previousMissing = saved.optString("calendar_missing").ifBlank {
+                CalendarRequest.parse(saved.optString("calendar_request"), reference, zone).missing.orEmpty()
+            }
+            request = CalendarRequest.continueRequest(saved.optString("calendar_request"), previousMissing, request) ?: return null
+            if (previousMissing == "date") reference = LocalDate.now(zone)
+            previous = saved
             priorId = prior.id
         }
         val parsed = CalendarRequest.parse(request, reference, zone)
         val inputs = parsed.event?.let(CalendarEvents::inputs)
             ?: JSONObject().put("validation_error", parsed.error ?: "Give the calendar event details.")
-        inputs.put("calendar_request", request).put("calendar_reference_date", reference.toString())
+        val rejectedReply = previous != null && parsed.event == null && parsed.missing == null
+        inputs.put("calendar_request", if (rejectedReply) previous!!.getString("calendar_request") else request)
+            .put("calendar_reference_date", reference.toString())
             .put("calendar_zone", zone.id)
-        parsed.missing?.let { inputs.put("calendar_missing", it) }
+        (parsed.missing ?: previousMissing.takeIf { rejectedReply })?.let { inputs.put("calendar_missing", it) }
         priorId?.let { inputs.put("calendar_continues_task_id", it) }
         return inputs
     }

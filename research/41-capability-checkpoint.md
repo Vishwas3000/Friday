@@ -101,6 +101,39 @@ device before Spotify became accessible; the new playback recovery remains unver
 also prevented a live SLM inference with the new destination envelope. Private reports stay in ignored
 `captures/reinstall-20261021/`.
 
+### Time-zone clarification regression
+
+A later selected chat exposed a missing continuation field. `block my calendar for on Friday on 2:00 p.m.
+Indian time` asked for local-zone confirmation but saved no `calendar_missing`. The reply `2:00 p.m. ist`
+therefore reached independent model routing, selected `alarm_timer`, and dispatched a Clock alarm request.
+The task eventually reported `BLOCKED`; withholding completion did not prevent the wrong action.
+
+Zone confirmation now has typed pending metadata. A reply can replace the saved zone and one start time;
+the original date and other constraints stay in the same chat. Older pending inputs without the missing-field
+key are reparsed using their saved date/zone. A semantically rejected field correction keeps the prior draft.
+Alarm contracts reject a route that has no alarm/timer/reminder request, including bare times and calendar
+requests, before inspection or dispatch. The UI shows the retained calendar request and offers a short reply
+for supported missing fields.
+
+The exact two-turn sequence was replayed through the production bridge in the same selected chat:
+
+| Turn | Observed result | Collection time |
+| --- | --- | --- |
+| Original calendar request | `WAITING_INPUT`, missing zone | 1.040 s |
+| `2:00 p.m. ist` | `WAITING_INPUT`, missing end/duration; calendar request retained | 0.552 s |
+
+Both new plans contained only `calendar.create` and `task.publish`, with zero attempts or dispatch records.
+Room readback confirmed the reply's link to the preceding task, the originating chat, 21 October reference
+date and original device zone. Independent complete before/after queries for the matching calendar title/date
+window were unchanged and empty. Focused calendar/routing and Writer/intent/media contract checks passed;
+fixtures cover the two replies, malformed corrections, repeated start time, and rejected orphan alarm plans.
+The installed APK matched SHA-256 `42b1a5839b0a972460ceb1533d2b08d7dd38ff921951679d3b3a0dbe8ee75510`.
+
+These are focused regression results, not a new full-suite acceptance result. The duration is still missing,
+so this timed event was not saved. The Pixel was locked during the attempted inspection of existing Clock
+alarms; the earlier 14:00 alarm's actual state remains unverified. Private records are in ignored
+`captures/session-alarm-20261021/`.
+
 ## Remaining acceptance work
 
 1. Expand controlled collectors for actual readable bill fixtures, text generation, draft transport, cancellation and interrupted saves. The fixture manifest alone is not device coverage.
