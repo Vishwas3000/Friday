@@ -191,8 +191,10 @@ original responses, rejection reasons, teacher-only normalization hints, repair
 prompts, raw answers and parent/source hashes in a separate directory.
 
 Only **1/48 structured repairs** passed the unchanged independent gold/source
-gate. All 16 prose repairs passed mechanical checks and require a new independent
-response-hash review. They were not promoted into this study. This result does
+gate. All 16 prose repairs passed mechanical checks and were subsequently
+individually AI-reviewed with fresh response hashes: their bodies preserved the
+original first-person inspection intention and absence of approval. All 16 were
+approved as next-stage targets. They were not promoted into this study. This result does
 not support automatic teacher rewriting as a reliable repair method. Use the
 retained rejection analysis, independently constructed gold and the separately
 prepared human-annotated dialogue data for the next experiment.
