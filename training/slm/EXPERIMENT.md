@@ -11,6 +11,10 @@ from Android app execution. It does not change the installed Writer or vision mo
   `a10cc1512eabd3dde888204e902eca88bddb4951`.
 - Environment: the rented image's Python 3.12 / PyTorch 2.14.1+cu130,
   Transformers 4.57.6 and safetensors 0.8.0 in an isolated job venv.
+- Tuning: Optuna 4.5.0, with three learning-rate trials and persistent local SQLite
+  history. Actual generated answers on a fixed synthetic validation subset select
+  the trial; validation loss selects its epoch. No frozen evaluation feedback is
+  used for tuning. Mechanical validation scores still do not establish semantics.
 - Frozen evaluation: `tests/slm-regression.json`, including the original 24
   `tests/slm-task-updates.json` cases. Evaluation prompts and expected answers are
   fixed before GPU evaluation. They never supply training labels or choose a checkpoint.
@@ -24,6 +28,10 @@ from Android app execution. It does not change the installed Writer or vision mo
 `prompts.py` defines an offline interface shared by training and evaluation.
 It is not Android prompt parity. Goal interpretation cases are research inputs;
 their outputs cannot select packages, authorize actions or claim task completion.
+
+Optuna documents [SQLite-backed study history and resumption](https://optuna.readthedocs.io/en/v4.5.0/tutorial/20_recipes/001_rdb.html).
+The experiment stores its own data, code and model hashes alongside that history;
+storing a study alone does not capture a training environment or sampler state.
 
 ## Artifact policy
 
