@@ -172,15 +172,20 @@ The selected student still fails all 29 exact high-level plans and remains weak
 on saved-task patches. Passing more JSON checks does not make it a production
 planner. Source-span variants and writing meaning need the separate AI reviews;
 financial/fitness omissions and invented facts must not be hidden by totals.
-The installed Friday models were not changed.
+The installed Friday models were not changed. The separate
+[student response review](STUDENT_REVIEW.md) accepted 13/24 writing outputs under
+AI review, compared with 18/24 mechanical passes. Several drafts copied grammar
+errors or omitted date windows, currency or qualifications.
 
 The selected FP32 safetensors weight file has SHA-256
 `fa5dfcafff5015901cde136d826c42f35b4fbe3ae2a93efe5cda48a56b8dd526`.
 The lossless model archive has 1,345,093,652 bytes and SHA-256
 `f201ddbabc201afe198bc2e1ee3cb135387bfb5b168195fb3f7b13ad0778c48a`.
 The six raw regression reports, full label/review audit, study SQLite and scripts
-were copied to ignored local captures. Model-backup completion must be verified
-against this archive checksum before relying on the local copy.
+were copied to ignored local captures. The lossless model archive was copied to
+`models/slm-pilot-20261021/` and independently verified locally: both its archive
+checksum and the decompressed safetensors checksum match the recorded values.
+Weights remain outside Git.
 
 ### Rejected-training-response correction pilot
 

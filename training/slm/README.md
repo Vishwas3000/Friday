@@ -6,11 +6,17 @@ synthetic training data, and trains a student on accepted teacher responses.
 [TEACHER_REVIEW.md](TEACHER_REVIEW.md) records interpretation and prose review limits.
 The [expanded app scenario catalogue](../../research/21-friday-use-case-catalogue.md)
 defines separate proposed device acceptance work; it is not another model score.
-[DATASETS.md](DATASETS.md) records primary online sources and two downloaded public
-train samples plus complete pinned SGD/MultiWOZ train downloads for a future grounded
-adapter stage, excluded from the current synthetic pilot. Its standard-library
-`fetch_data.py` resumes verified downloads under a 1 GB cap; raw dialogues are not
-automatically converted into the current Writer protocol.
+[DATASETS.md](DATASETS.md) records primary online sources, complete pinned
+SGD/MultiWOZ train downloads and the separate human-annotated `dialogue_state_v2`
+adapter. The full remote preparation contains **234,811 train / 25,751 validation
+rows**; the corrected independent audit passed all **260,562 rows**, including
+source/context/schema and exact SYSTEM-prompt/hash bindings. A 50,000-row local
+subset also passed independent audits. These data remain outside the current
+synthetic pilot and require a different trainer/protocol.
+[WRITING_DATA.md](WRITING_DATA.md) documents another **21,768 publisher-reference
+writing pairs**: 19,697 grammar corrections and 2,071 summaries, split into 20,617
+future train / 1,151 validation rows. Its 81,531 raw TRAIN records and filtered
+outputs remain separate; an explicit loader and writing experiment are still needed.
 
 These are **offline language experiments**. They do not change the installed
 Writer or test Android app navigation, sending, calendar writes, research collection
@@ -27,6 +33,10 @@ Friday's production prompt or constrained grammar.
 | [regression.py](regression.py) | Strict JSON, schema, source spans, normalized values, gold and writing canaries |
 | [distill.py](distill.py) | Teacher labeling, writing review gate, response-only full SFT and bounded Optuna study |
 | [probe.py](probe.py) | Separate four-case development smoke probe |
+| [fetch_data.py](fetch_data.py) | Pinned, verified SGD/MultiWOZ official TRAIN download, eight workers and a 1 GB cap |
+| [dialogue_data.py](dialogue_data.py) | Separate human-annotated `dialogue_state_v2` preparation, grouped splits and target-schema gates |
+| [verify_dialogue_data.py](verify_dialogue_data.py) | Independent standard-library reconstruction audit against the original TRAIN sources |
+| [writing_data.py](writing_data.py) | Pinned CoEdIT/DialogSum TRAIN references for a future writing loader; lexical filtering and grouped splits |
 
 Frozen evaluation never supplies labels, tunes prompts, selects a checkpoint or
 drives Optuna. Candidate train and validation use separate template/value pools;
@@ -216,6 +226,68 @@ duration, combined fields, a short message and negation. Its four cases do not r
 the full regression, use Android prompts or establish a release threshold. It
 defaults to pinned SmolLM2-360M and LFM2-350M; Qwen3 is optional.
 
+## Next stage: human-annotated dialogue state
+
+This preparation step uses the standard library and original human annotations.
+Run from the repo root, keeping the complete source download and prepared data
+under ignored `out/`:
+
+```sh
+python3 training/slm/fetch_data.py --self-check
+python3 -u training/slm/fetch_data.py \
+  --output-dir training/slm/out/external-full --workers 8
+python3 training/slm/dialogue_data.py --self-check
+python3 -u training/slm/dialogue_data.py \
+  --sources training/slm/out/external-full \
+  --out training/slm/out/dialogue-v2-full --max-rows 300000
+python3 training/slm/verify_dialogue_data.py --self-check
+python3 -u training/slm/verify_dialogue_data.py \
+  --sources training/slm/out/external-full \
+  --prepared training/slm/out/dialogue-v2-full
+```
+
+Use a fresh output directory; existing prepared data is never overwritten. The
+300,000 cap selects available compatible rows rather than inventing more examples.
+For the audited smaller subset, use `--max-rows 50000` with
+`--out training/slm/out/dialogue-v2-final`. Every current USER frame receives the
+same before-turn state snapshot; dialogue groups stay within one split. Duplicate
+and conflicting inputs, undeclared target names and invalid categorical values
+are dropped without rewriting annotations.
+
+The full remote preparation has **260,562 rows**, totaling **1,377,559,875 JSONL
+bytes**. Its corrected independent audit passed with zero schema/enum, annotation,
+context or overlap violations, with source-manifest/adapter hashes and every
+SYSTEM prompt bound to the recorded adapter. The full files remain remote;
+verified metadata is backed up under ignored `out/dialogue-v2-full-metadata/`.
+Retain the data on storage with enough space before recycling the remote disk.
+The verifier uses normal Python without `-O` and writes `independent-check.json`.
+
+The output predicts full service state from a schema, prior annotated states and
+the latest SYSTEM/USER utterances. It is not accepted by `distill.py` or the current
+Android Writer. No v2 student has been trained or installed by this preparation
+step. [DATASETS.md](DATASETS.md#human-annotated-dialogue-state-next-stage-data)
+records measured counts, full manifest/report hashes, exclusions and rollout/token limits.
+
+## Next stage: writing references
+
+The separate [writing data guide](WRITING_DATA.md) records sources, exact hashes and
+filters for **21,768 publisher-reference pairs**. It contains 19,697 grammatical
+corrections and 2,071 summaries, rather than teacher-generated targets. From the
+repo root:
+
+```sh
+python3 training/slm/writing_data.py --self-check
+python3 training/slm/writing_data.py --fetch
+```
+
+The prepared directory must be empty; the default is
+`training/slm/out/writing-external/prepared/`. Its 20,617/1,151 source-grouped
+train/validation split is for a future writing loader and experiment. No new model
+has been trained on these rows. Lexical filters and publisher provenance do not
+establish semantic accuracy; retain those limits during future sample review and
+evaluation. These rows are separate from `dialogue_state_v2` and the current
+pilot's teacher-label manifest format.
+
 ## Artifacts and backup
 
 Commit source, original synthetic fixtures, commands and sanitized measured
@@ -223,10 +295,10 @@ summaries. Keep weights, `.hf/`, generated data, raw responses, review decisions
 SQLite files in ignored `out/`, local `captures/` or `models/`. Never commit device
 transcripts, contacts, credentials or instance connection details.
 
-Before destroying/recycling the instance, copy data/label manifests, raw label
-batches, reviews, study files, training/regression reports and the selected full
-checkpoint off the rented disk. Put reports in local ignored captures and weights
-in ignored models; verify file hashes against the job manifests. Cache can be
+Before destroying/recycling the instance, copy source/prepared data manifests and
+notices, raw label batches, reviews, study files, training/regression reports and
+the selected full checkpoint off the rented disk. Put reports in local ignored
+captures and weights in ignored models; verify file hashes against the job manifests. Cache can be
 downloaded again from pinned revisions; trained weights and audit artifacts need
 backup. `/workspace` is persistent only when an actual persistent host volume is
 mounted—check the instance guide and capabilities rather than assuming it survives.

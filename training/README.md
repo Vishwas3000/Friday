@@ -66,9 +66,20 @@ RTX 4090, separate from Laya navigation training and Android app acceptance.
 The [expanded app scenarios](../research/21-friday-use-case-catalogue.md) include
 follow-up context, media, spending, holdings, activity, notes and task modifications.
 The [dataset research](slm/DATASETS.md) pins external dialogue/tool/UI sources and
-records 24,579 downloaded SGD/MultiWOZ train dialogues for later grounded adaptation,
-outside this pilot. `training/slm/fetch_data.py` reproduces the verified train-only
-download with a 1 GB cap; source dialogues require a separate protocol adapter.
+records 24,579 downloaded SGD/MultiWOZ train dialogues, outside this pilot.
+`training/slm/fetch_data.py` reproduces the verified train-only download with a
+1 GB cap. The separate `dialogue_data.py` adapter has prepared **234,811 train /
+25,751 validation rows** remotely for `dialogue_state_v2`; the corrected independent
+audit passed all **260,562 rows**, including source/context/schema checks and exact
+prompt/hash bindings. A local 50,000-row subset also passed independent audits.
+Preparation and standard-library `verify_dialogue_data.py` commands, source/schema
+gates and exact hashes are documented there. This new protocol still requires its
+own trainer and Android integration.
+The separate [writing dataset guide](slm/WRITING_DATA.md) records 81,531 downloaded
+publisher TRAIN records and **21,768 filtered writing pairs** (19,697 grammar
+corrections / 2,071 summaries), split into **20,617 future train / 1,151 validation**.
+Those references need an explicit future loader and writing experiment; they have
+not been used in the completed pilot or a new model training run.
 
 | Step | What runs |
 |---|---|
