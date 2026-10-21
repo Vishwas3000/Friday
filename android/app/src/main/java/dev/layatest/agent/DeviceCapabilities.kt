@@ -3,6 +3,8 @@ package dev.layatest.agent
 import dev.layatest.agent.coordinator.CapabilityDriver
 import dev.layatest.agent.coordinator.CapabilityResult
 import dev.layatest.agent.coordinator.StepRecord
+import dev.layatest.agent.coordinator.TaskCoordinator
+import dev.layatest.agent.coordinator.TaskStore
 import dev.layatest.agent.coordinator.DeviceCapabilities as Contracts
 import android.content.Intent
 import android.net.Uri
@@ -44,6 +46,15 @@ internal class DeviceCapabilities(
     override fun execute(step: StepRecord, inputs: JSONObject, beforeDispatch: () -> Boolean): CapabilityResult {
         if (stopped) return blocked("CANCELLED", "Stopped before the next action.")
         return when (step.capability) {
+            "input.clarify" -> {
+                inputs.optString("cancel_task_id").takeIf(String::isNotBlank)?.let { id ->
+                    val target = TaskStore.get(ctx.android).dao.task(id)
+                    if (!TaskInputContext.cancels(ctx.request) || target?.chatId != inputs.optString("chat_id") || id == step.taskId)
+                        return blocked("BLOCKED", "The pending task could not be cancelled in this chat.")
+                    TaskCoordinator.cancel(ctx.android, id)
+                }
+                blocked(inputs.getString("state"), inputs.getString("question"))
+            }
             "calendar.create" -> CalendarEvents.execute(ctx, inputs, step.taskId, beforeDispatch)
             "app.open" -> {
                 val app = app(inputs) ?: return blocked("UNSUPPORTED", "The selected app is not installed.")

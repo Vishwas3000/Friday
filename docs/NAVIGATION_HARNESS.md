@@ -197,6 +197,14 @@ If provided, `assistant`, `execution` and `timing` must be JSON objects. Malform
 
 ## Current limits
 
+Focused pending-input checks run on the connected device with `{"cmd":"task_input_selfcheck"}`. They use
+synthetic owner turns and never execute app actions. Coverage includes multi-field calendar replies, failed
+turn recovery, source-span validation, new/cancelled/completed task boundaries, chat isolation, selected-app
+search continuation, resource failures and refusal to rebuild an uncertain external write. These are component
+checks outside the 24-case goal-success denominator. `{"cmd":"writer","action":"selfcheck"}` also runs them.
+Live replay must separately confirm saved context, attempts/dispatches and the destination's state. See the
+[shared-input checkpoint](../research/41-capability-checkpoint.md#shared-pending-input-context) for measured results.
+
 The 21 October [session regression](../research/41-capability-checkpoint.md#time-zone-clarification-regression)
 also covers a calendar question followed by a short time-zone reply in the same Friday chat. Keep the chat
 identity, prior task link, missing field and retained inputs in the trace. Check unintended actions even when

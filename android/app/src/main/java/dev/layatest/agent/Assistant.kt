@@ -83,12 +83,12 @@ class Assistant(private val svc: AgentService, override val request: String, pri
             banner.say("Understanding…")
             val resumingDevice = resumeTaskId?.let { TaskCoordinator.isDeviceTask(svc, it) } == true
             val legacyResearch = resumeTaskId != null && !resumingDevice
-            val calendar = if (!research && resumeTaskId == null) DevicePlans.calendarInputs(this, chatId) else null
-            val reading = if (!research && calendar == null) ReadMessages.requestFrom(request, apps.installed) else null
-            val draft = if (!research && calendar == null && reading == null) Writer.requestFrom(taskPart(request)) else null
             val geminiResearch = research || (card.app == "com.google.android.apps.bard" &&
                 Regex("\\b(?:research|search|ask|find|plan|look up)\\b", RegexOption.IGNORE_CASE).containsMatchIn(request))
-            if (resumeTaskId == null && !geminiResearch && calendar == null && draft == null && reading == null && card.skill == null)
+            val intake = if (!geminiResearch && resumeTaskId == null) TaskIntake.prepare(this, chatId, ::generateDraft) else null
+            val reading = if (!geminiResearch && intake == null) ReadMessages.requestFrom(request, apps.installed) else null
+            val draft = if (!geminiResearch && intake == null && reading == null) Writer.requestFrom(taskPart(request)) else null
+            if (resumeTaskId == null && !geminiResearch && intake == null && draft == null && reading == null && card.skill == null)
                 card = card.copy(skill = route(request, { laya }) { q, options -> ask(q, options) })
             trace += "card: ${card.json()}"
             val result = if (stopped) null else if (legacyResearch) {
@@ -99,7 +99,7 @@ class Assistant(private val svc: AgentService, override val request: String, pri
                 }
             } else {
                 val id = resumeTaskId ?: TaskCoordinator.createDevice(svc, chatId, request,
-                    DevicePlans.from(this, draft, chatId, geminiResearch, calendar))
+                    intake ?: DevicePlans.from(this, draft, chatId, geminiResearch), SystemClock.elapsedRealtime() - t0)
                 durableTaskId = id
                 trace += "route: saved coordinator plan $id"
                 TaskCoordinator.runDevice(svc, id, capabilities(), log = { trace += it }).answer
@@ -157,7 +157,11 @@ class Assistant(private val svc: AgentService, override val request: String, pri
     }
 
     private fun generateDraft(draft: WriterRequest): JSONObject {
-        banner.say(if (draft.kind == "intent") "Resolving the request and chat references…" else "Writing a draft…")
+        banner.say(when (draft.kind) {
+            "intent" -> "Resolving the request and chat references…"
+            "task_update" -> "Understanding your reply…"
+            else -> "Writing a draft…"
+        })
         val written = svc.write(draft) { stopped }
         val memory = if (written.has("memory_available_bytes")) " [memory available ${written.optLong("memory_available_bytes") / 1048576} MiB, " +
             "required ${written.optLong("memory_required_bytes") / 1048576} MiB, threshold ${written.optLong("memory_threshold_bytes") / 1048576} MiB, " +

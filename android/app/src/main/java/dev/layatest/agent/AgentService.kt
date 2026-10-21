@@ -113,6 +113,7 @@ class AgentService : AccessibilityService() {
             .put("gemini_research", GeminiResearch.selfCheck()).put("hotel", HotelSearch.selfCheck())
             .put("calendar", CalendarEvents.selfCheck())
         "calendar_selfcheck" -> JSONObject().put("calendar", CalendarEvents.selfCheck()).put("routing", routingSelfCheck())
+        "task_input_selfcheck" -> JSONObject().put("task_inputs", TaskIntakeChecks.run())
         "calendar_observe" -> CalendarEvents.observe(this, c.getString("title"), c.getLong("from_ms"), c.getLong("until_ms"))
         "workflow_state" -> JSONObject().put("research", ResearchWorkflow.state(this) ?: JSONObject.NULL)
         "coordinator_selfcheck" -> TaskCoordinatorChecks.run(this)

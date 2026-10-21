@@ -21,6 +21,7 @@ internal object CalendarRequest {
     )
 
     data class Result(val event: Event? = null, val error: String? = null, val missing: String? = null)
+    data class Captured(val fields: Map<String, TaskInputContext.Value>, val error: String? = null)
 
     private fun rx(value: String) = Regex(value, RegexOption.IGNORE_CASE)
     private const val CALENDAR = "cal(?:endar|ender|ander)"
@@ -39,7 +40,6 @@ internal object CalendarRequest {
     private val shortZone = rx("^\\s*\\(?([a-z]{2,5})\\)?(?=\\s|$)")
     private val localTimePhrases = setOf("block", "reserve", "start", "end", "local", "device")
     private val timeGrammar = setOf("at", "and", "to", "until", "from", "on", "for", "named", "next", "the", "all", "with", "by", "in", "local")
-    private val timeWithZone = rx("(?:(?<time>${clock.pattern})\\s+)?(?<zone>${zoneToken.pattern}|(?:local|device)\\s+time)")
     private val duration = rx("\\bfor\\s+((?:\\d+(?:\\.\\d+)?\\s*(?:hours?|hrs?|minutes?|mins?)\\b\\s*(?:and\\s*)?)+)")
     private val durationPart = rx("(\\d+(?:\\.\\d+)?)\\s*(hours?|hrs?|minutes?|mins?)\\b")
     private val allDay = rx("\\b(?:all[ -]day|whole day|entire day)\\b")
@@ -61,20 +61,102 @@ internal object CalendarRequest {
                 (block.containsMatchIn(text) || creation.containsMatchIn(text)))
     }
 
+    fun mentionsCalendar(request: String) = rx("\\b$CALENDAR\\b").containsMatchIn(request) &&
+        !rx("^(?:write|draft|compose|message|text|send|e-?mail|search|google|look up|research|summari[sz]e)\\b").containsMatchIn(request.trim())
+
+    fun constraintError(request: String): String? {
+        val fields = mask(request, quoted.findAll(request).map { it.range }.toList())
+        return when {
+            unsaved.containsMatchIn(fields) -> "I haven't saved an event. Please confirm when you want me to create it; calendar previews are not supported yet."
+            recurrence.containsMatchIn(fields) -> "Please create this as a single event, or specify a recurrence after recurrence support is available."
+            rx("\\b(?:except|excluding|unless|not all[ -]day|not the whole day)\\b").containsMatchIn(fields) -> "Please clarify the requested exception before I create the event."
+            rx("\\b(?:remind(?:er)?|notify|notification|attendees?|invite|guests?|location|address)\\b").containsMatchIn(fields) -> "I need to clarify the requested reminder, location or attendees before creating this event."
+            rx("\\b(?:work|personal|shared|family)\\s+$CALENDAR\\b|[\\w.+-]+@[\\w.-]+\\.[a-z]{2,}").containsMatchIn(fields) -> "Which calendar account should I use? Selecting a named account is not supported yet."
+            else -> null
+        }
+    }
+
+    /** Collect every supplied field before validation asks about any missing field. */
+    fun capture(source: TaskInputContext.Source, missing: Set<String> = emptySet(), knownStart: String? = null): Captured {
+        val text = source.text
+        val result = linkedMapOf<String, TaskInputContext.Value>()
+        var error: String? = null
+        val quotes = quoted.findAll(text).toList()
+        var fields = mask(text, quotes.map { it.range })
+        val action = if (matches(text)) rx("\\b(?:block|reserve|schedule|create|add|make)\\b").find(fields) else null
+        action?.let { result["action"] = TaskInputContext.value(source, it.range, if (block.containsMatchIn(fields)) "block" else "create") }
+        if (action != null && rx("^(?:(?:hey\\s+)?friday[, ]+)").containsMatchIn(fields))
+            fields = mask(fields, listOf(0 until action.range.first))
+        val dates = listOf(isoDate, monthDay, dayMonth, relativeDate, weekdayDate).flatMap { it.findAll(fields).map { m -> m.range }.toList() }
+        if (dates.isNotEmpty()) {
+            val range = dates.minOf { it.first }..dates.maxOf { it.last }
+            val raw = text.substring(range)
+            val parsed = parse("block my calendar on $raw", source.date, source.zone)
+            if (parsed.event?.allDay == true) result["date"] = TaskInputContext.value(source, range, parsed.event.start.toLocalDate().toString())
+            else error = parsed.error
+            fields = mask(fields, dates)
+        }
+        if (rx("\\b\\d{1,4}[/\\-]\\d{1,2}(?:[/\\-]\\d{1,4})?\\b").containsMatchIn(fields))
+            error = "Please write numeric dates as YYYY-MM-DD, or spell out the month. Earlier details are kept."
+        val durations = duration.findAll(fields).toList()
+        val bareText = fields.trim().trimEnd('.', '!', '?')
+        val bare = bareText.takeIf { missing.any { it in setOf("end", "duration") } }?.let { duration.matchEntire("for $it") }
+        if (durations.size > 1 || (durations + listOfNotNull(bare)).any {
+                durationMinutes(it.value)?.let { n -> n > 0 } != true || rx("\\band\\s*$").containsMatchIn(it.value)
+            }) error = "Please give one positive duration in whole minutes."
+        if (durations.size == 1) durationMinutes(durations.single().value)?.takeIf { it > 0 }?.let {
+            result["duration"] = TaskInputContext.value(source, durations.single().range, it.toString())
+        } else if (durations.isEmpty() && bare != null && durationMinutes(bare.value)?.let { it > 0 } == true) {
+            val first = text.indexOf(bareText)
+            result["duration"] = TaskInputContext.value(source, first until first + bareText.length, durationMinutes(bare.value)!!.toString())
+        }
+        fields = mask(fields, durations.map { it.range })
+        val clocks = clock.findAll(fields).toList()
+        if (clocks.size > 2 || clocks.any { time(it.value) == null }) error = "Please give one valid start time and one end time."
+        if (clocks.size in 1..2) clocks.forEachIndexed { index, match ->
+            val normalized = time(match.value)?.toString() ?: return@forEachIndexed
+            val before = fields.substring(0, match.range.first)
+            val explicitEnd = rx("\\b(?:until|to|ends?(?: at)?)\\s*$").containsMatchIn(before)
+            val explicitStart = rx("\\b(?:at|from|starts?(?: at)?)\\s*$").containsMatchIn(before)
+            val end = index == 1 || explicitEnd || (clocks.size == 1 && dates.isEmpty() && "end" in missing &&
+                !explicitStart && normalized != knownStart)
+            result[if (end) "end" else "start"] = TaskInputContext.value(source, match.range, normalized)
+        }
+        val zones = zoneRanges(fields)
+        if (zones.size > 1) error = "Please specify one event time zone."
+        if (zones.size == 1) result["zone"] = TaskInputContext.value(source, zones.single())
+        allDay.find(fields)?.let { result["all_day"] = TaskInputContext.value(source, it.range, "true") }
+        rx("\\b(?:next day|following day|overnight)\\b").find(fields)?.let {
+            result["overnight"] = TaskInputContext.value(source, it.range, "true")
+        }
+        val cleaned = mask(fields, clocks.map { it.range } + zones)
+        if (rx("\\b(?:and|then|also)\\s+(.+)").findAll(cleaned).any { ruleSkill(it.groupValues[1]) != null })
+            error = "This reply includes another action. Please finish the calendar details and give the additional action as a separate request."
+        if (rx("\\b(?:at|from|between|starting(?: at)?)\\s+\\d").containsMatchIn(cleaned))
+            error = "Please give each time with AM/PM or 24-hour HH:mm notation."
+        if (rx("\\bseconds?\\b|\\bsecs?\\b").containsMatchIn(fields))
+            error = "Calendar durations currently support whole minutes. Please give a duration without seconds."
+        if (quotes.size > 1 || rx("\\b(?:not|never|without|don['’]t|do not)\\b").containsMatchIn(cleaned))
+            error = "Please restate the corrected event details before I save the event. Earlier details are kept."
+        val name = if (quotes.size == 1) quotes.single().groups.drop(1).firstOrNull { it != null }?.let { group ->
+            group?.let { it.value to it.range }
+        } else {
+            title(cleaned, emptyList(), true)?.takeIf { it != "Busy" && !TaskInputContext.referencesPrevious(it) }
+                ?.let { value -> text.indexOf(value).takeIf { it >= 0 }?.let { value to (it until it + value.length) } }
+        }
+        name?.let { result["title"] = TaskInputContext.value(source, it.second) }
+        if ("title" in missing && result.isEmpty() && !TaskInputContext.referencesPrevious(text) && ruleSkill(text) == null)
+            result["title"] = TaskInputContext.value(source, text.indices)
+        return Captured(result, error)
+    }
+
     fun parse(request: String, today: LocalDate = LocalDate.now(), zone: ZoneId = ZoneId.systemDefault()): Result {
         if (!matches(request)) return Result()
         val text = request.trim().replace('–', '-').replace('—', '-')
         val quotes = quoted.findAll(text).toList()
         var fields = mask(text, quotes.map { it.range })
         fun fail(message: String, missing: String? = null) = Result(error = message, missing = missing)
-        if (unsaved.containsMatchIn(fields)) return fail("I haven't saved an event. Please confirm when you want me to create it; calendar previews are not supported yet.")
-        if (recurrence.containsMatchIn(fields)) return fail("Please create this as a single event, or specify a recurrence after recurrence support is available.")
-        if (rx("\\b(?:except|excluding|unless|not all[ -]day|not the whole day)\\b").containsMatchIn(fields))
-            return fail("Please clarify the requested exception before I create the event.")
-        if (rx("\\b(?:remind(?:er)?|notify|notification|attendees?|invite|guests?|location|address)\\b").containsMatchIn(fields))
-            return fail("I need to clarify the requested reminder, location or attendees before creating this event.")
-        if (rx("\\b(?:work|personal|shared|family)\\s+$CALENDAR\\b|[\\w.+-]+@[\\w.-]+\\.[a-z]{2,}").containsMatchIn(fields))
-            return fail("Which calendar account should I use? Selecting a named account is not supported yet.")
+        constraintError(text)?.let { return fail(it) }
 
         data class DateField(val value: LocalDate, val range: IntRange, val inferred: Boolean)
         val dates = mutableListOf<DateField>()
@@ -224,62 +306,6 @@ internal object CalendarRequest {
         }
     }
 
-    /** A missing-field reply is data, never a new app instruction. The caller retains the parse reference date/zone. */
-    fun continueRequest(previous: String, missing: String, answer: String): String? {
-        if (!matches(previous) || answer.any(Char::isISOControl)) return null
-        val reply = answer.trim().trimEnd('.', '!', '?').trimEnd()
-        if (reply.isEmpty()) return null
-        if (missing == "zone") {
-            val replacement = timeWithZone.matchEntire(reply) ?: return null
-            val fields = mask(previous, quoted.findAll(previous).map { it.range }.toList())
-            val ranges = zoneRanges(fields)
-            if (ranges.size != 1) return null
-            val changes = mutableListOf(ranges.single() to replacement.groups["zone"]!!.value)
-            replacement.groups["time"]?.value?.let { value ->
-                if (time(value) == null) return null
-                val prior = clock.findAll(fields).singleOrNull() ?: return null
-                changes += prior.range to value
-            }
-            var corrected = previous
-            for ((range, value) in changes.sortedByDescending { it.first.first }) corrected = corrected.replaceRange(range, value)
-            return corrected
-        }
-        val fragment = when (missing) {
-            "end" -> {
-                val fullDuration = if (rx("^for\\s+").containsMatchIn(reply)) reply else "for $reply"
-                if (duration.matches(fullDuration) && !rx("\\band\\s*$").containsMatchIn(reply) && (durationMinutes(fullDuration) ?: 0) > 0)
-                    fullDuration
-                else {
-                    val end = reply.replace(rx("^(?:until|to)\\s+"), "")
-                    val zoned = timeWithZone.matchEntire(end)
-                    val value = zoned?.groups?.get("time")?.value ?: end
-                    val prior = clock.findAll(mask(previous, quoted.findAll(previous).map { it.range }.toList())).singleOrNull() ?: return null
-                    if (!clock.matches(value) || time(value) == null) return null
-                    if (end == reply && time(value) == time(prior.value))
-                        return previous + zoned?.groups?.get("zone")?.value?.let { " $it" }.orEmpty()
-                    "until $end"
-                }
-            }
-            "start" -> {
-                if (allDay.matches(reply)) reply else {
-                    val start = reply.replace(rx("^(?:at|from)\\s+"), "")
-                    val value = timeWithZone.matchEntire(start)?.groups?.get("time")?.value ?: start
-                    if (!clock.matches(value) || time(value) == null) return null
-                    "at $start"
-                }
-            }
-            "date" -> {
-                val date = reply.replace(rx("^on\\s+"), "")
-                if (!isoDate.matches(date) && !monthDay.matches(date) && !dayMonth.matches(date) &&
-                    !relativeDate.matches(date) && !weekdayDate.matches(date)) return null
-                "on $date"
-            }
-            "title" -> if (quoted.matches(reply)) "called $reply" else return null
-            else -> return null
-        }
-        return "$previous $fragment"
-    }
-
     private fun title(cleaned: String, quotes: List<MatchResult>, blocked: Boolean): String? {
         if (quotes.size == 1) return quotes.single().groupValues.drop(1).firstOrNull { it.isNotBlank() }?.trim()
         if (quotes.size > 1) return null
@@ -359,22 +385,7 @@ internal object CalendarRequest {
         val reference = LocalDate.of(2026, 10, 21)
         val reported = "block my calendar for on Friday on 2:00 p.m. Indian time"
         check(parse(reported, reference, zone).missing == "zone")
-        for (answer in listOf("2:00 p.m. ist", "IST", "2pm Asia/Kolkata", "2pm local time", "2:00 p.m. IST.")) {
-            val corrected = checkNotNull(continueRequest(reported, "zone", answer))
-            check(!corrected.contains("Indian time") && parse(corrected, reference, zone).missing == "end")
-            val event = checkNotNull(parse(continueRequest(corrected, "end", "30 minutes")!!, reference, zone).event)
-            check(event.title == "Busy" && event.start.toLocalDate() == LocalDate.of(2026, 10, 23) &&
-                event.start.toLocalTime() == LocalTime.of(14, 0) && event.end.toLocalTime() == LocalTime.of(14, 30))
-        }
-        check(continueRequest(reported, "zone", "2pm IST and open Clock") == null)
-        check(continueRequest(reported, "zone", "set an alarm for 2pm") == null)
-        check(continueRequest(reported, "zone", "tomorrow 2pm IST") == null)
         check(parse("block my calendar on Friday at 2pm IST and Indian time", reference, zone).missing == null)
-        val dateAfterTime = "block my calendar at 2pm January 7 Indian time"
-        check(parse(continueRequest(dateAfterTime, "zone", "2pm IST")!!, reference, zone).missing == "end")
-        val corrected = continueRequest(reported, "zone", "2:00 p.m. ist")!!
-        check(parse(continueRequest(corrected, "end", "2:00 p.m. IST")!!, reference, zone).missing == "end")
-        check(parse(continueRequest(corrected, "end", "until 2:30pm IST")!!, reference, zone).event!!.end.toLocalTime() == LocalTime.of(14, 30))
         val natural = "block my calender on friday at 2pm to meet some one"
         check(matches(natural))
         check(parse(natural, reference, zone).let { it.error == "What end time or duration should I use?" && it.missing == "end" })
@@ -388,24 +399,6 @@ internal object CalendarRequest {
         check(parse("block my calendar on Friday and Saturday at 2pm for 30 minutes", reference, zone).event == null)
         check(parse("block my calendar next Friday at 2pm for 30 minutes", reference, zone).event!!.start.toLocalDate() == meeting.start.toLocalDate())
         check(parse("block my calendar on Friday at 2pm for 30 minutes", LocalDate.of(2026, 12, 31), zone).event!!.start.toLocalDate() == LocalDate.of(2027, 1, 1))
-        for (answer in listOf("30 minutes", "for 30 minutes", "until 2:30pm", "to 14:30")) {
-            val continued = continueRequest(natural, "end", answer)!!
-            check(continued.startsWith(natural + " ") && parse(continued, reference, zone).event == meeting)
-        }
-        for (answer in listOf("open YouTube", "30 minutes and open WhatsApp", "until 2:30pm and tomorrow", "1 hour and", "0 minutes", "2"))
-            check(continueRequest(natural, "end", answer) == null)
-        val noDate = "block my calendar at 2pm to meet some one for 30 minutes"
-        check(parse(noDate, reference, zone).missing == "date")
-        check(parse(continueRequest(noDate, "date", "Friday")!!, reference, zone).event == meeting)
-        check(continueRequest(noDate, "date", "Friday and Saturday") == null)
-        val noStart = "block my calendar on Friday to meet some one for 30 minutes"
-        check(parse(noStart, reference, zone).missing == "start")
-        check(parse(continueRequest(noStart, "start", "at 2pm")!!, reference, zone).event == meeting)
-        check(parse(continueRequest("create an event called QA on Friday", "start", "all day")!!, reference, zone).event!!.allDay)
-        val noTitle = "create an event on Friday at 2pm for 30 minutes"
-        check(parse(noTitle, reference, zone).missing == "title")
-        check(parse(continueRequest(noTitle, "title", "\"QA meeting\"")!!, reference, zone).event!!.title == "QA meeting")
-        check(continueRequest(noTitle, "title", "open WhatsApp") == null)
         check(parse("block my calendar on 01/07/2027", reference, zone).missing == null)
         check(parse("$natural but do not save yet", reference, zone).missing == null)
         check(parse("block my calendar on January 7 and Friday at 2pm for 30 minutes", reference, zone).event == null)

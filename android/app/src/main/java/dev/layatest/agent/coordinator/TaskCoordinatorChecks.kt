@@ -735,6 +735,19 @@ internal object TaskCoordinatorChecks {
                 }
                 check(store.latestForChat(origin) == null)
             }
+            case("C46_input_preparation_time_survives_waiting_without_dispatch") {
+                val origin = chat()
+                val id = TaskCoordinator.createDevice(ctx, origin, "Synthetic input timing fixture", listOf(
+                    DeviceStep("calendar.create", JSONObject().put("validation_error", "Give a duration."))), preparationMs = 123)
+                    .also { origins[it] = origin }
+                val saved = store.snapshot(id)!!
+                check(saved.task.activeMs == 123L)
+                check(saved.events.single { it.kind == "INPUT_PREPARED" }.durationMs == 123L)
+                val driver = FakeCapabilityDriver()
+                check(TaskCoordinator.runDevice(ctx, id, driver).state == "WAITING_INPUT")
+                check(store.dao.task(id)!!.activeMs == 123L && driver.executions == 0 && driver.inspections == 0)
+                unpublished(id)
+            }
         }
 
         private fun chat(): String = ("coordinator_check_" + UUID.randomUUID()).also {

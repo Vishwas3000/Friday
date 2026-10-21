@@ -40,6 +40,9 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE chatId = :chatId AND deleted = 0 ORDER BY createdAt DESC, id DESC LIMIT 1")
     fun latestForChat(chatId: String): TaskRecord?
 
+    @Query("SELECT * FROM tasks WHERE chatId = :chatId AND deleted = 0 ORDER BY createdAt DESC, id DESC LIMIT :limit")
+    fun recentForChat(chatId: String, limit: Int): List<TaskRecord>
+
     @Query("SELECT * FROM tasks WHERE deleted = 0 AND state NOT IN ('COMPLETED', 'CANCELLED', 'FAILED', 'UNSUPPORTED') ORDER BY createdAt, id")
     fun recoverableTasks(): List<TaskRecord>
 

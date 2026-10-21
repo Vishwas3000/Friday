@@ -534,3 +534,41 @@ The phone was unplugged, so these are the first runs to make. The official Andro
 - https://arxiv.org/abs/2606.30790 (Indi-RomCoM)
 - https://arxiv.org/abs/2411.02538 (MILU)
 - https://huggingface.co/datasets/facebook/Multi-IF
+
+## 21 October follow-up: smaller task interpreter and distillation
+
+The installed Writer remains LFM2.5-1.2B QAD-Q4_0. Its structured-context experiment was rejected before
+inference with about 1.03 GB available against the existing 1.5 GB memory requirement. Native calendar
+context recovery worked independently. Lowering that guard without profiling would not establish a safe
+memory budget.
+
+Candidates to benchmark; none has been installed or trained in this checkpoint:
+
+| Candidate | Proposed Friday role | Primary evidence / limit |
+| --- | --- | --- |
+| [FunctionGemma 270M](https://ai.google.dev/gemma/docs/functiongemma) | Interpret bounded task fields and propose registered calls | Specialized function caller; intended for task-specific fine-tuning rather than direct dialogue. Its prompt/call format differs from Friday's current Writer template. |
+| [SmolLM2-360M-Instruct](https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct) | Short English message rewriting/drafting baseline | Small general text model, Apache 2.0. The publisher's function-calling claim specifically concerns its 1.7B variant; 360M task-call quality needs its own evaluation. |
+| [LFM2-350M](https://huggingface.co/LiquidAI/LFM2-350M) | Smaller LFM-family text baseline | Edge-oriented 350M model, under Liquid's license. Friday's draft fidelity and template/runtime compatibility remain unmeasured. |
+
+Google publishes a [Mobile Actions tuning recipe](https://ai.google.dev/gemma/docs/mobile-actions).
+Its [FunctionGemma model card](https://huggingface.co/google/functiongemma-270m-it) reports Mobile Actions
+accuracy improving from 58% to 85% after specialization. Its dynamic-int8 mobile build used 551 MB peak RSS
+on a Samsung S25 Ultra with 1024 context length. These are vendor measurements on another device/task set;
+they are not Friday acceptance results or Pixel memory/latency estimates.
+
+Recommended experiment:
+
+1. Benchmark unchanged candidates on held-out Friday task updates and short-message cases before training.
+2. Use a stronger teacher to produce synthetic context/reply/validated-patch examples, covering multiple
+   supplied fields, corrections, references, new tasks, cancellation, ambiguity and negation. Keep owner
+   records private and use reviewed/redacted examples only. Evaluate complete field values and source spans.
+3. Distill into the smallest student that passes: supervised fine-tuning on teacher outputs, initially with
+   LoRA. Tune interpretation and prose separately so their quality can be compared independently. A 4090 is
+   a plausible development target for these small students; actual training memory/time requires a pilot.
+4. Merge adapters, quantize, then rerun semantic tests: training adapts behavior, while quantization reduces
+   weight storage. Neither removes KV-cache/runtime costs or the need for calibrated admission checks.
+5. Measure cold/warm latency, peak RSS, unsupported-input behavior and task completion on the Pixel with
+   the coordinator held fixed. Keep validation, app authority and verified completion in Kotlin.
+
+Start with FunctionGemma for the field-update role and SmolLM2/LFM2 for prose. This is a proposed comparison,
+not a model replacement or completed distillation run.

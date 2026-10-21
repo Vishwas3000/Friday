@@ -83,23 +83,36 @@ a visible navigation label uses a local label match and preserves the requested 
 Other interpretations keep the model path. Memory admission failures produce a blocked resource error, rather
 than asking the owner to repeat already supplied task details.
 
-Calendar requests bypass model routing. A weekday resolves against the device date and time zone; a timed
-event without an end time asks for a duration. The latest pending calendar request in the selected chat keeps
-its details, so a reply such as `30 minutes` can finish it. Date and zone are saved with the request to keep
-relative dates stable across a later reply. CalendarProvider readback must match the saved title, times,
-time zone and Busy status before Friday reports success; recovery checks for an existing event first.
-Time-zone clarifications accept a zone or a time with a zone and replace the saved temporal field, keeping
-the event date and purpose. The task card shows the retained calendar request alongside the reply. A failed
-field correction keeps the prior pending details for another reply. Alarm plans are checked before inspection,
-execution and verification; a stand-alone time cannot authorize an alarm, timer or reminder.
+`TaskIntake` restores a pending task **before routing**. Its local Room plan stores the goal, owner turns,
+typed fields with exact source spans, pending question and previous-task link. This currently serves calendar
+creation and missing search text in an already selected app. It collects multiple supplied fields from one
+reply; failed/unpublished owner turns also remain available in that chat. Completed/cancelled tasks and other
+chats do not supply pending inputs. A clear new goal starts separately. Published app answers retain their
+existing, separate provenance.
+
+Calendar weekdays resolve against each source turn's saved date and time zone. Country time phrases can use
+Android's country/zone data when the country has one set of zone rules; ambiguous zones require clarification.
+A timed event still needs an end time or duration. CalendarProvider readback must match the saved fields and
+Busy status before completion. An uncertain dispatched write requires reconciliation instead of a fresh write.
+The task card shows the retained goal and supplied fields. Unsupported constraints stay blocked; restate a full
+corrected event to replace them. A stand-alone time cannot authorize an alarm, timer or reminder.
+
+Clear replies use native field decoders. Ambiguous continuations can request one local Writer `task_update`
+call (192 tokens, 20 seconds): a schema-limited field patch quoting exact current-owner text. Native checks
+reject unknown fields, invented spans, invalid types and contradictions with explicit decoded values. Writer
+cannot select an app or authorize an action. Resource/validation failures preserve the draft. Model-derived
+normalizations remain marked in the saved fields; these checks do not prove arbitrary-language interpretation.
 
 Type a request in Friday and tap **Run on this phone**. `Assistant` handles it:
-1. **Route** to one of 16 skills (`Skills.kt`): keyword rules first, Laya for paraphrases, and below 0.7
-   confidence Friday asks "do you want me to…".
-2. **Skill** (`PhoneSkills.kt`; Media / People & places in progress; anything else → `GenericSkill`): slots by
-   rule (`Slots.kt`), app from the catalog + your remembered pick (`AppResolver.kt`, D-027), then the cheapest
-   way to do it — an API answer, a direct intent, or Laya on the narrowest screen (D-028).
-3. **Answer** card with the result. A banner shows progress with **Stop**.
+
+1. Recover pending owner inputs in the selected chat; resolve supported field replies before model routing.
+2. For fresh requests, select a registered capability using native interpretation, Writer or the existing skill router.
+3. Save typed steps and bindings through `DevicePlanner` before app operations.
+4. Execute through the coordinator using platform APIs, app intents or Laya navigation; verify each result before its dependencies continue.
+5. Publish a verified answer to the originating chat, or show the pending question/resource/access failure. The banner provides progress and **Stop**.
+
+Recorded active time includes input interpretation/context recovery (`INPUT_PREPARED`) and attempted steps;
+idle waiting for an owner reply is excluded. Bridge polling wall time is a separate measurement.
 
 Laya loads on demand and can prewarm while a recognized navigation request is being typed (D-030).
 Laya and icon model sessions unload after **three idle minutes**; active tasks keep their sessions. Android

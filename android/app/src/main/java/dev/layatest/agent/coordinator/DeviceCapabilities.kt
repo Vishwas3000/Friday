@@ -44,6 +44,7 @@ internal object DeviceCapabilities {
         Capability("app.search", "Search selected app", "navigation", "app.exact_search_results", 30000),
         Capability("text.draft", "Generate requested text", "local_compute", "writer.generated_text", 90000),
         Capability("intent.resolve", "Resolve the request and chat references", "local_compute", "intent.grounded_source_spans", 35000),
+        Capability("input.clarify", "Keep task details for your reply", "local_compute", "input.pending_only", 5000),
         Capability("research.prepare", "Prepare normal Gemini chat", "navigation", "gemini.normal_blank", 15000),
         Capability("research.submit", "Submit saved research question", "external_write", "gemini.exact_user_turn", 15000),
         Capability("research.capture", "Collect the complete research answer", "read", "gemini.full_response_footer", 300000),
@@ -69,6 +70,8 @@ internal object DeviceCapabilities {
             (!string(input, "package") || !Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+").matches(input.getString("package"))))
             return "Which installed app or provider should I use?"
         return when (capability) {
+            "input.clarify" -> if (string(input, "question") && input.optString("state") in setOf("WAITING_INPUT", "BLOCKED", "CANCELLED")) null
+                else "A pending task needs a question and an explicit state."
             "research.prepare", "research.submit", "research.capture" -> ResearchCapabilities.inputError(capability, input)
             "intent.resolve" -> RequestResolver.inputError(input)
             "messages.read", "message.prepare" -> MessageCapabilities.inputError(capability, input)

@@ -134,6 +134,60 @@ so this timed event was not saved. The Pixel was locked during the attempted ins
 alarms; the earlier 14:00 alarm's actual state remains unverified. Private records are in ignored
 `captures/session-alarm-20261021/`.
 
+## Shared pending-input context
+
+The next session exposed another input failure: an initial calendar-domain turn was misrouted, a later
+request referred to the "above task", and a reply supplied date, time and time zone together. The owner
+turns existed in Room but had never been published to chat history. The former single-field continuation
+could not combine them and fell through to independent routing. The alarm authority guard prevented dispatch.
+
+`TaskIntake` now runs before routing. `TaskInputContext` is saved in typed plan inputs, with chat ownership,
+the original goal, bounded owner sources, exact source spans, normalized fields, decoder provenance, pending
+question and prior-task link. Calendar creation and missing search text in an already selected app use it.
+Failed/unpublished turns can seed a legacy calendar draft; completed/cancelled tasks and other chats are
+boundaries. The old calendar-only command-string continuation was removed. No database schema migration or
+new dependency is required.
+
+Clear replies collect every field before validation. Ambiguous replies can use one constrained local Writer
+`task_update` call. Its output cannot select an app, authorize an action or introduce unknown fields/source
+text. Type/span/native-consistency checks run before merging. Model-derived normalizations remain predictions;
+they need held-out semantic evaluation. Resource failures retain the draft. Any earlier dispatched external
+write stops fresh execution and requests reconciliation. Unsupported calendar constraints require a full
+corrected request. Other capability families still need migration to this input context.
+
+Focused Pixel component checks cover the three-turn regression, multi-field updates and corrections, time-zone
+aliases, missing title, invalid/ambiguous dates and times, duration conflicts, unsupported constraints, scoped
+search continuation, new/cancelled/completed task boundaries, chat isolation, exact-span validation, model
+failure and uncertain-write refusal. These fixtures create no actual events, alarms, messages or searches.
+Calendar/routing and Writer/media checks passed independently as well.
+
+The current chat's date/time/zone reply was replayed through the production entry point. Friday retained
+23 October 2026 at 14:00 India time and asked only for end time/duration in **2.682 seconds** of bridge wall
+time, including polling. The saved plan contained only `calendar.create` and `task.publish`, both with zero
+attempts. A matching before/after calendar query was unchanged. This proves input recovery and refusal to
+write an incomplete event; the timed event remains unsaved because no duration is present in the captured
+owner turns. Raw evidence stays in ignored `captures/task-context-20261021/`.
+
+The actual local Writer patch test was rejected before inference with `memory_pressure`: 1,029,713,920 bytes
+available, 1,500,000,000 required. There is no live generation-quality result for the new patch prompt.
+Synthetic patch validation passed. `INPUT_PREPARED` now records context/interpretation time, and recorded
+task active time includes that work in addition to step attempts.
+
+The owner subsequently supplied the missing duration in the same chat. That task completed with one calendar
+attempt and one publication attempt, recording **11.205 seconds** of active execution (11.179 seconds in the
+calendar step and 0.026 seconds publishing). An independent complete CalendarProvider query confirmed one
+matching Busy event on **23 October 2026, 14:00–14:30 India time**. The event remains saved. No harness input
+or extra task replay was used for that completion. It occurred before the final timing revision; no
+interpretation-stage duration is present for it. This individual owner task is outside suite acceptance totals.
+After the final reinstall, focused context/calendar/Writer/media checks and **46 synthetic coordinator checks**
+passed. The coordinator checks include persistence of preparation time while awaiting input without dispatch.
+A second incomplete replay was intentionally stopped because the latest owner task had already completed.
+The final installed APK matched SHA-256 `5e385f4e64af9723474e853ca831ec52a51d667c6444594fa8b3c0f187a5830a`.
+
+The owner's run recorded 10.950 seconds from calendar-attempt creation to the dispatch gate, then 0.032 seconds
+to provider readback. Permission checks, calendar selection and the existing-event query are not separately
+instrumented in that interval, so the delay cannot be assigned to any one of them. No SLM inference was used.
+
 ## Remaining acceptance work
 
 1. Expand controlled collectors for actual readable bill fixtures, text generation, draft transport, cancellation and interrupted saves. The fixture manifest alone is not device coverage.

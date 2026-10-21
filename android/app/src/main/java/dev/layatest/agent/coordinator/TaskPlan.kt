@@ -2,6 +2,7 @@ package dev.layatest.agent.coordinator
 
 import android.content.Context
 import dev.layatest.agent.GeminiResearch
+import dev.layatest.agent.TaskInputContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -101,7 +102,7 @@ internal object PlanValidator {
             val inputs = definition.getJSONObject("inputs")
             val bindings = definition.getJSONObject("bindings")
             bindings.keys().forEach { target ->
-                require(target !in setOf("package", "destination_app", "spec", "request", "sources", "recipient", "validation_error", "_input_bind")) { "App, recipient and research authority cannot come from observed app/model output" }
+                require(target !in setOf("package", "destination_app", "spec", "request", "sources", "recipient", "validation_error", "_input_bind", TaskInputContext.KEY)) { "App, recipient and research authority cannot come from observed app/model output" }
                 val source = bindings.getJSONObject(target)
                 require(source.getString("step_id") in dependencies)
                 if (target == "intent") {
@@ -118,6 +119,13 @@ internal object PlanValidator {
                 require(Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*").matches(source.getString("field")))
             }
             require(!inputs.has("_input_bind"))
+            inputs.optJSONObject(TaskInputContext.KEY)?.let {
+                val context = TaskInputContext.decode(it, task.chatId)
+                require(context.sources.any { source -> source.text == task.request }) { "The current owner turn is absent from its context" }
+                if (step.capability == "app.search") require(context.packageName == inputs.optString("package")) { "The selected search app changed" }
+            }
+            if (inputs.has("cancel_task_id")) require(step.capability == "input.clarify" &&
+                inputs.optString("chat_id") == task.chatId && TaskInputContext.cancels(task.request))
             require(!inputs.has("intent")) { "An interpreted app intent needs a verified resolver dependency" }
             if (step.capability in setOf("intent.resolve", "app.action", "app.navigate", "device.status"))
                 require(inputs.getString("request") == task.request) { "Saved action differs from the owner request" }

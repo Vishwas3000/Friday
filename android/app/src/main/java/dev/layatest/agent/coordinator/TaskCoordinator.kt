@@ -47,14 +47,17 @@ object TaskCoordinator {
     internal fun createDevice(ctx: Context, chatId: String, request: String, capability: String, inputs: JSONObject): String =
         createDevice(ctx, chatId, request, listOf(DeviceStep(capability, inputs)))
 
-    internal fun createDevice(ctx: Context, chatId: String, request: String, steps: List<DeviceStep>): String = synchronized(lock) {
+    internal fun createDevice(ctx: Context, chatId: String, request: String, steps: List<DeviceStep>, preparationMs: Long = 0): String = synchronized(lock) {
+        require(preparationMs >= 0)
         val plan = DevicePlanner.plan(chatId, request, steps)
+        val task = plan.task.copy(activeMs = preparationMs)
         val store = TaskStore.get(ctx)
         store.transaction {
-            store.dao.insertTask(plan.task)
+            store.dao.insertTask(task)
             store.dao.insertSteps(plan.steps)
             store.dao.upsertFacts(listOf(FactRecord(plan.task.id, "owner.request", "text", request, "owner_request", "supplied")))
-            event(store, plan.task, null, "PLAN_SAVED", plan.task.state, plan.task.message)
+            event(store, task, null, "PLAN_SAVED", task.state, task.message)
+            event(store, task, null, "INPUT_PREPARED", task.state, "Request interpretation and context recovery", duration = preparationMs)
         }
         plan.task.id
     }

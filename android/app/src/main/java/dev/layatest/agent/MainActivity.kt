@@ -484,9 +484,12 @@ class MainActivity : Activity() {
         taskCard.visibility = if (snapshot == null) View.GONE else View.VISIBLE
         if (snapshot == null) return
         val task = snapshot.task
-        val calendarInputs = if (snapshot.steps.firstOrNull()?.capability == "calendar.create") runCatching {
+        val savedInputs = runCatching {
             JSONObject(task.payload).getJSONArray("steps").getJSONObject(0).getJSONObject("inputs")
-        }.getOrNull() else null
+        }.getOrNull()
+        val inputContext = savedInputs?.optJSONObject(TaskInputContext.KEY)?.let {
+            runCatching { TaskInputContext.decode(it, task.chatId) }.getOrNull()
+        }
         val state = task.state.toString()
         val terminal = state in setOf("COMPLETED", "FAILED", "CANCELLED", "UNSUPPORTED")
         if (pending == task.request && task.createdAt >= pendingAt &&
@@ -499,8 +502,16 @@ class MainActivity : Activity() {
         }
         taskCard.addView(title)
         taskCard.addView(taskText(task.request))
-        calendarInputs?.optString("calendar_request")?.takeIf { it.isNotBlank() && it != task.request }?.let {
-            taskCard.addView(taskText("Calendar request: $it"))
+        (inputContext?.goal ?: savedInputs?.optString("calendar_request"))?.takeIf { it.isNotBlank() && it != task.request }?.let {
+            taskCard.addView(taskText("Task: $it"))
+        }
+        inputContext?.values?.takeIf { it.isNotEmpty() }?.let { values ->
+            val labels = mapOf("date" to "Date", "start" to "Start", "end" to "End", "duration" to "Duration",
+                "zone" to "Time zone", "title" to "Title", "query" to "Search", "all_day" to "All day")
+            val details = values.filterKeys { it in labels }.entries.joinToString(" · ") { (key, value) ->
+                "${labels.getValue(key)}: ${value.text}"
+            }
+            if (details.isNotBlank()) taskCard.addView(taskText("Kept details: $details"))
         }
         if (task.message.orEmpty().isNotBlank()) taskCard.addView(taskText(task.message.orEmpty()))
         for ((index, step) in snapshot.steps.sortedBy { it.position }.withIndex()) {
@@ -509,8 +520,8 @@ class MainActivity : Activity() {
         if (!terminal && AgentService.instance?.busy != true && state in setOf("RUNNING", "VERIFYING", "WAITING_EXTERNAL", "OUTCOME_UNKNOWN"))
             taskCard.addView(taskText("Friday was interrupted. Resume checks the saved progress before continuing."))
         if (state == "WAITING_INPUT") {
-            val calendarReply = !calendarInputs?.optString("calendar_missing").isNullOrBlank()
-            taskCard.addView(taskText(if (calendarReply) "Reply with the missing calendar detail in this chat, then tap Run. The event details are kept."
+            val kept = inputContext != null || !savedInputs?.optString("calendar_missing").isNullOrBlank()
+            taskCard.addView(taskText(if (kept) "Reply with the missing details in this chat, then tap Run. Earlier details are kept."
                 else "Enter your full request with the missing or corrected details, then tap Run."))
         }
         taskCard.addView(taskText("Recorded active time · ${durationText(task.activeMs)}"))
