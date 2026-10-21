@@ -70,6 +70,25 @@ nothing to pool. The bridge is one thread.
 ## The assistant (D-024)
 
 The current build also routes supported device requests through the persistent coordinator: native calendar creation, visible bill reading, app opening/search and standalone text drafting. It passes 35 synthetic coordinator checks and 19 component groups on the Pixel. Calendar access is an owner-controlled runtime permission; the saved event is checked through CalendarProvider. Unreadable app screens produce a blocked/unverified result. See the [capability checkpoint](../research/41-capability-checkpoint.md) and [evaluation harness](NAVIGATION_HARNESS.md) for test scope and remaining gaps. Earlier Research measurements below describe that separate acceptance sequence.
+
+Interpreted app requests pass the selected app's package and label separately from content sources. The local
+interpreter cannot change that destination or use its name as an unquoted current-request item. The saved
+interpretation binds this identity for recovery. Rejected model fields and a diagnostic code remain only in the
+private failed-attempt record, marked unverified; they cannot authorize the next step.
+Scoped media navigation first matches an exact visible control, ignoring possessives and accessibility tab-position
+announcements. It dismisses a visible keyboard when needed and checks the selected destination after tapping.
+Opening a library alone does not verify playback; the existing item, app, and playback-state checks still apply.
+New interpreted plans open the selected app before resolving the request. A complete request that uniquely matches
+a visible navigation label uses a local label match and preserves the requested action without loading Writer.
+Other interpretations keep the model path. Memory admission failures produce a blocked resource error, rather
+than asking the owner to repeat already supplied task details.
+
+Calendar requests bypass model routing. A weekday resolves against the device date and time zone; a timed
+event without an end time asks for a duration. The latest pending calendar request in the selected chat keeps
+its details, so a reply such as `30 minutes` can finish it. Date and zone are saved with the request to keep
+relative dates stable across a later reply. CalendarProvider readback must match the saved title, times,
+time zone and Busy status before Friday reports success; recovery checks for an existing event first.
+
 Type a request in Friday and tap **Run on this phone**. `Assistant` handles it:
 1. **Route** to one of 16 skills (`Skills.kt`): keyword rules first, Laya for paraphrases, and below 0.7
    confidence Friday asks "do you want me to…".

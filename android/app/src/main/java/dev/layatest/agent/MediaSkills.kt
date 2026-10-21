@@ -10,6 +10,7 @@ import android.media.session.PlaybackState
 import android.net.Uri
 import android.provider.MediaStore
 import android.view.KeyEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import java.util.Locale
 import dev.layatest.agent.coordinator.CapabilityResult
 import dev.layatest.agent.coordinator.DeviceCapabilities as Contracts
@@ -36,7 +37,9 @@ internal object MediaActions {
     private val transportKeys = setOf(KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_STOP,
         KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_MEDIA_PREVIOUS)
     private fun normalized(text: String) = text.trim().replace(Regex("\\s+"), " ").lowercase(Locale.ROOT)
-    private fun scopeName(text: String) = normalized(text).replace(Regex("^(?:my|your|our|the)\\s+"), "")
+    private val tabPosition = Regex(",\\s*tab\\s+\\d+\\s+of\\s+\\d+$", RegexOption.IGNORE_CASE)
+    private fun scopeName(text: String) = normalized(text).replace(tabPosition, "")
+        .replace(Regex("^(?:my|your|our|the)\\s+"), "")
     private fun plays(intent: JSONObject) = normalized(intent.optString("action")) in playActions
     private fun key(input: JSONObject) = mediaKey(input.optString("request"), input.optString("app_label").ifBlank { null })
     private fun digest(intent: JSONObject) = Contracts.digest(Contracts.canonical(intent))
@@ -56,9 +59,13 @@ internal object MediaActions {
     }
 
     /** Keep action, scope and target distinct; no raw request is converted into search text. */
-    fun goal(intent: JSONObject): String = "In the selected app, " + intent.getString("action") +
+    fun goal(intent: JSONObject, skill: String? = null): String = "In the selected app, " + intent.getString("action") +
         (intent.optString("target").takeIf { it.isNotBlank() }?.let { " the exact item named " + JSONObject.quote(it) }
-            ?: if (plays(intent)) " one actual visible playable item" else "") +
+            ?: if (plays(intent)) when (skill) {
+                "play_music" -> " one actual visible audio track or song"
+                "play_video" -> " one actual visible video"
+                else -> " one actual visible playable item"
+            } else "") +
         intent.optString("scope").takeIf { it.isNotBlank() }?.let { " within the section or collection " + JSONObject.quote(it) }.orEmpty() +
         ". Do not substitute another item or leave the selected app."
 
@@ -103,26 +110,89 @@ internal object MediaActions {
                 if (!gate()) return cancelled()
                 if (ctx.foreground() != app.pkg && !ctx.open(app)) return CapabilityResult("BLOCKED", message = "I couldn't open the selected media app.")
                 if (!ctx.waitUntil(4000) { ctx.foreground() == app.pkg }) return CapabilityResult("BLOCKED", message = "The selected media app isn't in the foreground.")
-                scopeProof = scopeObservation(ctx.screen(), scope)
+                var scopeScreen = ctx.screen()
+                if (scopeScreen.pkg != app.pkg || ctx.foreground() != app.pkg)
+                    return CapabilityResult("BLOCKED", message = "The selected media app changed before I could inspect its navigation.")
+                scopeProof = scopeObservation(scopeScreen, scope)
+                if (scopeProof == null && inputMethodVisible(scopeScreen)) {
+                    if (!gate()) return cancelled()
+                    if (!ctx.back()) return CapabilityResult("BLOCKED", message = "I couldn't dismiss the text input to inspect the app navigation.")
+                    ctx.waitUntil(2000) {
+                        scopeScreen = ctx.screen()
+                        scopeScreen.pkg != app.pkg || !inputMethodVisible(scopeScreen)
+                    }
+                    if (ctx.stopped) return cancelled()
+                    if (scopeScreen.pkg != app.pkg || ctx.foreground() != app.pkg)
+                        return CapabilityResult("BLOCKED", message = "The selected media app changed while dismissing text input.")
+                    if (inputMethodVisible(scopeScreen))
+                        return CapabilityResult("BLOCKED", message = "The text input is still covering the app navigation.")
+                    scopeProof = scopeObservation(scopeScreen, scope)
+                }
+                if (scopeProof == null) {
+                    scopeScreen = ctx.screen()
+                    if (scopeScreen.pkg != app.pkg || ctx.foreground() != app.pkg)
+                        return CapabilityResult("BLOCKED", message = "The selected media app changed before opening its navigation.")
+                    scopeProof = scopeObservation(scopeScreen, scope)
+                    if (scopeProof == null) exactScopeControl(scopeScreen, scope)?.let { control ->
+                        if (!gate()) return cancelled()
+                        ctx.say("Opening " + JSONObject.quote(scope) + "…")
+                        if (!ctx.tap(control)) return CapabilityResult("BLOCKED", message = "I couldn't open the requested app section.")
+                        ctx.waitUntil(3000) {
+                            scopeScreen = ctx.screen()
+                            scopeProof = scopeScreen.takeIf { it.pkg == app.pkg }?.let { scopeObservation(it, scope) }
+                            scopeScreen.pkg != app.pkg || scopeProof != null
+                        }
+                        if (ctx.stopped) return cancelled()
+                        if (scopeProof == null) return CapabilityResult("BLOCKED", message = "I couldn't verify the app section after opening its navigation control.")
+                    }
+                }
                 if (scopeProof == null) {
                     if (!gate()) return cancelled()
                     ctx.runLaya("Open the section or collection " + JSONObject.quote(scope) +
                         " in this app; stop there before playback. Do not enter the section name into a search field.", maxSteps = 5)
                     if (ctx.stopped) return cancelled()
-                    scopeProof = scopeObservation(ctx.screen(), scope)
+                    scopeProof = ctx.screen().takeIf { it.pkg == app.pkg }?.let { scopeObservation(it, scope) }
                 }
-                if (scopeProof == null) return CapabilityResult("BLOCKED", message = "I couldn't verify the requested app section. Playback wasn't started.")
+                if (scopeProof == null) return CapabilityResult("BLOCKED", message = "I couldn't verify the requested app section or complete playback.")
             }
             if (saved.optString("mode") == "navigate" && !plays(saved)) {
                 if (scopeProof == null) {
                     if (!gate()) return cancelled()
                     if (ctx.foreground() != app.pkg && !ctx.open(app)) return CapabilityResult("BLOCKED", message = "The selected media app couldn't be opened.")
                     if (!gate()) return cancelled()
-                    ctx.runLaya(goal(saved), maxSteps = 6)
+                    ctx.runLaya(goal(saved, input.optString("skill")), maxSteps = 6)
                 }
             } else if (scope.isNotBlank()) {
                 if (!gate()) return cancelled()
-                ctx.runLaya(goal(saved), maxSteps = 7, typeText = saved.optString("target").ifBlank { null })
+                val originScope = scopeProof
+                ctx.runLaya(goal(saved, input.optString("skill")), maxSteps = 7,
+                    typeText = saved.optString("target").ifBlank { null }, scanForTarget = saved.optString("target").isNotBlank())
+                if (ctx.stopped) return cancelled()
+                if (plays(saved) && originScope != null) {
+                    val paused = playback(ctx, app.pkg)
+                    val fresh = ctx.screen()
+                    val currentScope = fresh.takeIf { it.pkg == app.pkg }?.let { scopeObservation(it, scope) }
+                    if (currentScope != null) {
+                        scopeProof = currentScope.put("origin_scope_observation", originScope)
+                        val player = playbackUi(ctx, app.pkg, fresh)
+                        val title = paused?.optString("title").orEmpty()
+                        val exact = saved.optString("target")
+                        val control = player?.optJSONObject("control_node")
+                        if (paused?.optInt("playback_state") == PlaybackState.STATE_PAUSED &&
+                            player?.optInt("playback_state") == PlaybackState.STATE_PAUSED &&
+                            normalized(player.optString("title")) == normalized(title) && scopeContains(currentScope, title) &&
+                            (exact.isBlank() || normalized(exact) == normalized(title)) &&
+                            control != null && controlLabel(control) in setOf("play", "resume")) {
+                            observedControl(fresh, control)?.let { resume ->
+                                if (!gate()) return cancelled()
+                                if (ctx.foreground() != app.pkg) return CapabilityResult("BLOCKED", message = "The selected media app changed before resuming the observed item.")
+                                ctx.say("Starting the observed track…")
+                                if (!ctx.tap(resume)) return CapabilityResult("BLOCKED", message = "I couldn't start the paused item from the requested section.")
+                                currentScope.put("resume_before", JSONObject(player.toString()).put("playback_observation", paused))
+                            }
+                        }
+                    }
+                }
             } else {
                 val target = saved.getString("target")
                 val action = if (plays(saved)) MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH else Intent.ACTION_SEARCH
@@ -141,13 +211,16 @@ internal object MediaActions {
                 }
                 if (!ctx.waitUntil(4000) { ctx.foreground() == app.pkg }) return CapabilityResult("BLOCKED", message = "The selected media app isn't in the foreground.")
                 if (!gate()) return cancelled()
-                ctx.runLaya(goal(saved), maxSteps = 7, typeText = target)
+                ctx.runLaya(goal(saved, input.optString("skill")), maxSteps = 7, typeText = target)
             }
         }
         if (ctx.stopped) return cancelled()
         var result: CapabilityResult? = null
         ctx.waitUntil(3500) { if (ctx.stopped) true else observe(ctx, input, scopeProof, before).also { result = it } != null }
-        return if (ctx.stopped) cancelled() else result ?: CapabilityResult("BLOCKED",
+        if (ctx.stopped) return cancelled()
+        result?.let { return it }
+        return CapabilityResult("BLOCKED", evidence = JSONObject()
+            .put("scope_observation", scopeProof).put("observed_playback", playback(ctx, app.pkg)),
             message = "The requested media outcome couldn't be verified in the selected app. I haven't marked it complete.")
     }
 
@@ -198,7 +271,10 @@ internal object MediaActions {
                 .put("source_package", controller.packageName).put("controller_package", controller.packageName)
                 .put("title", title).put("playback_state", state.state).put("position", state.position)
         }
-        val screen = ctx.screen()
+        return playbackUi(ctx, pkg, ctx.screen())
+    }
+
+    private fun playbackUi(ctx: SkillContext, pkg: String, screen: Screen): JSONObject? {
         if (screen.pkg != pkg) return null
         val visible = nodes(screen)
         val player = visible.firstOrNull { node ->
@@ -227,8 +303,8 @@ internal object MediaActions {
     private fun descendants(root: JSONObject, pkg: String): List<JSONObject> {
         val found = mutableListOf<JSONObject>()
         fun visit(node: JSONObject) {
-            if (!node.optBoolean("visible") || node.optString("package") != pkg) return
-            found += node
+            if (node.optString("package") != pkg) return
+            if (node.optBoolean("visible")) found += node
             node.optJSONArray("children")?.let { children -> for (i in 0 until children.length()) children.optJSONObject(i)?.let(::visit) }
         }
         visit(root)
@@ -236,8 +312,76 @@ internal object MediaActions {
     }
 
     private fun controlLabel(node: JSONObject) = normalized(node.optString("content_desc").ifBlank { node.optString("text") })
-    private fun destination(node: JSONObject, target: String): Boolean = scopeName(node.optString("text").ifBlank { node.optString("content_desc") }) == scopeName(target) &&
-        (node.optBoolean("selected") || Regex("toolbar|header|title", RegexOption.IGNORE_CASE).containsMatchIn(node.optString("resource_id")))
+
+    /** An unlabeled navigation wrapper may carry its label and tab role on a visible child. */
+    private fun scopeLabel(node: JSONObject): String {
+        node.optString("text").ifBlank { node.optString("content_desc") }.takeIf { it.isNotBlank() }?.let { return it }
+        val children = node.optJSONArray("children") ?: return ""
+        return (0 until children.length()).mapNotNull(children::optJSONObject)
+            .filter { it.optBoolean("visible") && it.optString("package") == node.optString("package") }
+            .map { it.optString("text").ifBlank { it.optString("content_desc") } }.filter { it.isNotBlank() }
+            .distinct().singleOrNull().orEmpty()
+    }
+
+    /** Displayed navigation labels, including labeled children of actionable tab wrappers. */
+    fun navigationLabels(screen: Screen): List<String> {
+        val visible = nodes(screen)
+        val players = visible.filter(::playerContainer).flatMap { descendants(it, screen.pkg.orEmpty()) }.toSet()
+        return visible.filter { node ->
+            node !in players && node.optBoolean("enabled") && !node.optBoolean("editable")
+        }.mapNotNull { node ->
+            val label = scopeLabel(node).takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val role = node.optString("resource_id")
+            (label to node.optJSONArray("bounds")?.toString()).takeIf {
+                tabPosition.containsMatchIn(label) ||
+                    (node.optBoolean("clickable") && Regex("navigation|toolbar|header|tab", RegexOption.IGNORE_CASE).containsMatchIn(role))
+            }
+        }.distinct().map { it.first }
+    }
+
+    fun inputMethodVisible(screen: Screen): Boolean {
+        val windows = screen.state?.optJSONArray("windows") ?: return false
+        return (0 until windows.length()).any { index ->
+            windows.optJSONObject(index)?.let { it.optInt("type") == AccessibilityWindowInfo.TYPE_INPUT_METHOD && it.optJSONObject("root")?.optBoolean("visible") == true } == true
+        }
+    }
+
+    /** Match raw visible labels before using a model; inferred candidate names cannot create a match. */
+    private fun exactScopeControl(screen: Screen, scope: String): ScreenCandidate? {
+        val matches = nodes(screen).filter { node ->
+            node.optBoolean("clickable") && node.optBoolean("enabled") && !node.optBoolean("editable") &&
+                scopeName(scopeLabel(node)) == scopeName(scope)
+        }
+        return screen.candidates.filter { candidate ->
+            candidate.enabled && candidate.clickable && !candidate.editable && matches.any { node ->
+                node.optJSONArray("bounds")?.let { bounds ->
+                    bounds.length() == candidate.bounds.size && candidate.bounds.indices.all { bounds.optInt(it, Int.MIN_VALUE) == candidate.bounds[it] }
+                } == true
+            }
+        }.singleOrNull()
+    }
+
+    private fun observedControl(screen: Screen, node: JSONObject): ScreenCandidate? {
+        if (!node.optBoolean("visible") || !node.optBoolean("enabled") || !node.optBoolean("clickable") ||
+            node.optString("package") != screen.pkg) return null
+        val bounds = node.optJSONArray("bounds") ?: return null
+        return screen.candidates.singleOrNull { candidate ->
+            candidate.enabled && candidate.clickable && !candidate.editable &&
+                bounds.length() == candidate.bounds.size && candidate.bounds.indices.all { bounds.optInt(it, Int.MIN_VALUE) == candidate.bounds[it] }
+        }
+    }
+
+    private fun scopeContains(scope: JSONObject, title: String): Boolean {
+        if (title.isBlank()) return false
+        val items = scope.optJSONArray("items") ?: return false
+        return (0 until items.length()).any { normalized(items.optJSONObject(it)?.optString("text").orEmpty()) == normalized(title) }
+    }
+
+    private fun destination(node: JSONObject, target: String): Boolean = node.optBoolean("visible") &&
+        scopeName(scopeLabel(node)) == scopeName(target) &&
+        (node.optBoolean("selected") ||
+            (node.optBoolean("checkable") && node.optBoolean("checked") && tabPosition.containsMatchIn(scopeLabel(node))) ||
+            Regex("toolbar|header|title", RegexOption.IGNORE_CASE).containsMatchIn(node.optString("resource_id")))
 
     private fun scopeObservation(screen: Screen, scope: String): JSONObject? {
         val visible = nodes(screen)
@@ -254,8 +398,8 @@ internal object MediaActions {
     private fun nodes(screen: Screen): List<JSONObject> {
         val found = mutableListOf<JSONObject>()
         fun visit(node: JSONObject) {
-            if (!node.optBoolean("visible") || node.optString("package") != screen.pkg) return
-            found += node
+            if (node.optString("package") != screen.pkg) return
+            if (node.optBoolean("visible")) found += node
             node.optJSONArray("children")?.let { children -> for (i in 0 until children.length()) children.optJSONObject(i)?.let(::visit) }
         }
         screen.state?.optJSONArray("windows")?.let { windows ->
@@ -296,6 +440,11 @@ internal object MediaActions {
                 scopeProof.optString("scope") != scope || !destination(scopeProof.optJSONObject("destination") ?: JSONObject(), scope) ||
                 scopeProof.optString("source_text_sha256") != Contracts.digest(scopeProof.optString("screen_text"))))
             return "The requested app section wasn't observed."
+        val origin = scopeProof?.optJSONObject("origin_scope_observation")
+        if (origin != null && (origin.optString("source_package") != pkg || origin.optString("scope") != scope ||
+                !destination(origin.optJSONObject("destination") ?: JSONObject(), scope) ||
+                origin.optString("source_text_sha256") != Contracts.digest(origin.optString("screen_text"))))
+            return "The original app section wasn't verified before navigating its items."
         val method = proof.optString("capture_method")
         val title = proof.optString("title")
         if (title.isBlank() || result.output.optString("target") != title) return "No actual media item or destination was observed."
@@ -363,6 +512,26 @@ internal object MediaActions {
         check(inputError(scoped) == null)
         check(goal(scoped.getJSONObject("intent")).contains("my collection"))
         check(goal(scoped.getJSONObject("intent")).contains("one actual visible playable item"))
+        check(goal(scoped.getJSONObject("intent"), "play_music").contains("visible audio track or song"))
+        val tabLabel = node("", "tab_label").put("content_desc", "Your Collection, Tab 3 of 4").put("enabled", true)
+        val tab = node("", "navigation_tab").put("checkable", true).put("checked", true).put("enabled", true)
+            .put("children", JSONArray().put(tabLabel))
+        val item = node("Amber Horizon", "item_title")
+        val hidden = node("Hidden item", "item_title").put("visible", false)
+        val playerTitle = node("Outside track", "track_title")
+        val player = node("", "now_playing_bar").put("children", JSONArray().put(playerTitle))
+        val host = node("", "structural_host").put("visible", false)
+            .put("children", JSONArray().put(tab).put(item).put(hidden).put(player))
+        val screen = Screen(pkg, emptyList(), emptyList(), JSONObject().put("windows",
+            JSONArray().put(JSONObject().put("type", 1).put("root", host))))
+        check(navigationLabels(screen) == listOf("Your Collection, Tab 3 of 4"))
+        check(playerTitle in nodes(screen) && hidden !in nodes(screen))
+        val observed = checkNotNull(scopeObservation(screen, "my collection"))
+        check(scopeContains(observed, "Amber Horizon") && !scopeContains(observed, "Outside track"))
+        val refreshed = JSONObject(scope.toString()).put("origin_scope_observation", JSONObject(scope.toString()))
+        check(receipt(scoped, frame(), refreshed, null) != null)
+        refreshed.getJSONObject("origin_scope_observation").put("source_text_sha256", "changed")
+        check(receipt(scoped, frame(), refreshed, null) == null)
         check(receipt(scoped, frame(), scope, null) != null)
         check(receipt(scoped, frame(), null, null) == null)
         check(receipt(scoped, frame("Unobserved song"), scope, null) == null)

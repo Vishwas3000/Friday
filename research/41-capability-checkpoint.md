@@ -67,6 +67,40 @@ An initial Pixel calendar fixture failed because Android formatted the local zon
 
 The CRED list request and same-chat total follow-up took **6.467 s / 5.582 s** as synchronous bridge calls, with **6.043 s / 4.837 s** recorded task activity. Both used `bills.read` and stopped with an explicit inability to read bills or calculate a total. Independent snapshots exposed System UI and zero application windows; the cause is not established. This is live blocked-behavior evidence, not a passed bill-retrieval case or evidence that the account has no dues. The total follow-up retained the saved bill-app context. Raw records remain in `captures/calendar-tests/live-cred-readback.json`.
 
+## 21 October follow-up: interpretation and calendar clarification
+
+The calendar flow now runs before model routing. Weekdays resolve against the device date and zone; a timed
+event needs an end time or duration. A pending request saves its original text, date reference, zone and
+missing field in the originating chat. A field-shaped reply creates a linked plan using those saved details;
+unrelated commands cannot become event values. An already supplied relative date keeps its reference across
+midnight; a newly supplied relative date uses the day of that reply. Unsupported or ambiguous constraints
+still require a corrected full request. The original waiting task is retained as history.
+
+On the Pixel, `block my calender on friday at 2pm to meet some one` reached `WAITING_INPUT` with
+`What end time or duration should I use?`. The saved reference was 21 October 2026 in the device's India
+time zone. There were zero calendar attempts or dispatches, and no matching event existed in the independent
+before-query. The collector observed the pending state after 7.631 seconds, including request startup and
+polling; the task's zero active execution time is not an end-to-end latency measurement. Parser fixtures
+verify that `30 minutes` produces 23 October, 14:00–14:30, with the supplied purpose as its title. This is
+fixture evidence, not a claim that this timed event was inserted. The live insertion awaits the owner's
+duration choice; UI navigation also awaits an unlocked Pixel.
+
+The installed build passed focused calendar, routing, Writer/intent and media self-check groups. The pending
+request survived an update installation. Its APK SHA-256 was
+`2825d602ba28d9028ec61f1a937d57f95d07c2e8f515776bcc20ffc02403650e`, independently matched to the installed APK.
+These checks do not establish cloud synchronization or acceptance of every calendar phrasing.
+
+Interpreted app plans now open their selected app and keep its identity separate from content. A complete
+command matching one visible navigation label can resolve without the SLM; other commands retain grounded
+model interpretation. In an earlier live Spotify run, interpretation took 167 ms and the Library tab was
+opened correctly, but playback remained paused, so Friday correctly withheld completion. New recovery
+reads visible player children beneath structural containers and may press one observed Play control for a
+verified paused item in the requested scope. Regression fixtures exclude player text and ordinary item
+titles from navigation labels and still reject paused playback. The latest live retry stopped at the locked
+device before Spotify became accessible; the new playback recovery remains unverified live. Memory pressure
+also prevented a live SLM inference with the new destination envelope. Private reports stay in ignored
+`captures/reinstall-20261021/`.
+
 ## Remaining acceptance work
 
 1. Expand controlled collectors for actual readable bill fixtures, text generation, draft transport, cancellation and interrupted saves. The fixture manifest alone is not device coverage.

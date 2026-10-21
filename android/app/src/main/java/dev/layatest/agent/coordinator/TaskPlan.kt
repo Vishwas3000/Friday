@@ -98,18 +98,25 @@ internal object PlanValidator {
             require(dependencies == definition.getJSONArray("depends_on").strings() && dependencies.distinct().size == dependencies.size)
             require(dependencies.all { it in seen }) { "Cyclic or missing dependency" }
             require(step.state != "COMPLETED" || dependencies.all { seen.getValue(it).state == "COMPLETED" }) { "Completed step has an unfinished dependency" }
+            val inputs = definition.getJSONObject("inputs")
             val bindings = definition.getJSONObject("bindings")
             bindings.keys().forEach { target ->
-                require(target !in setOf("package", "spec", "request", "sources", "recipient", "validation_error", "_input_bind")) { "App, recipient and research authority cannot come from observed app/model output" }
+                require(target !in setOf("package", "destination_app", "spec", "request", "sources", "recipient", "validation_error", "_input_bind")) { "App, recipient and research authority cannot come from observed app/model output" }
                 val source = bindings.getJSONObject(target)
                 require(source.getString("step_id") in dependencies)
-                if (target == "intent") require(source.getString("field") == "intent" &&
-                    seen.getValue(source.getString("step_id")).capability == "intent.resolve") {
-                    "An app intent must come from the registered grounded resolver"
+                if (target == "intent") {
+                    val resolver = seen.getValue(source.getString("step_id"))
+                    require(source.getString("field") == "intent" && resolver.capability == "intent.resolve") {
+                        "An app intent must come from the registered grounded resolver"
+                    }
+                    definitions.getJSONObject(resolver.position).getJSONObject("inputs").optJSONObject("destination_app")?.let { destination ->
+                        require(destination.getString("package") == inputs.getString("package")) {
+                            "The interpreted destination differs from the selected app"
+                        }
+                    }
                 }
                 require(Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*").matches(source.getString("field")))
             }
-            val inputs = definition.getJSONObject("inputs")
             require(!inputs.has("_input_bind"))
             require(!inputs.has("intent")) { "An interpreted app intent needs a verified resolver dependency" }
             if (step.capability in setOf("intent.resolve", "app.action", "app.navigate", "device.status"))

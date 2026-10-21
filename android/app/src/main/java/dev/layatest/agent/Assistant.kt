@@ -83,11 +83,12 @@ class Assistant(private val svc: AgentService, override val request: String, pri
             banner.say("Understanding…")
             val resumingDevice = resumeTaskId?.let { TaskCoordinator.isDeviceTask(svc, it) } == true
             val legacyResearch = resumeTaskId != null && !resumingDevice
-            val reading = if (!research) ReadMessages.requestFrom(request, apps.installed) else null
-            val draft = if (!research && reading == null) Writer.requestFrom(taskPart(request)) else null
+            val calendar = if (!research && resumeTaskId == null) DevicePlans.calendarInputs(this, chatId) else null
+            val reading = if (!research && calendar == null) ReadMessages.requestFrom(request, apps.installed) else null
+            val draft = if (!research && calendar == null && reading == null) Writer.requestFrom(taskPart(request)) else null
             val geminiResearch = research || (card.app == "com.google.android.apps.bard" &&
                 Regex("\\b(?:research|search|ask|find|plan|look up)\\b", RegexOption.IGNORE_CASE).containsMatchIn(request))
-            if (resumeTaskId == null && !geminiResearch && draft == null && reading == null && card.skill == null)
+            if (resumeTaskId == null && !geminiResearch && calendar == null && draft == null && reading == null && card.skill == null)
                 card = card.copy(skill = route(request, { laya }) { q, options -> ask(q, options) })
             trace += "card: ${card.json()}"
             val result = if (stopped) null else if (legacyResearch) {
@@ -98,7 +99,7 @@ class Assistant(private val svc: AgentService, override val request: String, pri
                 }
             } else {
                 val id = resumeTaskId ?: TaskCoordinator.createDevice(svc, chatId, request,
-                    DevicePlans.from(this, draft, chatId, geminiResearch))
+                    DevicePlans.from(this, draft, chatId, geminiResearch, calendar))
                 durableTaskId = id
                 trace += "route: saved coordinator plan $id"
                 TaskCoordinator.runDevice(svc, id, capabilities(), log = { trace += it }).answer
@@ -584,10 +585,10 @@ class Assistant(private val svc: AgentService, override val request: String, pri
             .writeText(rows.joinToString("") { it.put("outcome", outcome).toString() + "\n" })
     }
 
-    override fun runLaya(subgoal: String, maxSteps: Int, typeText: String?, pickText: (() -> String?)?): Outcome =
-        steps(subgoal, maxSteps, typeText, pickText)
+    override fun runLaya(subgoal: String, maxSteps: Int, typeText: String?, pickText: (() -> String?)?, scanForTarget: Boolean): Outcome =
+        steps(subgoal, maxSteps, typeText, pickText, scanForTarget)
 
-    private fun steps(subgoal: String, maxSteps: Int, typeText: String?, pickText: (() -> String?)?): Outcome {
+    private fun steps(subgoal: String, maxSteps: Int, typeText: String?, pickText: (() -> String?)?, scanForTarget: Boolean): Outcome {
         val startPkg = foreground()
         path.clear(); rows.clear(); goal = subgoal; typed = typeText
         Routes.find(svc, startPkg, subgoal, typeText)?.takeIf { memory != "off" }?.let { route ->
@@ -602,7 +603,7 @@ class Assistant(private val svc: AgentService, override val request: String, pri
         hint?.let { trace += "hint (${it.source}): \"${it.goal}\" -> ${it.steps.joinToString(" → ") { s -> s.describe() }}" }
         val blocked = HashSet<String>()  // targets skipped or refused, so Laya doesn't pick them again
         var misses = 0
-        var skimmed = false
+        var skimmed = !scanForTarget
         var startWords: Set<String>? = null  // the first screen's fingerprint: the finished screen is told apart by what changed
         // what the goal is about, without the words it will type: "search for screenshots" is about the search box
         // (the skim scrolled Photos 4 pages for "screenshots", 2026-10-18); the shortlist still looks for those words

@@ -46,7 +46,8 @@ interface SkillContext {
     fun screen(): Screen
     /** Let Laya drive the UI toward [subgoal]; [typeText] is what INPUT_TEXT types. */
     /** [pickText]: finds the text to type only when a step types (choosing it from the request costs a Laya pass). */
-    fun runLaya(subgoal: String, maxSteps: Int = 12, typeText: String? = null, pickText: (() -> String?)? = null): Outcome
+    fun runLaya(subgoal: String, maxSteps: Int = 12, typeText: String? = null, pickText: (() -> String?)? = null,
+                scanForTarget: Boolean = true): Outcome
 
     /** The skill checked the outcome (playing, transactions on screen): keep what this request learned (D-048). */
     fun succeeded()

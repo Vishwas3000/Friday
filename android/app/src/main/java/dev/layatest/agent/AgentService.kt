@@ -145,6 +145,7 @@ class AgentService : AccessibilityService() {
         "route" -> routeTest(c.getString("text"))
         "run" -> JSONObject().put("started", runGoal(c.getString("goal"), c.optBoolean("research")))
         "writer" -> when (c.optString("action", "generate")) {
+            "selfcheck" -> JSONObject().put("writer", Writer.selfCheck()).put("media", mediaSelfCheck())
             "status", "unload" -> JSONObject().put("status", "ok").put("writer_loaded", false)
                 .put("laya_loaded", layaWarm).put("cold", true)
             "generate" -> {

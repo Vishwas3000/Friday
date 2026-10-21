@@ -20,17 +20,19 @@ internal object CalendarRequest {
         val inferredYear: Boolean
     )
 
-    data class Result(val event: Event? = null, val error: String? = null)
+    data class Result(val event: Event? = null, val error: String? = null, val missing: String? = null)
 
     private fun rx(value: String) = Regex(value, RegexOption.IGNORE_CASE)
     private const val CALENDAR = "cal(?:endar|ender|ander)"
     private const val MONTH = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+    private const val WEEKDAY = "mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?"
     private const val ORDINAL = "(?:st|nd|rd|th)?"
     private val quoted = Regex("[\"“]([^\"”]+)[\"”]|'([^'\\n]+)'")
     private val monthDay = rx("\\b($MONTH)\\.?\\s*(?:the\\s+)?(\\d{1,2})$ORDINAL(?!\\d)(?:(?:\\s*,\\s*|\\s+)(\\d{4})\\b)?")
     private val dayMonth = rx("(?<!\\d)(\\d{1,2})$ORDINAL\\s+(?:of\\s+)?($MONTH)\\.?(?![a-z])(?:(?:\\s*,\\s*|\\s+)(\\d{4})\\b)?")
     private val isoDate = Regex("(?<![\\d-])(\\d{4})-(\\d{2})-(\\d{2})(?![\\d-])")
     private val relativeDate = rx("\\b(day after tomorrow|today|tomorrow)\\b")
+    private val weekdayDate = rx("\\b(?:(this|next|coming)\\s+)?($WEEKDAY)\\b\\.?")
     private val clock = rx("(?<![\\w:])(?:\\d{1,2}(?::\\d{2})?\\s*[ap]\\.?m\\.?|\\d{1,2}:\\d{2})(?![\\w:])|\\b(?:noon|midnight)\\b")
     private val duration = rx("\\bfor\\s+((?:\\d+(?:\\.\\d+)?\\s*(?:hours?|hrs?|minutes?|mins?)\\b\\s*(?:and\\s*)?)+)")
     private val durationPart = rx("(\\d+(?:\\.\\d+)?)\\s*(hours?|hrs?|minutes?|mins?)\\b")
@@ -58,7 +60,7 @@ internal object CalendarRequest {
         val text = request.trim().replace('–', '-').replace('—', '-')
         val quotes = quoted.findAll(text).toList()
         var fields = mask(text, quotes.map { it.range })
-        fun fail(message: String) = Result(error = message)
+        fun fail(message: String, missing: String? = null) = Result(error = message, missing = missing)
         if (unsaved.containsMatchIn(fields)) return fail("I haven't saved an event. Please confirm when you want me to create it; calendar previews are not supported yet.")
         if (recurrence.containsMatchIn(fields)) return fail("Please create this as a single event, or specify a recurrence after recurrence support is available.")
         if (rx("\\b(?:except|excluding|unless|not all[ -]day|not the whole day)\\b").containsMatchIn(fields))
@@ -89,8 +91,32 @@ internal object CalendarRequest {
             val days = when (m.value.lowercase(Locale.ROOT)) { "today" -> 0L; "tomorrow" -> 1L; else -> 2L }
             dates += DateField(today.plusDays(days), m.range, false)
         }
+        for (m in weekdayDate.findAll(fields)) {
+            val prefix = fields.substring(0, m.range.first)
+            val previous = dates.filter { it.range.last < m.range.first }.maxByOrNull { it.range.last }
+            val connected = previous != null && rx("^\\s*(?:and|or|to|through|until|-)\\s*$")
+                .matches(fields.substring(previous.range.last + 1, m.range.first))
+            val annotation = dates.firstOrNull { d ->
+                d.range.first > m.range.last && rx("^\\s*,?\\s*$").matches(fields.substring(m.range.last + 1, d.range.first)) ||
+                    d.range.last < m.range.first && rx("^\\s*,?\\s*$").matches(fields.substring(d.range.last + 1, m.range.first))
+            }
+            if (m.groupValues[1].isEmpty() && !connected && annotation == null &&
+                !rx("\\b(?:on|$CALENDAR|event|appointment|meeting|day|time)(?:\\s+app)?\\s*$").containsMatchIn(prefix)) continue
+            val weekday = weekdayNumber(m.groupValues[2])
+            val offset = (weekday.value - today.dayOfWeek.value + 7) % 7
+            val value = when (m.groupValues[1].lowercase(Locale.ROOT)) {
+                "this" -> today.plusDays((weekday.value - today.dayOfWeek.value).toLong())
+                "next" -> today.plusDays(if (offset == 0) 7L else offset.toLong())
+                else -> today.plusDays(offset.toLong())
+            }
+            if (annotation != null && (annotation.value.dayOfWeek != weekday || m.groupValues[1].isNotEmpty() && annotation.value != value))
+                return fail("The weekday does not match that date. Which one did you mean?")
+            dates += DateField(annotation?.value ?: value, m.range, false)
+        }
         if (invalidDate) return fail("That date does not exist. Please give a valid day, month and year.")
-        if (dates.isEmpty()) return fail("What date should I block? Please use a month name, YYYY-MM-DD, today or tomorrow.")
+        if (dates.isEmpty() && rx("\\b\\d{1,4}[/\\-]\\d{1,2}(?:[/\\-]\\d{1,4})?\\b").containsMatchIn(fields))
+            return fail("Please write numeric dates as YYYY-MM-DD, or spell out the month so the date is unambiguous.")
+        if (dates.isEmpty()) return fail("What date should I block? Please use a month name, YYYY-MM-DD, a weekday, today or tomorrow.", "date")
         if (dates.map { it.value }.distinct().size != 1) return fail("Please specify one event date. I cannot silently choose between multiple dates.")
         val day = dates.first().value
         if (day.isBefore(today)) return fail("That explicit date is in the past. Please confirm the intended future date.")
@@ -102,8 +128,8 @@ internal object CalendarRequest {
         if (dates.any { d -> rx("^\\s*(?:-|to|through|until|and|or)\\s*(?:the\\s+)?\\d{1,2}(?:st|nd|rd|th)?\\b").containsMatchIn(text.substring(d.range.last + 1)) })
             return fail("Please specify one event date; date ranges need clarification.")
         for (d in dates) {
-            val weekday = rx("\\b(mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\\s*,?\\s*$").find(text.substring(0, d.range.first))
-            if (weekday != null && DayOfWeek.of(listOf("mon", "tue", "wed", "thu", "fri", "sat", "sun").indexOf(weekday.groupValues[1].take(3).lowercase(Locale.ROOT)) + 1) != day.dayOfWeek)
+            val weekday = rx("\\b($WEEKDAY)\\.?\\s*,?\\s*$").find(text.substring(0, d.range.first))
+            if (weekday != null && weekdayNumber(weekday.groupValues[1]) != day.dayOfWeek)
                 return fail("The weekday does not match that date. Which one did you mean?")
         }
 
@@ -130,13 +156,7 @@ internal object CalendarRequest {
             return fail("Calendar durations currently support whole minutes. Please give a duration without seconds.")
         val durations = duration.findAll(fields).toList()
         if (durations.size > 1) return fail("Please give one duration or one end time.")
-        val minutes = durations.firstOrNull()?.let { d ->
-            runCatching {
-                durationPart.findAll(d.value).fold(BigDecimal.ZERO) { sum, part ->
-                    sum + part.groupValues[1].toBigDecimal() * if (part.groupValues[2].startsWith("h", true)) BigDecimal(60) else BigDecimal.ONE
-                }.longValueExact()
-            }.getOrNull()
-        }
+        val minutes = durations.firstOrNull()?.let { durationMinutes(it.value) }
         if (durations.isNotEmpty() && (minutes == null || minutes <= 0)) return fail("Please give a positive duration in whole minutes.")
         fields = mask(fields, durations.map { it.range })
         val clocks = clock.findAll(fields).toList()
@@ -149,22 +169,25 @@ internal object CalendarRequest {
             return fail("Please give each time with AM/PM or 24-hour HH:mm notation.")
         if (explicitAllDay && (clocks.isNotEmpty() || durations.isNotEmpty())) return fail("Should this be all day, or use the specified times?")
         if (clocks.isEmpty() && (rx("\\b(?:morning|afternoon|evening|night|noon|midnight|hours?|minutes?)\\b").containsMatchIn(fields) || durations.isNotEmpty()))
-            return fail("What start time should I use? Please give AM/PM or 24-hour HH:mm notation.")
+            return fail("What start time should I use? Please give AM/PM or 24-hour HH:mm notation.",
+                if (durations.isNotEmpty() && !rx("\\b(?:morning|afternoon|evening|night)\\b").containsMatchIn(fields)) "start" else null)
         val isAllDay = clocks.isEmpty() && (explicitAllDay || shouldBlock)
-        if (!isAllDay && clocks.isEmpty()) return fail("Should this be all day, or what start and end times should I use?")
-        if (!isAllDay && clocks.size == 1 && minutes == null) return fail("What end time or duration should I use?")
+        if (!isAllDay && clocks.isEmpty()) return fail("Should this be all day, or what start time should I use?", "start")
+        if (!isAllDay && clocks.size == 1 && minutes == null) return fail("What end time or duration should I use?", "end")
         if (clocks.size == 2) {
             val between = fields.substring(clocks[0].range.last + 1, clocks[1].range.first)
-            if (!rx("^\\s*(?:-|to|until|through|and)\\s*$").matches(between)) return fail("Please write a single time range, such as from 9 AM to 10 AM.")
+            if (!rx("^\\s*(?:-|to|until|through|and)\\s*$").matches(between) &&
+                !rx("^\\s*(?:to|for|called|titled|named)\\b.*\\buntil\\s*$").matches(between))
+                return fail("Please write a single time range, such as from 9 AM to 10 AM.")
         }
         val cleaned = mask(fields, clocks.map { it.range })
         val withoutApp = cleaned.replace(rx("\\b(?:in|using|with)\\s+(?:(?:my|the|google)\\s+)*$CALENDAR(?:\\s+app)?\\b"), "")
-        if (rx("\\b(?:at|in)\\s+(?!(?:for|on|from|to|until|and|all|whole|entire)\\b)[a-z]").containsMatchIn(withoutApp))
+        if (rx("\\b(?:at|in)\\s+(?!(?:for|on|from|to|until|and|called|titled|named|all|whole|entire)\\b)[a-z]").containsMatchIn(withoutApp))
             return fail("I need to clarify the requested place or other event detail before creating the event.")
         if (rx("\\b(?:for|until|to)\\s+\\d|\\b(?:next|following)\\s+(?:week|month|year)\\b").containsMatchIn(cleaned))
             return fail("I could not interpret all the requested date or duration information. Please give an exact date and time range.")
         val title = title(cleaned, quotes, shouldBlock)
-            ?: return fail("What title should I give this event?")
+            ?: return fail("What title should I give this event?", "title")
         return try {
             val start = if (isAllDay) day.atStartOfDay(zone) else day.atTime(times.first()!!).atZone(zone)
             val end = when {
@@ -193,20 +216,62 @@ internal object CalendarRequest {
         }
     }
 
+    /** A missing-field reply is data, never a new app instruction. The caller retains the parse reference date/zone. */
+    fun continueRequest(previous: String, missing: String, answer: String): String? {
+        if (!matches(previous) || answer.any(Char::isISOControl)) return null
+        val reply = answer.trim()
+        if (reply.isEmpty()) return null
+        val fragment = when (missing) {
+            "end" -> {
+                val fullDuration = if (rx("^for\\s+").containsMatchIn(reply)) reply else "for $reply"
+                if (duration.matches(fullDuration) && !rx("\\band\\s*$").containsMatchIn(reply) && (durationMinutes(fullDuration) ?: 0) > 0)
+                    fullDuration
+                else {
+                    val end = reply.replace(rx("^(?:until|to)\\s+"), "")
+                    if (!clock.matches(end) || time(end) == null || clock.findAll(mask(previous, quoted.findAll(previous).map { it.range }.toList())).count() != 1) return null
+                    "until $end"
+                }
+            }
+            "start" -> {
+                if (allDay.matches(reply)) reply else {
+                    val start = reply.replace(rx("^(?:at|from)\\s+"), "")
+                    if (!clock.matches(start) || time(start) == null) return null
+                    "at $start"
+                }
+            }
+            "date" -> {
+                val date = reply.replace(rx("^on\\s+"), "")
+                if (!isoDate.matches(date) && !monthDay.matches(date) && !dayMonth.matches(date) &&
+                    !relativeDate.matches(date) && !weekdayDate.matches(date)) return null
+                "on $date"
+            }
+            "title" -> if (quoted.matches(reply)) "called $reply" else return null
+            else -> return null
+        }
+        return "$previous $fragment"
+    }
+
     private fun title(cleaned: String, quotes: List<MatchResult>, blocked: Boolean): String? {
         if (quotes.size == 1) return quotes.single().groupValues.drop(1).firstOrNull { it.isNotBlank() }?.trim()
         if (quotes.size > 1) return null
-        val marker = rx("\\b(?:called|titled|named|for)\\s+(?:(?:my|the|a|an)\\s+)?(.+)").find(cleaned)
+        val marker = rx("\\b(?:(?:called|titled|named|for)\\s+(?:(?:my|the|a|an)\\s+)?|" +
+            "to\\s+(?!(?:and|or|for|on|at|in|from|until|through|called|titled|named|using|with|next|following|overnight|all|whole|entire|block|reserve|$CALENDAR)\\b))(\\S.*)").find(cleaned)
         val selected = marker?.groupValues?.get(1) ?: if (blocked) return "Busy" else cleaned
             .replace(rx("^(?:(?:hey\\s+)?friday[, ]+)?(?:please\\s+|(?:can|could|will|would) you\\s+)*(?:schedule|create|add|make)\\s+(?:(?:a|an|the|my|new)\\s+)*(?:(?:event|appointment|meeting)\\s+)?"), "")
         return selected
             .replace(rx("\\b(?:in|to|on|using|with)\\s+(?:(?:my|the|google)\\s+)*$CALENDAR(?:\\s+app)?\\b.*$"), "")
-            .replace(rx("\\b(?:on|at|from|starting|between|all[ -]day|whole day|entire day|next day|following day|overnight)\\b.*$"), "")
+            .replace(rx("\\b(?:on|at|from|until|starting|between|all[ -]day|whole day|entire day|next day|following day|overnight)\\b.*$"), "")
             .trim(' ', '.', ',', ':', '-', ';')
             .takeIf { it.isNotBlank() && !it.equals("event", true) && !it.equals("appointment", true) }
     }
 
     private fun monthNumber(value: String): Int = listOf("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec").indexOf(value.take(3).lowercase(Locale.ROOT)) + 1
+    private fun weekdayNumber(value: String): DayOfWeek = DayOfWeek.of(listOf("mon", "tue", "wed", "thu", "fri", "sat", "sun").indexOf(value.take(3).lowercase(Locale.ROOT)) + 1)
+    private fun durationMinutes(value: String): Long? = runCatching {
+        durationPart.findAll(value).fold(BigDecimal.ZERO) { sum, part ->
+            sum + part.groupValues[1].toBigDecimal() * if (part.groupValues[2].startsWith("h", true)) BigDecimal(60) else BigDecimal.ONE
+        }.longValueExact()
+    }.getOrNull()
     private fun overlap(a: IntRange, b: IntRange) = a.first <= b.last && b.first <= a.last
     private fun mask(value: String, ranges: List<IntRange>): String {
         val chars = value.toCharArray()
@@ -242,6 +307,46 @@ internal object CalendarRequest {
         check(event("block my calendar on 2027-01-07").start == review.start)
         check(event("block my calendar tomorrow").start.toLocalDate() == today.plusDays(1))
         check(event("block my calendar today").start.toLocalDate() == today)
+        val reference = LocalDate.of(2026, 10, 21)
+        val natural = "block my calender on friday at 2pm to meet some one"
+        check(matches(natural))
+        check(parse(natural, reference, zone).let { it.error == "What end time or duration should I use?" && it.missing == "end" })
+        val meeting = parse("$natural for 30 minutes", reference, zone).event!!
+        check(meeting.title == "meet some one" && !meeting.allDay && meeting.start.toLocalDate() == LocalDate.of(2026, 10, 23))
+        check(meeting.start.toLocalTime() == LocalTime.of(14, 0) && meeting.end.toLocalTime() == LocalTime.of(14, 30) && meeting.start.zone == zone)
+        check(parse("$natural for 1 hour", reference, zone).event!!.end.toLocalTime() == LocalTime.of(15, 0))
+        check(parse("block my calendar on Wednesday at 2pm for 30 minutes", reference, zone).event!!.start.toLocalDate() == reference)
+        check(parse("block my calendar next Wednesday at 2pm for 30 minutes", reference, zone).event!!.start.toLocalDate() == reference.plusDays(7))
+        check(parse("block my calendar this Monday at 2pm for 30 minutes", reference, zone).event == null)
+        check(parse("block my calendar on Friday and Saturday at 2pm for 30 minutes", reference, zone).event == null)
+        check(parse("block my calendar next Friday at 2pm for 30 minutes", reference, zone).event!!.start.toLocalDate() == meeting.start.toLocalDate())
+        check(parse("block my calendar on Friday at 2pm for 30 minutes", LocalDate.of(2026, 12, 31), zone).event!!.start.toLocalDate() == LocalDate.of(2027, 1, 1))
+        for (answer in listOf("30 minutes", "for 30 minutes", "until 2:30pm", "to 14:30")) {
+            val continued = continueRequest(natural, "end", answer)!!
+            check(continued.startsWith(natural + " ") && parse(continued, reference, zone).event == meeting)
+        }
+        for (answer in listOf("open YouTube", "30 minutes and open WhatsApp", "until 2:30pm and tomorrow", "1 hour and", "0 minutes", "2"))
+            check(continueRequest(natural, "end", answer) == null)
+        val noDate = "block my calendar at 2pm to meet some one for 30 minutes"
+        check(parse(noDate, reference, zone).missing == "date")
+        check(parse(continueRequest(noDate, "date", "Friday")!!, reference, zone).event == meeting)
+        check(continueRequest(noDate, "date", "Friday and Saturday") == null)
+        val noStart = "block my calendar on Friday to meet some one for 30 minutes"
+        check(parse(noStart, reference, zone).missing == "start")
+        check(parse(continueRequest(noStart, "start", "at 2pm")!!, reference, zone).event == meeting)
+        check(parse(continueRequest("create an event called QA on Friday", "start", "all day")!!, reference, zone).event!!.allDay)
+        val noTitle = "create an event on Friday at 2pm for 30 minutes"
+        check(parse(noTitle, reference, zone).missing == "title")
+        check(parse(continueRequest(noTitle, "title", "\"QA meeting\"")!!, reference, zone).event!!.title == "QA meeting")
+        check(continueRequest(noTitle, "title", "open WhatsApp") == null)
+        check(parse("block my calendar on 01/07/2027", reference, zone).missing == null)
+        check(parse("$natural but do not save yet", reference, zone).missing == null)
+        check(parse("block my calendar on January 7 and Friday at 2pm for 30 minutes", reference, zone).event == null)
+        check(parse("block my calendar tomorrow and Friday at 2pm for 30 minutes", reference, zone).event == null)
+        check(parse("block my calendar on Friday, 2026-10-23 at 2pm for 30 minutes", reference, zone).event!!.start.toLocalDate() == meeting.start.toLocalDate())
+        check(parse("Friday, block my calendar on Wednesday at 2pm for 30 minutes", reference, zone).event!!.start.toLocalDate() == reference)
+        check(parse("block my calendar on Friday at 2pm for 30 minutes called \"Monday review\"", reference, zone).event!!.title == "Monday review")
+        check(event("block time on January 7 from 9 AM to 10 AM for my review").title == "review")
         check(event("block my calendar on February 29").start.toLocalDate() == LocalDate.of(2028, 2, 29))
         check(event("create an event called QA review on January 7 at 9 AM for 1 hour").let { it.title == "QA review" && !it.allDay && it.start.hour == 9 && it.end.hour == 10 })
         check(event("add an event \"QA review\" on 7 Jan from 13:30 to 14:45").let { it.title == "QA review" && it.start.minute == 30 && it.end.hour == 14 && it.end.minute == 45 })

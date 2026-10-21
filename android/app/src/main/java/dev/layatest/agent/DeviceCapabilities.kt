@@ -6,6 +6,7 @@ import dev.layatest.agent.coordinator.StepRecord
 import dev.layatest.agent.coordinator.DeviceCapabilities as Contracts
 import android.content.Intent
 import android.net.Uri
+import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 
@@ -50,6 +51,16 @@ internal class DeviceCapabilities(
                 ctx.say("Opening " + app.label + "…")
                 if (!ctx.open(app)) return blocked("BLOCKED", "I couldn't open " + app.label + ".")
                 ctx.waitUntil(5000) { ctx.foreground() == app.pkg }
+                if (inputs.optBoolean("dismiss_keyboard") && ctx.foreground() == app.pkg && MediaActions.inputMethodVisible(ctx.screen())) {
+                    if (!beforeDispatch() || stopped) return blocked("CANCELLED", "Stopped before dismissing text input.")
+                    return inSelectedApp(app.pkg, true) {
+                        if (!ctx.back()) blocked("BLOCKED", "I couldn't dismiss the keyboard to inspect navigation.")
+                        else {
+                            ctx.waitUntil(2000) { ctx.foreground() != app.pkg || !MediaActions.inputMethodVisible(ctx.screen()) }
+                            opened(inputs) ?: blocked("BLOCKED", "The selected app and visible navigation couldn't be verified after dismissing the keyboard.")
+                        }
+                    }
+                }
                 opened(inputs) ?: blocked("BLOCKED", "I requested " + app.label + ", but couldn't verify its foreground screen.")
             }
             "app.search" -> {
@@ -119,10 +130,31 @@ internal class DeviceCapabilities(
             }
             "intent.resolve" -> {
                 ctx.say("Resolving the request and references from this chat…")
-                val result = RequestResolver.resolve(inputs.getString("request"), resolverSources(inputs), write)
-                val intent = result.intent ?: return blocked("WAITING_INPUT", result.error ?: "Name the item or destination to use.")
+                val destination = RequestResolver.destinationFrom(inputs)
+                val sources = resolverSources(inputs)
+                val screen = destination?.takeIf { ctx.foreground() == it.packageName }?.let { ctx.screen() }
+                val direct = screen?.takeIf { it.pkg == destination?.packageName }?.let {
+                    RequestResolver.resolveVisibleNavigation(inputs.getString("request"), sources, destination, MediaActions.navigationLabels(it))
+                }
+                val result = direct ?: RequestResolver.resolve(inputs.getString("request"), sources, destination, write)
+                val intent = result.intent ?: return CapabilityResult(
+                    if (result.errorCode in setOf("MEMORY_PRESSURE", "MODEL_UNAVAILABLE", "TIMEOUT", "MODEL_FAILED")) "BLOCKED" else "WAITING_INPUT",
+                    output = JSONObject().put("diagnostics", JSONObject().put("code", result.errorCode).put("detail", result.detail)
+                        .put("model_error_code", result.modelErrorCode)
+                        .put("rejected_intent", result.candidate)),
+                    evidence = evidence(inputs, "local.intent").put("verified", false).put("diagnostic_only", true)
+                        .put("capture_method", "rejected_interpretation"),
+                    message = result.error ?: "Name the item or destination to use.")
                 CapabilityResult(output = JSONObject().put("intent", intent), evidence = evidence(inputs, "local.intent")
-                    .put("capture_method", "grounded_intent").put("intent_sha256", Contracts.digest(Contracts.canonical(intent))))
+                    .put("capture_method", "grounded_intent").put("intent_sha256", Contracts.digest(Contracts.canonical(intent)))
+                    .put("resolution_method", result.method).apply {
+                        if (direct != null) {
+                            val text = screen.texts.joinToString("\n") { it.text }
+                            put("observed_label", result.visibleLabel).put("screen_package", screen.pkg)
+                                .put("navigation_labels", JSONArray(MediaActions.navigationLabels(screen)))
+                                .put("screen_text", text).put("screen_sha256", hash(text))
+                        }
+                    })
             }
             else -> when {
                 step.capability.startsWith("research.") -> research.execute(step.capability, inputs, beforeDispatch)
@@ -143,8 +175,9 @@ internal class DeviceCapabilities(
     private fun opened(inputs: JSONObject): CapabilityResult? {
         val pkg = inputs.optString("package")
         if (pkg.isBlank() || ctx.foreground() != pkg) return null
+        if (inputs.optBoolean("dismiss_keyboard") && MediaActions.inputMethodVisible(ctx.screen())) return null
         return CapabilityResult("COMPLETED", JSONObject().put("package", pkg).put("label", app(inputs)?.label),
-            evidence(inputs, pkg).put("foreground_package", pkg),
+            evidence(inputs, pkg).put("foreground_package", pkg).put("keyboard_dismissed", inputs.optBoolean("dismiss_keyboard")),
             "Opened " + (app(inputs)?.label ?: "the selected app") + ". Foreground checked.")
     }
 

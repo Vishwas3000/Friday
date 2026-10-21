@@ -6,12 +6,16 @@ import dev.layatest.agent.coordinator.TaskStore
 import dev.layatest.agent.coordinator.DeviceCapabilities as Contracts
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
+import java.time.ZoneId
 
 /** Interpretation saves typed inputs before execution; app/model output cannot select an app or recipient. */
 internal object DevicePlans {
-    fun from(ctx: SkillContext, writer: WriterRequest?, chatId: String, research: Boolean = false): List<DeviceStep> {
+    fun from(ctx: SkillContext, writer: WriterRequest?, chatId: String, research: Boolean = false,
+             calendar: JSONObject? = null): List<DeviceStep> {
         val request = ctx.request
         if (research) return ResearchCapabilities.steps(ctx.android, chatId, request)
+        calendar?.let { return one("calendar.create", it) }
         if (HotelCapabilities.isHotelRequest(request)) {
             val steps = if (HotelCapabilities.requestsResearch(request))
                 ResearchCapabilities.steps(ctx.android, chatId, request).toMutableList() else mutableListOf()
@@ -36,11 +40,6 @@ internal object DevicePlans {
                     "Do not invent senders or claim to have read the full inbox.")
                 .put("max_tokens", 128).put("timeout_ms", 20000).put("model", Writer.MODEL), listOf(0),
                 mapOf("text" to OutputBinding(0, "source"))))
-        }
-        if (CalendarRequest.matches(request)) {
-            val parsed = CalendarRequest.parse(request)
-            return one("calendar.create", parsed.event?.let(CalendarEvents::inputs)
-                ?: JSONObject().put("validation_error", parsed.error ?: "Give the calendar event details."))
         }
         val draft = writer ?: if (ctx.card.skill == "message") WriterRequest(
             if (isEmail(taskPart(request))) "email" else "message", request, messageParts(taskPart(request)).second.orEmpty()) else null
@@ -100,11 +99,48 @@ internal object DevicePlans {
 
     private fun one(capability: String, inputs: JSONObject) = listOf(DeviceStep(capability, inputs))
 
+    /** A clarification can complete only the latest pending calendar request in this chat. */
+    fun calendarInputs(ctx: SkillContext, chatId: String): JSONObject? {
+        var request = ctx.request
+        var zone = ZoneId.systemDefault()
+        var reference = LocalDate.now(zone)
+        var priorId: String? = null
+        if (!CalendarRequest.matches(request)) {
+            val prior = TaskStore.get(ctx.android).latestForChat(chatId)?.task ?: return null
+            if (prior.capability != "device" || prior.state != "WAITING_INPUT") return null
+            val definitions = JSONObject(prior.payload).optJSONArray("steps") ?: return null
+            val saved = (0 until definitions.length()).map { definitions.getJSONObject(it) }
+                .singleOrNull { it.optString("capability") == "calendar.create" }?.optJSONObject("inputs") ?: return null
+            request = CalendarRequest.continueRequest(saved.optString("calendar_request"),
+                saved.optString("calendar_missing"), request) ?: return null
+            zone = runCatching { ZoneId.of(saved.getString("calendar_zone")) }.getOrNull() ?: return null
+            reference = if (saved.optString("calendar_missing") == "date") LocalDate.now(zone)
+                else runCatching { LocalDate.parse(saved.getString("calendar_reference_date")) }.getOrNull() ?: return null
+            priorId = prior.id
+        }
+        val parsed = CalendarRequest.parse(request, reference, zone)
+        val inputs = parsed.event?.let(CalendarEvents::inputs)
+            ?: JSONObject().put("validation_error", parsed.error ?: "Give the calendar event details.")
+        inputs.put("calendar_request", request).put("calendar_reference_date", reference.toString())
+            .put("calendar_zone", zone.id)
+        parsed.missing?.let { inputs.put("calendar_missing", it) }
+        priorId?.let { inputs.put("calendar_continues_task_id", it) }
+        return inputs
+    }
+
     private fun interpreted(ctx: SkillContext, chatId: String, capability: String, inputs: JSONObject): List<DeviceStep> {
-        val bindings = mutableMapOf("intent" to OutputBinding(0, "intent"))
-        if (capability == "app.navigate") bindings["target"] = OutputBinding(0, "intent.target")
-        return listOf(DeviceStep("intent.resolve", JSONObject().put("request", ctx.request).put("sources", sources(ctx, chatId))),
-            DeviceStep(capability, inputs, listOf(0), bindings))
+        val resolution = JSONObject().put("request", ctx.request).put("sources", sources(ctx, chatId))
+        val steps = mutableListOf<DeviceStep>()
+        ctx.apps.installed.firstOrNull { it.pkg == inputs.optString("package") }?.let { app ->
+            resolution.put("destination_app", JSONObject().put("package", app.pkg).put("label", app.label))
+            steps += DeviceStep("app.open", JSONObject().put("package", app.pkg).put("dismiss_keyboard", true))
+        }
+        val resolver = steps.size
+        val bindings = mutableMapOf("intent" to OutputBinding(resolver, "intent"))
+        if (capability == "app.navigate") bindings["target"] = OutputBinding(resolver, "intent.target")
+        steps += DeviceStep("intent.resolve", resolution, if (resolver == 0) emptyList() else listOf(resolver - 1))
+        steps += DeviceStep(capability, inputs, listOf(resolver), bindings)
+        return steps
     }
 
     private fun selectedApp(ctx: SkillContext, skill: String): AppInfo? = ctx.apps.default(skill) ?: ctx.apps.candidates(skill).singleOrNull()

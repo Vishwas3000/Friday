@@ -112,9 +112,20 @@ internal object DeviceCapabilities {
                     a.getJSONObject(index).let { RequestResolver.Source(it.getString("id"), it.getString("text")) }
                 } }
                 val intent = output.optJSONObject("intent") ?: return "No interpreted intent was returned."
+                if (evidence.optString("resolution_method") == "visible_navigation") {
+                    val destination = RequestResolver.destinationFrom(input) ?: return "The visible navigation has no selected app."
+                    val label = evidence.optString("observed_label")
+                    val labels = evidence.optJSONArray("navigation_labels") ?: return "Visible navigation labels were not captured."
+                    if (label.isBlank() || evidence.optString("screen_package") != destination.packageName ||
+                        evidence.optString("screen_sha256") != digest(evidence.optString("screen_text")) ||
+                        intent.optString("mode") != "navigate" || intent.optString("target").isNotEmpty() || intent.optString("source_id") != "request" ||
+                        RequestResolver.canonicalSectionName(label) != RequestResolver.canonicalSectionName(intent.optString("scope")) ||
+                        (0 until labels.length()).count { RequestResolver.canonicalSectionName(labels.optString(it)) == RequestResolver.canonicalSectionName(label) } != 1)
+                        return "The exact visible navigation label was not bound to the selected app and request."
+                }
                 if (evidence.optString("source_package") != "local.intent" || evidence.optString("capture_method") != "grounded_intent" ||
                     evidence.optString("intent_sha256") != digest(canonical(intent))) "Intent evidence is missing or changed."
-                else RequestResolver.validate(input.getString("request"), sources, intent)
+                else RequestResolver.validate(input.getString("request"), sources, intent, RequestResolver.destinationFrom(input))
             }
             "research.prepare", "research.submit", "research.capture" -> ResearchCapabilities.verificationError(capability, input, result)
             "messages.read", "message.prepare" -> MessageCapabilities.verificationError(capability, input, result)
@@ -128,7 +139,8 @@ internal object DeviceCapabilities {
                 output.opt("all_day") != input.getBoolean("all_day") || evidence.opt("all_day") != input.getBoolean("all_day") -> "Saved all-day setting differs from the requested event"
                 else -> null
             }
-            "app.open" -> if (output.optString("package") == input.getString("package") && evidence.optString("foreground_package") == input.getString("package")) null else "Selected app was not verified in the foreground"
+            "app.open" -> if (output.optString("package") == input.getString("package") && evidence.optString("foreground_package") == input.getString("package") &&
+                (!input.optBoolean("dismiss_keyboard") || evidence.optBoolean("keyboard_dismissed"))) null else "Selected app and requested navigation setup were not verified"
             "app.search" -> if (output.optString("package") == input.getString("package") && output.optString("query") == input.getString("query") &&
                 sameQuery(evidence.optString("observed_query"), input.getString("query")) && string(evidence, "matched_result") &&
                 evidence.optBoolean("query_visible") && evidence.optBoolean("results_visible")) null else "Exact query and independent results were not verified in the selected app"

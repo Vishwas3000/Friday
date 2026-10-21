@@ -7,27 +7,93 @@ import java.security.MessageDigest
 /** One bounded local interpretation. Only the caller can supply verified sources from the selected chat. */
 internal object RequestResolver {
     data class Source(val id: String, val text: String)
-    data class Resolution(val intent: JSONObject? = null, val error: String? = null)
+    data class Destination(val packageName: String, val label: String) {
+        fun json(): JSONObject = JSONObject().put("package", packageName).put("label", label)
+    }
+    data class Resolution(
+        val intent: JSONObject? = null,
+        val error: String? = null,
+        /** Unverified model fields for local diagnostics only; never an executable intent. */
+        val candidate: JSONObject? = null,
+        val errorCode: String? = null,
+        val detail: String? = null,
+        val method: String = "local_model",
+        val modelErrorCode: String? = null,
+        val visibleLabel: String? = null,
+    )
 
     private val referenceWords = setOf("a", "an", "the", "any", "some", "all", "one", "ones", "of", "from", "in", "on", "it", "its", "this", "that", "them", "they", "these", "those", "above", "below", "previous", "earlier", "same", "former", "latter", "first", "last", "next")
     private val referencePhrase = Regex("\\b(?:any|anyone|some|one|ones|either|all)\\b.*\\b(?:above|below|previous|earlier|these|those|them)\\b", RegexOption.IGNORE_CASE)
     private val sourceId = Regex("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+    private val packageName = Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+")
     private val listedLine = Regex("^[\\t ]*(?:[-*+•][\\t ]+|[0-9]+[.)][\\t ]+)")
+    private val navigationCommand = Regex("^[\\t ]*(?:please[\\t ]+)?(go to|navigate to|open|show|view|play)[\\t ]+(.+?)[\\t ]*$", RegexOption.IGNORE_CASE)
+    private val tabPosition = Regex("(?:,[\\t ]*|[\\t ]+)Tab[\\t ]+[1-9][0-9]*[\\t ]+of[\\t ]+[1-9][0-9]*$", RegexOption.IGNORE_CASE)
     private data class Span(val start: Int, val end: Int)
 
-    fun resolve(request: String, sources: List<Source>, write: (WriterRequest) -> JSONObject): Resolution {
-        inputProblem(request, sources)?.let { return Resolution(error = it) }
-        val result = try { write(writerRequest(request, sources)) } catch (_: Exception) {
-            return Resolution(error = "The local intent model failed. Name the exact target and app section to continue.")
+    /** Only ownership and a trailing accessibility tab position are presentation differences. */
+    fun canonicalSectionName(text: String): String = text.trim().replace(tabPosition, "").trim()
+        .replace(Regex("^(?:my|your|our|the)[\\t ]+", RegexOption.IGNORE_CASE), "").lowercase()
+
+    /** Caller supplies fresh navigation-affordance labels from the selected app, never item titles. */
+    fun resolveVisibleNavigation(request: String, sources: List<Source>, destination: Destination?, labels: List<String>): Resolution? {
+        val app = destination ?: return null
+        val command = navigationCommand.matchEntire(request) ?: return null
+        var scope = command.groupValues[2].trim()
+        if (scope.any { it in "\"“”'‘’\n\r" }) return null
+        val suffix = Regex("[\\t ]+(?:from|in|on)[\\t ]+(?:${Regex.escape(app.label)}|${Regex.escape(app.packageName)})$", RegexOption.IGNORE_CASE)
+        scope = suffix.replace(scope, "").trim()
+        if (scope.isBlank() || unresolved(scope) || tabPosition.containsMatchIn(scope)) return null
+        val canonical = canonicalSectionName(scope)
+        if (canonical.isBlank()) return null
+        val matches = labels.filter { canonicalSectionName(it) == canonical }
+        if (matches.size > 1) return Resolution(error = "More than one app section has that name. Choose the section to use.",
+            errorCode = "AMBIGUOUS_NAVIGATION", method = "visible_navigation")
+        val label = matches.singleOrNull() ?: return null
+        // Reuse every input, exact span, action, and immutable destination check without loading a model.
+        val resolution = resolve(request, sources, destination) {
+            JSONObject().put("status", "ok").put("mode", "navigate").put("action", command.groupValues[1])
+                .put("target", "").put("scope", scope).put("source_id", "request")
         }
-        if (result.optString("status") != "ok") return Resolution(error =
-            "The local intent model didn't return a checked interpretation (${result.optString("status", "unknown")}). Name the exact target to continue.")
+        return resolution.takeIf { it.intent != null }?.copy(method = "visible_navigation", visibleLabel = label)
+    }
+
+    fun resolve(request: String, sources: List<Source>, write: (WriterRequest) -> JSONObject): Resolution =
+        resolve(request, sources, null, write)
+
+    fun resolve(request: String, sources: List<Source>, destination: Destination?, write: (WriterRequest) -> JSONObject): Resolution {
+        inputProblem(request, sources, destination)?.let {
+            return Resolution(error = "I couldn't read this request and its context. Try a shorter exact request.", errorCode = "INVALID_INPUT", detail = it)
+        }
+        val result = try { write(writerRequest(request, sources, destination)) } catch (_: Exception) {
+            return Resolution(error = "The local interpretation failed. Please retry.", errorCode = "MODEL_FAILED", detail = "The local intent model failed.")
+        }
         val intent = JSONObject()
         for (key in Writer.intentKeys) if (result.has(key)) intent.put(key, result.get(key))
+        // Copy before normalization so failed attempts retain exactly what the model proposed.
+        val candidate = intent.takeIf { it.length() > 0 }?.let { JSONObject(it.toString()) }
+        if (result.optString("status") != "ok") {
+            val status = result.optString("status", "unknown")
+            val modelCode = result.opt("error_code") as? String
+            val (code, message) = when {
+                modelCode == "memory_pressure" -> "MEMORY_PRESSURE" to "Not enough free memory to interpret this request. Close another app and retry."
+                status == "unavailable" -> "MODEL_UNAVAILABLE" to "Friday's local model is unavailable. Check the model setup and retry."
+                status == "timeout" -> "TIMEOUT" to "Interpreting the request timed out. Please retry."
+                else -> "MODEL_FAILED" to "The local interpretation didn't finish. Please retry."
+            }
+            return Resolution(error = message, candidate = candidate, errorCode = code, modelErrorCode = modelCode,
+                detail = "The local intent model returned status $status${modelCode?.let { "; error_code=$it" }.orEmpty()}.")
+        }
         val malformed = Writer.intentErrors(intent)
-        if (malformed.isNotEmpty()) return Resolution(error = "The intent model returned malformed fields: ${malformed.joinToString("; ")}.")
+        if (malformed.isNotEmpty()) return Resolution(error = "I couldn't read the model's interpretation. Try naming the item or section.",
+            candidate = candidate, errorCode = "MALFORMED_INTENT", detail = malformed.joinToString("; "))
         if (selected(request, sources, intent.getString("source_id")) == null)
-            return Resolution(error = "The intent cited an unavailable source. Choose a target from this chat's verified results.")
+            return Resolution(error = "Choose an item from this chat's verified results.", candidate = candidate,
+                errorCode = "UNKNOWN_SOURCE", detail = "The intent cited an unavailable source.")
+        destinationError(request, intent, destination)?.let {
+            return Resolution(error = "I couldn't separate the selected app from the requested item. Name the item or section.",
+                candidate = candidate, errorCode = "DESTINATION_AS_TARGET", detail = it)
+        }
         // A section cannot also be its own contained item; retain an explicitly quoted item title.
         val target = intent.optString("target")
         val scope = intent.optString("scope")
@@ -40,9 +106,22 @@ internal object RequestResolver {
             intent.put("mode", "navigate").put("target", "").put("source_id", "request")
         }
         val error = groundingError(request, sources, intent)
-        if (error != null) return Resolution(error = error)
-        intent.put("proof", proof(request, sources, intent))
+        if (error != null) return Resolution(error = "I couldn't identify one exact item or section. Name it to continue.",
+            candidate = candidate, errorCode = "UNGROUNDED_INTENT", detail = error)
+        intent.put("proof", proof(request, sources, intent, destination))
         return Resolution(intent = intent)
+    }
+
+    /** Null means absent. A present malformed identity must never silently lose its binding. */
+    fun destinationFrom(input: JSONObject): Destination? {
+        if (!input.has("destination_app")) return null
+        val app = input.optJSONObject("destination_app") ?: throw IllegalArgumentException("The destination app must be an object.")
+        require(app.keys().asSequence().toSet() == setOf("package", "label") && app.opt("package") is String && app.opt("label") is String) {
+            "The destination app needs exact package and label strings."
+        }
+        return Destination(app.getString("package"), app.getString("label")).also {
+            destinationProblem(it)?.let { problem -> throw IllegalArgumentException(problem) }
+        }
     }
 
     /** Saved inputs may carry additional source provenance; the model sees only these exact id/text pairs. */
@@ -57,38 +136,60 @@ internal object RequestResolver {
                 if (item.opt("id") !is String || item.opt("text") !is String) return "A saved source needs exact id and text strings."
                 sources += Source(item.getString("id"), item.getString("text"))
             }
-            inputProblem(input.getString("request"), sources)
+            inputProblem(input.getString("request"), sources, destinationFrom(input))
         }
-        } catch (_: Exception) { "Saved intent inputs are invalid." }
+        } catch (_: Exception) { "Saved intent inputs or destination app are invalid." }
     }
 
     /** Re-run at the coordinator boundary, including after restoring an interrupted task. */
-    fun validate(request: String, sources: List<Source>, intent: JSONObject): String? {
-        inputProblem(request, sources)?.let { return it }
+    fun validate(request: String, sources: List<Source>, intent: JSONObject): String? =
+        validate(request, sources, intent, null)
+
+    fun validate(request: String, sources: List<Source>, intent: JSONObject, destination: Destination?): String? {
+        inputProblem(request, sources, destination)?.let { return it }
         if (intent.keys().asSequence().toSet() != Writer.intentKeys + "proof") return "Resolved intent fields are missing or unexpected."
         val fields = JSONObject()
         Writer.intentKeys.forEach { fields.put(it, intent.get(it)) }
+        destinationError(request, fields, destination)?.let { return it }
         groundingError(request, sources, fields)?.let { return it }
         val saved = intent.optJSONObject("proof") ?: return "Resolved intent has no source binding."
-        val expected = proof(request, sources, fields)
+        val expected = proof(request, sources, fields, destination)
         if (saved.keys().asSequence().toSet() != expected.keys().asSequence().toSet() || expected.keys().asSequence().any { saved.opt(it) != expected.get(it) })
             return "Resolved intent no longer matches the exact request and cited source spans."
         return null
     }
 
-    private fun writerRequest(request: String, sources: List<Source>): WriterRequest = WriterRequest(
-        kind = "intent", instruction = request,
-        text = JSONArray().also { records -> sources.forEach { records.put(JSONObject().put("id", it.id).put("text", it.text)) } }.toString(),
-        maxTokens = 128, timeoutMs = 30_000,
-    )
+    private fun writerRequest(request: String, sources: List<Source>, destination: Destination?): WriterRequest {
+        val records = JSONArray().also { rows -> sources.forEach { rows.put(JSONObject().put("id", it.id).put("text", it.text)) } }
+        val text = if (destination == null) records.toString()
+            else JSONObject().put("sources", records).put("destination_app", destination.json()).toString()
+        return WriterRequest(kind = "intent", instruction = request, text = text, maxTokens = 128, timeoutMs = 30_000)
+    }
 
-    private fun inputProblem(request: String, sources: List<Source>): String? {
+    private fun inputProblem(request: String, sources: List<Source>, destination: Destination?): String? {
         if (request.isBlank()) return "What should Friday do?"
+        destinationProblem(destination)?.let { return it }
         if (sources.any { it.id == "request" || !sourceId.matches(it.id) || it.text.isBlank() } || sources.map { it.id }.distinct().size != sources.size)
             return "Cited sources need distinct identifiers and nonempty exact text."
-        val errors = writerRequest(request, sources).errors()
+        val errors = writerRequest(request, sources, destination).errors()
         if (errors.any { it.contains("2800") }) return "The request and cited excerpts exceed the local 2800-character context limit. Provide a shorter exact target or a smaller cited excerpt."
         return errors.takeIf { it.isNotEmpty() }?.let { "The local intent input is unsupported: ${it.joinToString("; ")}." }
+    }
+
+    private fun destinationProblem(destination: Destination?): String? = when {
+        destination == null -> null
+        !packageName.matches(destination.packageName) -> "The destination app package is invalid."
+        destination.label.isBlank() || destination.label.any(Char::isISOControl) -> "The destination app needs a nonempty label without control characters."
+        else -> null
+    }
+
+    private fun destinationError(request: String, fields: JSONObject, destination: Destination?): String? {
+        if (destination == null || fields.opt("source_id") != "request") return null
+        val target = fields.opt("target") as? String ?: return null
+        if (target.isNotEmpty() && !quoted(request, target) &&
+            (target.equals(destination.label, ignoreCase = true) || target.equals(destination.packageName, ignoreCase = true)))
+            return "The selected destination app was mistaken for the content item."
+        return null
     }
 
     private fun selected(request: String, sources: List<Source>, id: String): Source? =
@@ -154,7 +255,7 @@ internal object RequestResolver {
         return null
     }
 
-    private fun proof(request: String, sources: List<Source>, intent: JSONObject): JSONObject {
+    private fun proof(request: String, sources: List<Source>, intent: JSONObject, destination: Destination?): JSONObject {
         val cited = selected(request, sources, intent.getString("source_id"))!!
         val target = intent.getString("target")
         val scope = intent.getString("scope")
@@ -164,6 +265,7 @@ internal object RequestResolver {
             .put("action_text", action.value).put("action_start", action.range.first).put("action_end", action.range.last + 1)
             .put("source_text_sha256", hash(cited.text)).put("scope_source_id", scopeSource.id)
             .put("scope_source_sha256", hash(scopeSource.text))
+        destination?.let { proof.put("destination_package", it.packageName).put("destination_label", it.label) }
         fun bind(key: String, text: String, at: Span) {
             val start = at.start
             val end = at.end
@@ -250,6 +352,53 @@ internal object RequestResolver {
         tampered.getJSONObject("proof").put("target_start", 0)
         check(validate(request, listOf(source, other), tampered) != null)
         check(validate(request, listOf(source.copy(text = source.text + "Changed"), other), resolved.intent) != null)
+        val destination = Destination("dev.example.media", "Example Player")
+        val nativeRequest = "play my collection from Example Player"
+        val label = "Your Collection, Tab 3 of 4"
+        val native = checkNotNull(resolveVisibleNavigation(nativeRequest, emptyList(), destination, listOf(label)))
+        val nativeIntent = checkNotNull(native.intent)
+        check(native.method == "visible_navigation" && native.visibleLabel == label)
+        check(nativeIntent.getString("mode") == "navigate" && nativeIntent.getString("action") == "play" &&
+            nativeIntent.getString("target").isEmpty() && nativeIntent.getString("scope") == "my collection")
+        check(validate(nativeRequest, emptyList(), nativeIntent, destination) == null)
+        check(validate(nativeRequest, emptyList(), nativeIntent) != null)
+        check(validate(nativeRequest, emptyList(), nativeIntent, destination.copy(packageName = "dev.example.other")) != null)
+        check(validate(nativeRequest, emptyList(), nativeIntent, destination.copy(label = "Other Player")) != null)
+        val bound = resolve(nativeRequest, emptyList(), destination) { writer ->
+            val envelope = JSONObject(writer.text)
+            check(envelope.getJSONArray("sources").length() == 0 && destinationFrom(envelope) == destination)
+            check(writer.errors().isEmpty())
+            answer("navigate", "play", "", "my collection", "request")
+        }
+        check(bound.intent != null && validate(nativeRequest, emptyList(), bound.intent, destination) == null)
+        val mistakenApp = resolve("play my collection from example player", emptyList(), destination) {
+            answer("act", "play", "Example Player", "my collection", "request")
+        }
+        check(mistakenApp.intent == null && mistakenApp.errorCode == "DESTINATION_AS_TARGET" &&
+            mistakenApp.candidate?.getString("target") == "Example Player" && !mistakenApp.candidate.has("proof"))
+        val quotedApp = "play \"Example Player\" from my collection"
+        val literalApp = resolve(quotedApp, emptyList(), destination) { answer("act", "play", "Example Player", "my collection", "request") }
+        check(literalApp.intent != null && validate(quotedApp, emptyList(), literalApp.intent, destination) == null)
+        val namedSource = Source("context-1", "1. Example Player")
+        check(resolve("play any one of above", listOf(namedSource), destination) {
+            answer("act", "play", "Example Player", "", namedSource.id)
+        }.intent != null)
+        check(resolveVisibleNavigation(nativeRequest, emptyList(), null, listOf(label)) == null)
+        for (labels in listOf(listOf(label, label), listOf(label, "My Collection, Tab 1 of 2"))) {
+            val ambiguous = checkNotNull(resolveVisibleNavigation(nativeRequest, emptyList(), destination, labels))
+            check(ambiguous.intent == null && ambiguous.errorCode == "AMBIGUOUS_NAVIGATION")
+        }
+        for (command in listOf("play \"my collection\" from Example Player", "play any one of above from Example Player",
+            "play items from my collection from Example Player", "play my favourite collection from Example Player",
+            "play Amber Horizon from my collection from Example Player"))
+            check(resolveVisibleNavigation(command, emptyList(), destination, listOf(label)) == null)
+        val memoryFailure = resolve(nativeRequest, emptyList(), destination) {
+            JSONObject().put("status", "unavailable").put("error_code", "memory_pressure")
+        }
+        check(memoryFailure.intent == null && memoryFailure.errorCode == "MEMORY_PRESSURE" &&
+            memoryFailure.modelErrorCode == "memory_pressure" && memoryFailure.detail?.contains("memory_pressure") == true)
+        check(resolve(nativeRequest, emptyList(), destination) { JSONObject().put("status", "unavailable") }.errorCode == "MODEL_UNAVAILABLE")
+        check(resolve(nativeRequest, emptyList(), destination) { JSONObject().put("status", "timeout") }.errorCode == "TIMEOUT")
         var invoked = false
         check(resolve("x".repeat(2800), emptyList()) { invoked = true; answer() }.intent == null && !invoked)
         check(inputError(JSONObject().put("request", request).put("sources", JSONArray().put(JSONObject().put("id", source.id).put("text", source.text)))) == null)
