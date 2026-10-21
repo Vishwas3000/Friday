@@ -57,6 +57,22 @@ Needs Job 2's `data/READY` (it reads `/root/friday-laya/laya/data/`). The two jo
 
 Shared Hugging Face cache for both jobs: `export HF_HOME=/root/friday-laya/hf` (the model is ~0.65 GB).
 
+### Restoring local vision checkpoints
+
+On 22 October 2026, the redundant unpacked `model.safetensors` copies in
+`models/student/ckpt/{s11,s11a,s11f}/` were reclaimed for the SLM backup. Every
+checkpoint member was first checked byte for byte against its retained ZIP.
+The archives, tokenizer/config files and ONNX exports remain available; checksums
+and restore commands are in ignored `models/student/storage-audit-20261022.json`.
+Before loading these local PyTorch checkpoints, restore the needed variant from
+the repository root (about 0.53 GB per weight file):
+
+```sh
+unzip -n models/student/s11-checkpoint.zip -d models/student/ckpt
+unzip -n models/student/s11a-checkpoint.zip -d models/student/ckpt
+unzip -n models/student/s11f-checkpoint.zip -d models/student/ckpt
+```
+
 ## Job 4: Friday text distillation, `training/slm/`
 
 Use the [complete reproduction guide](slm/README.md),
