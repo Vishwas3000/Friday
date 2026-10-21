@@ -1,6 +1,6 @@
 # Public TRAIN data for Friday's small text model
 
-_21 October 2026 · Downloaded and adapted locally · Future SFT input; no model training or frozen-suite changes_
+_21 October 2026 · Downloaded and adapted locally · Original preparation; frozen suites unchanged_
 
 The existing dialogue-state corpus teaches state tracking, not grammatical rewriting or concise summaries. The [student review](STUDENT_REVIEW.md) also distinguishes preserving source text from actually performing an edit. This addition supplies **21,768 filtered publisher-reference writing examples**, including **19,697 grammar corrections** and **2,071 dialogue summaries**. It does not use Qwen to create their targets.
 
@@ -51,7 +51,11 @@ Raw plus prepared payloads total **70,544,897 bytes**, below the adapter's **150
 
 The corpus was also reproduced on the remote training machine under
 `out/writing-external/prepared/`. Its manifest and both JSONL file hashes match the
-local result exactly. The data is staged for a separate writing SFT experiment.
+local result exactly. The [subsequent sampled semantic review](WRITING_SAMPLE_REVIEW.md)
+rejected 27 of 80 targets. The first blind teacher filter failed its fixed
+calibration, so [prepared state/context training](PREPARED_TRAINING.md) uses only
+23 independently approved training references and 30 validation references.
+The larger writing set is not approved for training by its publisher provenance.
 
 ### Conservative filtering
 
@@ -97,7 +101,7 @@ python3 training/slm/writing_data.py --fetch
 
 The default raw directory is `training/slm/out/writing-external`; prepared output is its `prepared` subdirectory. The second command requires an empty prepared output directory. To audit a new deterministic build without replacing existing data, use `--output training/slm/out/writing-external/prepared-recheck` only when sufficient disk is available; a duplicate local copy is not needed for the current result.
 
-**Protocol compatibility:** these are future `messages`/`response` SFT rows. They are not directly accepted by the current pilot's Qwen-label manifest loader and are not the `dialogue_state_v2` protocol. No current loader, frozen suite or model was modified, and these rows were not mixed into the completed training run.
+**Protocol compatibility:** these are `messages`/`response` SFT rows. They are not directly accepted by the original pilot's Qwen-label manifest loader and are not the `dialogue_state_v2` protocol. The separate [train_prepared.py](train_prepared.py) now validates this format, enforces hash-bound approved reviews and excludes rejected or unreviewed targets. These rows were not mixed into the completed synthetic pilot; its loader and frozen suites remain unchanged.
 
 The next concrete step is a separate response-only writing experiment with an explicit loader for this format, tokenizer-length checks, a reviewed sample of edits/summaries, controlled rewrite-versus-summary sampling and an independent unseen writing evaluation. Preserve publisher references and row/source hashes through that step. Test grammar correction and requested transformations as well as canary survival; a model that merely copies source text must not earn a rewriting pass.
 

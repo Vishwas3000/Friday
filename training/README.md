@@ -73,13 +73,18 @@ records 24,579 downloaded SGD/MultiWOZ train dialogues, outside this pilot.
 audit passed all **260,562 rows**, including source/context/schema checks and exact
 prompt/hash bindings. A local 50,000-row subset also passed independent audits.
 Preparation and standard-library `verify_dialogue_data.py` commands, source/schema
-gates and exact hashes are documented there. This new protocol still requires its
-own trainer and Android integration.
+gates and exact hashes are documented there. The new
+[prepared-data trainer](slm/PREPARED_TRAINING.md) implements offline training for
+this separate protocol; Android integration remains separate.
 The separate [writing dataset guide](slm/WRITING_DATA.md) records 81,531 downloaded
 publisher TRAIN records and **21,768 filtered writing pairs** (19,697 grammar
 corrections / 2,071 summaries), split into **20,617 future train / 1,151 validation**.
-Those references need an explicit future loader and writing experiment; they have
-not been used in the completed pilot or a new model training run.
+Those references were not used in the completed pilot. An
+[80-pair semantic review](slm/WRITING_SAMPLE_REVIEW.md) rejected 27 targets, and the
+blind teacher screening failed its fixed calibration gates. The larger state/context
+stage uses the audited dialogue data plus only 23 approved writing training
+references and 30 approved writing validation references. Other writing targets
+are excluded; a larger writing experiment needs better screening.
 
 | Step | What runs |
 |---|---|

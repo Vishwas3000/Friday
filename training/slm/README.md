@@ -11,12 +11,18 @@ SGD/MultiWOZ train downloads and the separate human-annotated `dialogue_state_v2
 adapter. The full remote preparation contains **234,811 train / 25,751 validation
 rows**; the corrected independent audit passed all **260,562 rows**, including
 source/context/schema and exact SYSTEM-prompt/hash bindings. A 50,000-row local
-subset also passed independent audits. These data remain outside the current
-synthetic pilot and require a different trainer/protocol.
+subset also passed independent audits. These data remain outside the original
+synthetic pilot; [train_prepared.py](train_prepared.py) implements their separate
+trainer. [PREPARED_TRAINING.md](PREPARED_TRAINING.md) records the larger state/context
+stage, recovery and measured hardware checks.
 [WRITING_DATA.md](WRITING_DATA.md) documents another **21,768 publisher-reference
 writing pairs**: 19,697 grammar corrections and 2,071 summaries, split into 20,617
 future train / 1,151 validation rows. Its 81,531 raw TRAIN records and filtered
-outputs remain separate; an explicit loader and writing experiment are still needed.
+outputs remain separate. The [sampled reference review](WRITING_SAMPLE_REVIEW.md)
+found semantic errors, and the blind Qwen filter failed calibration. The larger
+state/context stage therefore includes only 23 independently approved training
+writing references and 30 validation references; the other writing targets are
+excluded. A larger writing experiment needs better reference screening.
 
 These are **offline language experiments**. They do not change the installed
 Writer or test Android app navigation, sending, calendar writes, research collection
@@ -37,6 +43,8 @@ Friday's production prompt or constrained grammar.
 | [dialogue_data.py](dialogue_data.py) | Separate human-annotated `dialogue_state_v2` preparation, grouped splits and target-schema gates |
 | [verify_dialogue_data.py](verify_dialogue_data.py) | Independent standard-library reconstruction audit against the original TRAIN sources |
 | [writing_data.py](writing_data.py) | Pinned CoEdIT/DialogSum TRAIN references for a future writing loader; lexical filtering and grouped splits |
+| [review_references.py](review_references.py) | Blind teacher reference screening with fixed calibration gates and hash-bound decisions |
+| [train_prepared.py](train_prepared.py) | Larger prepared-data SFT, batched tokenization, reviewed writing, live progress and recoverable checkpoints |
 
 Frozen evaluation never supplies labels, tunes prompts, selects a checkpoint or
 drives Optuna. Candidate train and validation use separate template/value pools;
