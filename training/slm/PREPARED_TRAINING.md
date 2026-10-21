@@ -251,6 +251,11 @@ cap and writes `final-prepared-validation.json` with `selection_eligible=false`.
 
 ## Instance and artifacts
 
+The [continuous dashboard](MONITORING.md) refreshes training graphs and health
+checks every 60 seconds in a separate CPU environment. It reads this run's
+configuration-bound reports and filters earlier OOM attempts from the shared
+log. The trainer, sampler and optimization configuration remain unchanged.
+
 Run the finite job through the instance's existing supervisor. Keep the instance
 running while training. Stopping it interrupts the job; recovery requires a
 completed checkpoint and unchanged data/configuration. Destroying the instance

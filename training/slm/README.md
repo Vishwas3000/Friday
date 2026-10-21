@@ -47,6 +47,13 @@ Friday's production prompt or constrained grammar.
 | [train_prepared.py](train_prepared.py) | Larger prepared-data SFT, batched tokenization, reviewed writing, live progress and recoverable checkpoints |
 | [migrate_prepared.py](migrate_prepared.py) | Verified upgrade of the recorded OOM checkpoint to token-budget batching, with original state and a receipt preserved |
 | [watch_prepared.py](watch_prepared.py) | CPU-only Optuna record of the fixed prepared run, persistent validation losses and completion/failure state |
+| [monitor_prepared.py](monitor_prepared.py) | Read-only health checks, validation curves and graph refresh alongside training |
+| [plot_prepared.py](plot_prepared.py) | Matplotlib PNG/SVG and a self-contained HTML dashboard from recorded metrics |
+| [sync_prepared.py](sync_prepared.py) | Verified SSH transfer of the live dashboard to local storage |
+
+[MONITORING.md](MONITORING.md) explains the six graphs, continuous checks and
+isolated plotting setup. Graphs use recorded losses and runtime metrics; generated
+answers and Android actions still require their separate evaluations.
 
 Frozen evaluation never supplies labels, tunes prompts, selects a checkpoint or
 drives Optuna. Candidate train and validation use separate template/value pools;
