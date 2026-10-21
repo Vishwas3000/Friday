@@ -65,6 +65,10 @@ Use the [complete reproduction guide](slm/README.md),
 RTX 4090, separate from Laya navigation training and Android app acceptance.
 The [expanded app scenarios](../research/21-friday-use-case-catalogue.md) include
 follow-up context, media, spending, holdings, activity, notes and task modifications.
+The [dataset research](slm/DATASETS.md) pins external dialogue/tool/UI sources and
+records 24,579 downloaded SGD/MultiWOZ train dialogues for later grounded adaptation,
+outside this pilot. `training/slm/fetch_data.py` reproduces the verified train-only
+download with a 1 GB cap; source dialogues require a separate protocol adapter.
 
 | Step | What runs |
 |---|---|

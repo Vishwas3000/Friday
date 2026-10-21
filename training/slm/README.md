@@ -6,6 +6,11 @@ synthetic training data, and trains a student on accepted teacher responses.
 [TEACHER_REVIEW.md](TEACHER_REVIEW.md) records interpretation and prose review limits.
 The [expanded app scenario catalogue](../../research/21-friday-use-case-catalogue.md)
 defines separate proposed device acceptance work; it is not another model score.
+[DATASETS.md](DATASETS.md) records primary online sources and two downloaded public
+train samples plus complete pinned SGD/MultiWOZ train downloads for a future grounded
+adapter stage, excluded from the current synthetic pilot. Its standard-library
+`fetch_data.py` resumes verified downloads under a 1 GB cap; raw dialogues are not
+automatically converted into the current Writer protocol.
 
 These are **offline language experiments**. They do not change the installed
 Writer or test Android app navigation, sending, calendar writes, research collection
