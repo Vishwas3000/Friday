@@ -572,3 +572,50 @@ Recommended experiment:
 
 Start with FunctionGemma for the field-update role and SmolLM2/LFM2 for prose. This is a proposed comparison,
 not a model replacement or completed distillation run.
+
+## 21 October GPU baseline checkpoint
+
+The supplied instance was accessed successfully after its SSH endpoint became ready.
+The RTX 4090 has 24 GB VRAM; a CUDA operation and all three model probes ran successfully.
+The image's conda Python environment supplied PyTorch 2.14.1+cu130; the isolated Friday
+job uses Transformers 4.57.6 and safetensors 0.8.0. No drivers or shared Python packages
+were modified. This instance has no persistent host volume. Synthetic reports were
+backed up under ignored `captures/slm-gpu-20261021/`.
+
+Three parallel tasks produced a primary-source model/teacher review, a repeatable
+[GPU probe](../training/slm/README.md), and a [24-case context pilot](../tests/slm-task-updates.json).
+The probe's standard-library self-check and setup shell syntax check passed. The
+fixture pilot passed unique-span/schema/type/size checks; it has not been run through
+the phone's validator or a model. Its native guard cases are explicitly distinguished.
+
+The committed probe was then run on the GPU, with each model's chat template, BF16,
+eager attention, greedy decoding and 96 output tokens. These four development smoke
+cases use prompts distinct from Friday's production prompts; they do not constitute
+held-out acceptance, grammar-constrained evaluation, phone memory or navigation tests.
+
+| Model and pinned revision | Required JSON object, /4 | Exact keys/nonempty string types, /4 | Exact extraction fields, /2 |
+| --- | --- | --- | --- |
+| SmolLM2-360M-Instruct, `a10cc1512eabd3dde888204e902eca88bddb4951` | 2 | 1 | 0 |
+| LFM2-350M, `f37d3f5c8c5484bc01dad379a595cf4c68c4e70e` | 1 | 1 | 0 |
+| Qwen3-4B-Instruct-2507, `cdbee75f17c01a7cc42f958dc650907174af0554` | 4 | 3 | 1 |
+
+SmolLM2 returned the wrong date/start and omitted `REF42` in the negated message.
+LFM2 used fences/multiple objects, returned the wrong date/zone, and preserved `REF42`
+in its one accepted-shaped message. Qwen preserved the date/time/zone and both message
+facts in this small manual review, but its duration used numeric `30` where the prompt
+required string `"30"`. That remains a failed strict extraction case. Prose has no
+automatic semantic pass. Formatting restrictions alone would not fix wrong dates or
+lost reference codes.
+
+Qwen's measured peak PyTorch CUDA allocation was about 7.57 GiB, so short-context teacher
+inference fits this 4090. This is not process RSS, full training memory or a phone budget.
+Its [publisher model card](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) documents
+non-thinking instruction tuning and compatibility with Transformers >=4.51. An ungated,
+reviewed teacher-output pilot is feasible; no student has been trained at this checkpoint.
+
+The review also found [LFM2.5-350M](https://huggingface.co/LiquidAI/LFM2.5-350M), distinct
+from the tested LFM2-350M. It warrants a separate baseline before selecting a student.
+Its newer configuration/template must be checked against the chosen runtime; it was
+not loaded here. FunctionGemma still needs authorized gated access and a formatting
+adapter. Keep temporal arithmetic and final authority in Kotlin; phrase-only extraction
+would need an explicit adapter to the current normalized-value contract before shipping.

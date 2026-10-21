@@ -56,6 +56,33 @@ Needs Job 2's `data/READY` (it reads `/root/friday-laya/laya/data/`). The two jo
 
 Shared Hugging Face cache for both jobs: `export HF_HOME=/root/friday-laya/hf` (the model is ~0.65 GB).
 
+## Small SLM baseline before distillation
+
+`training/slm/` contains a pinned, four-case GPU smoke probe for SmolLM2-360M,
+LFM2-350M and the optional Qwen3-4B-Instruct-2507 teacher. Copy its files into
+`/root/friday-laya/slm/`, then run:
+
+```sh
+cd /root/friday-laya/slm
+bash setup.sh
+.venv/bin/python probe.py --models smollm2 lfm2 qwen3
+```
+
+Setup reuses the PyTorch image's `/venv/main` environment through a job-local venv.
+It installs no drivers or global packages. Results retain exact prompts, raw outputs,
+model revisions, framework versions and GPU timing/allocation measurements in `out/`.
+This is unconstrained BF16 inference, separate from Android grammar/GGUF evaluation.
+
+The [24 context cases](../tests/slm-task-updates.json) are a separate evaluation-only
+pilot for the current `task_update` interface. They are not loaded by this four-case
+probe and have not had model/native-runtime execution. Keep them out of training and
+checkpoint selection; three native guard cases are marked separately.
+
+Sync useful reports off the rented instance. `/workspace` is only persistent across
+recycle/destroy when a host volume is actually mounted; inspect the instance's guide
+and `vast-capabilities` rather than assuming persistence. The first SLM instance had
+no such volume; its synthetic outputs were backed up to ignored local captures.
+
 ## If the box is lost
 Everything needed to rebuild is in this folder. Rent again (the table above), add the Mac's key, then redo the jobs'
 Copy and Setup steps. Data is re-streamed from AndroidControl's public bucket, the models come from Hugging Face at

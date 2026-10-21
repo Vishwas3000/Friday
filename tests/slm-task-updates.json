@@ -1,0 +1,1384 @@
+{
+  "version": 1,
+  "purpose": "Evaluation-only synthetic pilot for Friday task_update interpretation; not a training corpus or device action suite.",
+  "provenance": "Original hand-authored English examples. No device state, private chats, contacts, credentials, messages or app observations were used.",
+  "split_policy": "All cases are held-out evaluation. Do not train, distill, tune prompts, or select checkpoints on these cases; make a separate training set and a separate model-selection set. If these examples inform a change, report contamination and replace the evaluation set.",
+  "reference": {
+    "date": "2026-10-21",
+    "zone": "Asia/Kolkata"
+  },
+  "interface": {
+    "kind": "task_update",
+    "instruction_from": "saved_goal",
+    "text_from": "JSON-serialize input exactly; input.fields is the complete model-field set for the capability.",
+    "max_tokens": 192,
+    "timeout_ms": 20000,
+    "output_shape": {
+      "operation": "update | new | clarify",
+      "updates": [
+        {
+          "field": "registered model field",
+          "text": "exact unique substring of input.current",
+          "value": "normalized string"
+        }
+      ]
+    },
+    "normalization": "Dates YYYY-MM-DD using input.date; start/end HH:mm; duration positive whole minutes as a string; title/query/zone equal the copied span trimmed. update requires at least one update; new and clarify require an empty updates array.",
+    "authority": "Destination packages, create authorization, all-day/overnight flags, cancellation, external effects and verification belong to the native coordinator. No output may introduce those fields. An accepted patch is not task completion."
+  },
+  "evaluation": {
+    "patch_scoring": "Compare operation and the set of field/text/value triples; update order is immaterial. Required spans in this pilot are unique. Score protocol validation and semantic expected-output agreement separately.",
+    "context_scoring": "expected_partial_context.fields contains supplied/accepted facts after a semantic update; it is not a full serialized TaskInputContext and does not grant action authority. missing lists unresolved data only. For new, fields describes the old draft, which this patch must leave unmodified; it does not describe the new task.",
+    "path_scoring": "production_path is a read-time prediction from TaskIntake and CalendarRequest, not measured invocation evidence. native_fast_path, native_blocked and fresh_native_routing cases usually bypass Writer. slm_fallback_candidate assumes a pending same-chat draft, no earlier uncertain external dispatch, and no competing app-search route.",
+    "native_guard_cases": "TU11, TU12 and TU16 have semantically safe clarify outputs which the current CalendarRequest.capture guard rejects even when updates is empty. Keep them as native-routing/semantic negatives and report this validator rejection separately; do not count it as an SLM decoding failure.",
+    "limits": "No GPU/phone/model execution is represented. Exact-span and typed-value checks cannot establish the truth of a model-normalized relative date or duration when the native parser has no equivalent. Review those interpretations independently. This pilot does not measure drafting, multilingual use, UI navigation, messages, bills, research or booking."
+  },
+  "cases": [
+    {
+      "id": "TU01",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "Explicit duration fills the pending end without changing start",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "for 45 minutes",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "end"
+        ],
+        "question": "What end time or duration should I use?",
+        "known": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review"
+        }
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "duration",
+            "text": "for 45 minutes",
+            "value": "45"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review",
+          "duration": "45"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_fast_path",
+        "reason": "Calendar capture already recognizes an explicit numeric duration; no Writer request is needed."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Keep the date, 09:00 start and title. A parsed duration is not proof that an event was saved."
+      ]
+    },
+    {
+      "id": "TU02",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "Natural language duration uses the saved start",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "Make it half an hour.",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "end"
+        ],
+        "question": "What end time or duration should I use?",
+        "known": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review"
+        }
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "duration",
+            "text": "half an hour",
+            "value": "30"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review",
+          "duration": "30"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "slm_fallback_candidate",
+        "reason": "The native duration parser requires numerals and finds no field in this reply."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Interpret half an hour as 30 minutes. Do not replace the known start or title."
+      ]
+    },
+    {
+      "id": "TU03",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "Compound spoken duration is normalized without dropping the half hour",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "Make it an hour and a half.",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "end"
+        ],
+        "question": "What end time or duration should I use?",
+        "known": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review"
+        }
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "duration",
+            "text": "an hour and a half",
+            "value": "90"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review",
+          "duration": "90"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "slm_fallback_candidate",
+        "reason": "Native capture does not decode a duration written entirely in words."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "The duration is 90 minutes, rather than 30 or 60."
+      ]
+    },
+    {
+      "id": "TU04",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "One reply supplies date, start and zone while duration stays unknown",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "tomorrow at 10:20 AM UTC",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "date"
+        ],
+        "question": "What date should this event use?",
+        "known": {
+          "title": "Design walkthrough"
+        }
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "date",
+            "text": "tomorrow",
+            "value": "2026-10-22"
+          },
+          {
+            "field": "start",
+            "text": "10:20 AM",
+            "value": "10:20"
+          },
+          {
+            "field": "zone",
+            "text": "UTC",
+            "value": "UTC"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "title": "Design walkthrough",
+          "date": "2026-10-22",
+          "start": "10:20",
+          "zone": "UTC"
+        },
+        "missing": [
+          "end"
+        ],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_fast_path",
+        "reason": "Native calendar capture collects all supplied fields before asking for the next one."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Use the fixed source date 2026-10-21. Do not guess a duration or silently use the device zone instead of UTC."
+      ]
+    },
+    {
+      "id": "TU05",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "Explicit date correction preserves the supplied time range",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "Move it to 2026-10-28.",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "date"
+        ],
+        "question": "Which date should I use?",
+        "known": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review",
+          "end": "10:00"
+        }
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "date",
+            "text": "2026-10-28",
+            "value": "2026-10-28"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "date": "2026-10-28",
+          "start": "09:00",
+          "title": "Project review",
+          "end": "10:00"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_fast_path",
+        "reason": "The correction refers to the active task and contains a native ISO date."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Only the date changes; the start, end and title remain as supplied."
+      ]
+    },
+    {
+      "id": "TU06",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "Start correction keeps the existing duration",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "Actually start at 16:10.",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "start"
+        ],
+        "question": "What is the corrected start time?",
+        "known": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review",
+          "duration": "45"
+        }
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "start",
+            "text": "16:10",
+            "value": "16:10"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "date": "2026-10-26",
+          "start": "16:10",
+          "title": "Project review",
+          "duration": "45"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_fast_path",
+        "reason": "An explicit start marker prevents interpreting the single clock as an end."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Keep the 45 minute duration and previous date; do not create a second event."
+      ]
+    },
+    {
+      "id": "TU07",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "Explicit until marker fills end",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "until 10:15 AM",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "end"
+        ],
+        "question": "What end time or duration should I use?",
+        "known": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review"
+        }
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "end",
+            "text": "10:15 AM",
+            "value": "10:15"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review",
+          "end": "10:15"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_fast_path",
+        "reason": "Native capture recognizes the explicit end marker."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Do not replace the 09:00 start with the supplied end."
+      ]
+    },
+    {
+      "id": "TU08",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "Repeating the same start does not invent an end",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "9 AM",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "end"
+        ],
+        "question": "What end time or duration should I use?",
+        "known": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review"
+        }
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "start",
+            "text": "9 AM",
+            "value": "09:00"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review"
+        },
+        "missing": [
+          "end"
+        ],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_fast_path",
+        "reason": "While awaiting end, a clock equal to the saved start is retained as start."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "The end or duration remains missing. This reply must not be converted into an alarm request."
+      ]
+    },
+    {
+      "id": "TU09",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "An app name inside the literal title is event data",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "\"Google Maps review\"",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "title"
+        ],
+        "question": "What title should I give this event?",
+        "known": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "duration": "30"
+        }
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "title",
+            "text": "Google Maps review",
+            "value": "Google Maps review"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "duration": "30",
+          "title": "Google Maps review"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_fast_path",
+        "reason": "Native capture extracts the one quoted title; app identity is outside this patch schema."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Google Maps is the event title text, not an instruction to open Maps or change the destination app."
+      ]
+    },
+    {
+      "id": "TU10",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "An unresolved reference cannot supply a missing duration",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "same as before",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "end"
+        ],
+        "question": "What end time or duration should I use?",
+        "known": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review"
+        }
+      },
+      "expected": {
+        "operation": "clarify",
+        "updates": []
+      },
+      "expected_partial_context": {
+        "fields": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review"
+        },
+        "missing": [
+          "end"
+        ],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "slm_fallback_candidate",
+        "reason": "There is a reference but no field value in the current reply or known end/duration."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "No historical duration is present in this model envelope. Do not invent one from the saved goal."
+      ]
+    },
+    {
+      "id": "TU11",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "A negated request to change anything keeps existing fields",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "Don't change anything yet.",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "end"
+        ],
+        "question": "What end time or duration should I use?",
+        "known": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review"
+        }
+      },
+      "expected": {
+        "operation": "clarify",
+        "updates": []
+      },
+      "expected_partial_context": {
+        "fields": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review"
+        },
+        "missing": [
+          "end"
+        ],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_blocked",
+        "reason": "Calendar capture rejects negation conservatively and stores a blocker; production should not call the SLM."
+      },
+      "current_validator": {
+        "expected": "reject_native_guard",
+        "reason": "The current calendar capture rejects the ambiguous or negated reply before validating the patch, including an empty clarify patch."
+      },
+      "semantic_checks": [
+        "Do not delete existing fields, authorize a save, or infer cancellation from this reply."
+      ]
+    },
+    {
+      "id": "TU12",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "Two unchosen dates require clarification",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "Either tomorrow or 2026-10-24; I am undecided.",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "date"
+        ],
+        "question": "What date should I use?",
+        "known": {
+          "start": "09:00",
+          "duration": "30",
+          "title": "Planning"
+        }
+      },
+      "expected": {
+        "operation": "clarify",
+        "updates": []
+      },
+      "expected_partial_context": {
+        "fields": {
+          "start": "09:00",
+          "duration": "30",
+          "title": "Planning"
+        },
+        "missing": [
+          "date"
+        ],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_blocked",
+        "reason": "Native parsing finds distinct dates and refuses to choose one."
+      },
+      "current_validator": {
+        "expected": "reject_native_guard",
+        "reason": "The current calendar capture rejects the ambiguous or negated reply before validating the patch, including an empty clarify patch."
+      },
+      "semantic_checks": [
+        "Both dates are candidates, not accepted facts. Keep the start, duration and title without assigning a date."
+      ]
+    },
+    {
+      "id": "TU13",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "A clear independent app launch leaves the pending calendar draft",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "Open Instagram.",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "end"
+        ],
+        "question": "What end time or duration should I use?",
+        "known": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review"
+        }
+      },
+      "expected": {
+        "operation": "new",
+        "updates": []
+      },
+      "expected_partial_context": {
+        "fields": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "title": "Project review"
+        },
+        "missing": [
+          "end"
+        ],
+        "active_draft_replaced": true
+      },
+      "production_path": {
+        "classification": "fresh_native_routing",
+        "reason": "TaskIntake recognizes a separate open command before invoking the Writer."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "The patch selects neither an app package nor an action; the normal planner handles the new owner request separately."
+      ]
+    },
+    {
+      "id": "TU14",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "A spoken relative date uses the fixed source date",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "three days from now",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "date"
+        ],
+        "question": "What date should I use?",
+        "known": {
+          "start": "09:00",
+          "duration": "30",
+          "title": "Planning"
+        }
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "date",
+            "text": "three days from now",
+            "value": "2026-10-24"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "start": "09:00",
+          "duration": "30",
+          "title": "Planning",
+          "date": "2026-10-24"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "slm_fallback_candidate",
+        "reason": "Native calendar date patterns do not recognize this spoken relative expression."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Resolve from 2026-10-21, not the benchmark wall clock. No other event field changes."
+      ]
+    },
+    {
+      "id": "TU15",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "A reply supplies a duration and a quoted app name as title",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "for 1 hour and 15 minutes, called \"Spotify launch review\"",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "end"
+        ],
+        "question": "What end time or duration should I use?",
+        "known": {
+          "date": "2026-10-26",
+          "start": "09:00"
+        }
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "duration",
+            "text": "for 1 hour and 15 minutes",
+            "value": "75"
+          },
+          {
+            "field": "title",
+            "text": "Spotify launch review",
+            "value": "Spotify launch review"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "date": "2026-10-26",
+          "start": "09:00",
+          "duration": "75",
+          "title": "Spotify launch review"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_fast_path",
+        "reason": "Native capture recognizes the numeric compound duration and one literal title."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "The duration is 75 whole minutes. Spotify stays title data; no media action is authorized."
+      ]
+    },
+    {
+      "id": "TU16",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "An ambiguous numeric date stays unknown",
+      "saved_goal": "Block my calendar for a single project session.",
+      "input": {
+        "capability": "calendar.create",
+        "fields": [
+          "date",
+          "start",
+          "end",
+          "duration",
+          "title",
+          "zone"
+        ],
+        "current": "10/11",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "date"
+        ],
+        "question": "What date should I use?",
+        "known": {
+          "start": "09:00",
+          "duration": "30",
+          "title": "Planning"
+        }
+      },
+      "expected": {
+        "operation": "clarify",
+        "updates": []
+      },
+      "expected_partial_context": {
+        "fields": {
+          "start": "09:00",
+          "duration": "30",
+          "title": "Planning"
+        },
+        "missing": [
+          "date"
+        ],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_blocked",
+        "reason": "Calendar capture asks for ISO or a spelled-out month instead of choosing a locale interpretation."
+      },
+      "current_validator": {
+        "expected": "reject_native_guard",
+        "reason": "The current calendar capture rejects the ambiguous or negated reply before validating the patch, including an empty clarify patch."
+      },
+      "semantic_checks": [
+        "Do not choose October 11, November 10, a year, or the current date."
+      ]
+    },
+    {
+      "id": "TU17",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "Google Maps is literal query data in an already selected app",
+      "saved_goal": "Search in the previously selected app; the query is not supplied yet.",
+      "input": {
+        "capability": "app.search",
+        "fields": [
+          "query"
+        ],
+        "current": "Google Maps for Cubbon Park Bengaluru",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "query"
+        ],
+        "question": "What should I search for in the selected app?",
+        "known": {}
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "query",
+            "text": "Google Maps for Cubbon Park Bengaluru",
+            "value": "Google Maps for Cubbon Park Bengaluru"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "query": "Google Maps for Cubbon Park Bengaluru"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_fast_path",
+        "reason": "A plain query reply is copied by the app.search adapter; the saved destination package is unchanged."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Preserve Maps, the place and city exactly. Never bind Google or Google Maps as a new destination from this patch."
+      ]
+    },
+    {
+      "id": "TU18",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "Negative query wording is preserved as data",
+      "saved_goal": "Search in the previously selected app; the query is not supplied yet.",
+      "input": {
+        "capability": "app.search",
+        "fields": [
+          "query"
+        ],
+        "current": "songs without lyrics",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "query"
+        ],
+        "question": "What should I search for in the selected app?",
+        "known": {}
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "query",
+            "text": "songs without lyrics",
+            "value": "songs without lyrics"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "query": "songs without lyrics"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_fast_path",
+        "reason": "Plain query data is copied literally; calendar negation restrictions do not apply to app.search."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Keep without lyrics in the query. Do not invert it to songs with lyrics."
+      ]
+    },
+    {
+      "id": "TU19",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "Two app names remain part of a literal query",
+      "saved_goal": "Search in the previously selected app; the query is not supplied yet.",
+      "input": {
+        "capability": "app.search",
+        "fields": [
+          "query"
+        ],
+        "current": "Spotify vs YouTube Music review",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "query"
+        ],
+        "question": "What should I search for in the selected app?",
+        "known": {}
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "query",
+            "text": "Spotify vs YouTube Music review",
+            "value": "Spotify vs YouTube Music review"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "query": "Spotify vs YouTube Music review"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "native_fast_path",
+        "reason": "There is no new command verb or referential field correction; the adapter copies the whole query."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Neither mentioned app changes the selected destination; keep vs and review."
+      ]
+    },
+    {
+      "id": "TU20",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "A referential correction extracts the new literal query",
+      "saved_goal": "Search the selected app for rain sounds.",
+      "input": {
+        "capability": "app.search",
+        "fields": [
+          "query"
+        ],
+        "current": "Use \"ambient piano\" instead.",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "query"
+        ],
+        "question": "What query should replace the previous one?",
+        "known": {
+          "query": "rain sounds"
+        }
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "query",
+            "text": "ambient piano",
+            "value": "ambient piano"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "query": "ambient piano"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "slm_fallback_candidate",
+        "reason": "The word instead suppresses the plain-query shortcut; the SLM must extract the replacement span."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Use only ambient piano, without the command, quotation marks or instead. The selected package remains fixed."
+      ]
+    },
+    {
+      "id": "TU21",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "An uncited previous item cannot become a new query",
+      "saved_goal": "Search in the previously selected app; the query is not supplied yet.",
+      "input": {
+        "capability": "app.search",
+        "fields": [
+          "query"
+        ],
+        "current": "one of the above",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "query"
+        ],
+        "question": "What should I search for in the selected app?",
+        "known": {}
+      },
+      "expected": {
+        "operation": "clarify",
+        "updates": []
+      },
+      "expected_partial_context": {
+        "fields": {},
+        "missing": [
+          "query"
+        ],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "slm_fallback_candidate",
+        "reason": "The envelope has no cited result list or known query; a reference alone does not identify search text."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Do not search for the literal instruction one of the above or fabricate a song/title from unavailable history."
+      ]
+    },
+    {
+      "id": "TU22",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "A calendar request is a new task while search is pending",
+      "saved_goal": "Search in the previously selected app; the query is not supplied yet.",
+      "input": {
+        "capability": "app.search",
+        "fields": [
+          "query"
+        ],
+        "current": "Block my calendar tomorrow at noon for 30 minutes called \"Planning\".",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "query"
+        ],
+        "question": "What should I search for in the selected app?",
+        "known": {}
+      },
+      "expected": {
+        "operation": "new",
+        "updates": []
+      },
+      "expected_partial_context": {
+        "fields": {},
+        "missing": [
+          "query"
+        ],
+        "active_draft_replaced": true
+      },
+      "production_path": {
+        "classification": "fresh_native_routing",
+        "reason": "The native calendar match starts a separate calendar draft; the Writer should not turn the request into search text."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Do not choose a package or authorize a calendar write in this patch. The new task goes through normal validation."
+      ]
+    },
+    {
+      "id": "TU23",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "A corrected query may itself contain an app name",
+      "saved_goal": "Search the selected app for hiking maps.",
+      "input": {
+        "capability": "app.search",
+        "fields": [
+          "query"
+        ],
+        "current": "Actually use \"Google Maps offline tutorial\".",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "query"
+        ],
+        "question": "What query should replace the previous one?",
+        "known": {
+          "query": "hiking maps"
+        }
+      },
+      "expected": {
+        "operation": "update",
+        "updates": [
+          {
+            "field": "query",
+            "text": "Google Maps offline tutorial",
+            "value": "Google Maps offline tutorial"
+          }
+        ]
+      },
+      "expected_partial_context": {
+        "fields": {
+          "query": "Google Maps offline tutorial"
+        },
+        "missing": [],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "slm_fallback_candidate",
+        "reason": "Actually signals a reference-based correction, so the whole sentence cannot be accepted as the query."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "Replace only the query. Google Maps is text inside the query, not a newly selected executor."
+      ]
+    },
+    {
+      "id": "TU24",
+      "split": "evaluation",
+      "purpose": "held_out_interpreter_pilot",
+      "description": "Negating an unresolved reference does not invent replacement search text",
+      "saved_goal": "Search in the previously selected app; the query is not supplied yet.",
+      "input": {
+        "capability": "app.search",
+        "fields": [
+          "query"
+        ],
+        "current": "Don't use the above; I haven't chosen a search term.",
+        "date": "2026-10-21",
+        "zone": "Asia/Kolkata",
+        "missing": [
+          "query"
+        ],
+        "question": "What should I search for in the selected app?",
+        "known": {}
+      },
+      "expected": {
+        "operation": "clarify",
+        "updates": []
+      },
+      "expected_partial_context": {
+        "fields": {},
+        "missing": [
+          "query"
+        ],
+        "active_draft_replaced": false
+      },
+      "production_path": {
+        "classification": "slm_fallback_candidate",
+        "reason": "The reply refers to absent material and supplies no affirmative literal query; the shortcut is suppressed."
+      },
+      "current_validator": {
+        "expected": "accept",
+        "reason": "Expected to satisfy TaskInputContext.patchErrors; this does not establish semantic correctness."
+      },
+      "semantic_checks": [
+        "No query, package, cancellation or action can be inferred. Ask for the missing search term."
+      ]
+    }
+  ]
+}
