@@ -15,7 +15,7 @@ class Step(val op: String, val opConfidence: Double, val target: Int?, val targe
 
 /**
  * The on-device Laya model (D-023: fp16, CPU arena off, 4 threads). Created only when a request needs
- * it and closed when the request ends (D-016). Laya only ever chooses: [choose] answers any short
+ * it and closed after the service's idle interval (D-016). Laya only ever chooses: [choose] answers any short
  * option list (routing, slot spans, "did you mean"), [step] picks the next UI action.
  */
 class LayaEngine(ctx: Context) : AutoCloseable {
@@ -125,8 +125,7 @@ class LayaEngine(ctx: Context) : AutoCloseable {
     }
 
     override fun close() {
-        tok.close()
-        session.close()
+        try { tok.close() } finally { session.close() }
     }
 
     companion object {

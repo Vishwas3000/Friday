@@ -21,18 +21,24 @@ Not for the Play Store (it bans autonomous accessibility agents, D-012).
 | `Overlay.kt` | The on-phone approval card (Run / Skip / Stop) and the magenta target outline. |
 | `MainActivity.kt` | Status screen: is the service on, and the command to run a task. |
 | `../scripts/live_adb.py` | The Mac driver: loads Laya, reads the screen, decides, asks for approval, acts, logs. |
-| `../scripts/setup_phone.py` | Install + enable the service + open the bridge, in one command. |
+| `../scripts/setup_phone.py` | Install + open permission setup + forward the bridge, in one command. |
 
 ## Run a test
 ```sh
-uv run python scripts/setup_phone.py            # install, enable the service, forward the port
+uv run python scripts/setup_phone.py            # install, prompt for access, forward the port
 uv run python scripts/live_adb.py --app "Open the Clock app and go to the Battery page"
 ```
 Each step appears **on the phone**; tap Run / Skip / Stop. (`--yes` runs without asking, but risky-looking
 steps — send, pay, delete, install… — still ask. Use it only for read-only tests.)
 
-Enabling the service needs no "restricted settings" tap on Android 16 — `settings put secure
-enabled_accessibility_services …` is enough [measured 2026-10-16], confirming research/02 §4.1.
+Friday shows a permission checklist on first launch. Enable **Accessibility** to control apps; approve
+**Microphone** for voice, **Calendar** for event tasks, and **System settings** for brightness control as needed.
+Android presents the actual permission/settings screens and the owner approves them. Setup never grants access
+through adb. Reopen the checklist with **Show tools → Permissions**; denied optional access can be granted later.
+Approving the microphone does not enable wake-word listening. The Friday bubble uses an accessibility overlay,
+so it does not need a separate draw-over-other-apps permission.
+When Accessibility is missing, **Run**, **Research**, **Teach**, and **Resume** open Android Accessibility
+settings directly and explain where to enable Friday. The request remains in the composer for retry after setup.
 
 ## Bridge protocol
 One JSON object per line, one reply per request.
@@ -72,7 +78,14 @@ Type a request in Friday and tap **Run on this phone**. `Assistant` handles it:
    way to do it — an API answer, a direct intent, or Laya on the narrowest screen (D-028).
 3. **Answer** card with the result. A banner shows progress with **Stop**.
 
-Laya loads only when a step needs it, stays warm for 3 minutes, and pre-warms when you open Friday (D-030).
+Laya loads on demand and can prewarm while a recognized navigation request is being typed (D-030).
+Laya and icon model sessions unload after **three idle minutes**; active tasks keep their sessions. Android
+low-memory signals request cleanup when the current task finishes, and service shutdown releases task models.
+Writer frees its model after every generation. Wake-word listening stays off unless enabled by the owner;
+when enabled, it retains the existing charging and call restrictions and releases audio/models when stopped.
+The next task may take longer while its model reloads. Idle cleanup uses an uptime timer: it can wait while
+the phone sleeps, and Friday does not wake the phone just to unload models. RAM and battery savings have not
+been measured for this change.
 Bridge tests: `{"cmd":"selfcheck"}` (parsers), `{"cmd":"route","text":…}` (routing + timings), `{"cmd":"run","goal":…}`.
 
 ## Durable Research (M1 development)

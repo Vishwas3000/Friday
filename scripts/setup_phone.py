@@ -1,9 +1,9 @@
-"""One-command phone setup: install the agent APK, enable its accessibility service, open the adb bridge.
+"""One-command phone setup: install the agent APK, open permission setup, forward the adb bridge.
 
-uv run python scripts/setup_phone.py            # install + enable + forward
+uv run python scripts/setup_phone.py            # install + prompt for access + forward
 uv run python scripts/setup_phone.py --build     # also build the debug APK first (needs the Android SDK + JDK 17)
 
-Works on macOS and Windows. Safe to re-run; it appends to the accessibility list, never overwrites it.
+Works on macOS and Windows. Permissions are approved by the owner on the phone.
 """
 import argparse
 import platform
@@ -11,12 +11,10 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 APK = ROOT / "android/app/build/outputs/apk/debug/app-debug.apk"
-SERVICE = "dev.layatest.agent/dev.layatest.agent.AgentService"
 PORT = 8765
 adb = shutil.which("adb") or sys.exit("adb not found on PATH (install Android platform-tools)")
 
@@ -50,27 +48,8 @@ def main():
             sys.exit("gradle build failed (need the Android SDK and JDK 17)")
     print(f"installing {APK.name}...")
     print(sh(*dev, "install", "-r", str(APK)))
-    # "Hey Friday" (D-035) listens only with the mic granted; granting here saves tapping through the dialog.
-    sh(*dev, "shell", "pm", "grant", "dev.layatest.agent", "android.permission.RECORD_AUDIO")
-
-    # An app update makes Android re-check accessibility services and rewrite the list; an enable
-    # that lands mid-check gets wiped (seen 2026-10-17), so wait and retry.
-    for _ in range(4):
-        time.sleep(2)
-        enabled = sh("shell", *dev, "settings", "get", "secure", "enabled_accessibility_services")
-        current = [s for s in (enabled or "").split(":") if s and s != "null"]
-        if SERVICE not in current:
-            current.append(SERVICE)
-            sh("shell", *dev, "settings", "put", "secure", "enabled_accessibility_services", ":".join(current))
-        sh("shell", *dev, "settings", "put", "secure", "accessibility_enabled", "1")
-        time.sleep(1)
-        if SERVICE in sh("shell", *dev, "settings", "get", "secure", "enabled_accessibility_services"):
-            break
-    else:
-        sys.exit("could not enable the service. Turn on 'Friday' by hand: Settings > Accessibility.")
-
     # Uninstalling wipes the app's storage: put Laya back if it's missing (a fresh install needs it).
-    have = sh("shell", *dev, "run-as", "dev.layatest.agent", "ls", "files", check=False)
+    have = sh(*dev, "shell", "run-as", "dev.layatest.agent", "ls", "files", check=False)
     from bench_device import MODELS, push_into_files  # sibling script; shares the shell->run-as copy
     for name in ("laya-android.nb8-h-e16.onnx", "tokenizer.json"):
         if name not in have:
@@ -80,7 +59,9 @@ def main():
             push_into_files(src, name)
 
     sh(*dev, "forward", f"tcp:{PORT}", "localabstract:layatest_agent")
-    print(f"\nready. service enabled, Laya on the phone, bridge on tcp:{PORT}.")
+    sh(*dev, "shell", "am", "start", "-n", "dev.layatest.agent/.MainActivity")
+    print(f"\nInstalled with Laya on the phone; bridge forwarded on tcp:{PORT}.")
+    print("Approve Friday's access on the phone: Tools > Permissions. The bridge connects after Accessibility is enabled.")
     print('run a task:  uv run python scripts/live_adb.py --app "Open the Clock app and go to the Timer tab"')
 
 

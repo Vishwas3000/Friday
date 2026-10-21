@@ -61,7 +61,11 @@ class AgentService : AccessibilityService() {
         bridge?.stop()
         wake?.close()
         bubble?.hide()
-        Thread({ modelLock.lock(); try { freeLaya() } finally { modelLock.unlock() } }, "models-destroy").start()
+        main.removeCallbacks(idleRelease)
+        Thread({
+            modelLock.lock()
+            try { freeTaskModels() } finally { modelLock.unlock() }
+        }, "models-destroy").start()
         instance = null
         Thread({ TaskStore.get(this).changed() }, "friday-service-state").start()
         super.onDestroy()
@@ -76,7 +80,7 @@ class AgentService : AccessibilityService() {
             return JSONObject().put("status", "busy").put("error", "A model is loading or running")
         }
         return try {
-            if (cmd == "bench" || cmd == "decide_test") freeLaya()
+            if (cmd == "bench" || cmd == "decide_test") freeTaskModels()
             command(c)
         } finally {
             layaIdle()
@@ -317,7 +321,10 @@ class AgentService : AccessibilityService() {
     }
 
     private fun endRequest() {
+        // Publish the new deadline before another thread can observe the request as idle.
+        modelsUsedAt = SystemClock.uptimeMillis()
         synchronized(requestState) { running = false }
+        layaIdle()
         TaskStore.get(this).changed() // Enables Resume after the last state commit releases the request gate.
     }
 
@@ -387,41 +394,67 @@ class AgentService : AccessibilityService() {
         return true
     }
 
-    // ---- Laya stays warm between requests and is freed after IDLE_MS unused (D-016: load on demand, free when idle) ----
+    // ---- Task models stay warm for IDLE_MS; active requests own them through modelLock. ----
     @Volatile private var warm: LayaEngine? = null
-    // off the main thread: releasing waits on the lock that laya() holds while loading (~10 s)
-    private val idleRelease = Runnable { Thread(::releaseLaya, "laya-release").start() }
+    @Volatile private var modelsUsedAt = 0L
+    @Volatile private var trimModels = false
+    // No wake alarm: if the phone sleeps, this runs when the main looper can run again.
+    private val idleRelease = Runnable { Thread(::releaseIdleModels, "models-release").start() }
 
     internal val layaWarm get() = warm != null
 
     /** The shared engine, loading it if needed (~10 s). Callers must not close it; call [layaIdle] when done. */
     internal fun laya(): LayaEngine {
-        check(modelLock.isHeldByCurrentThread && !writing) { "Laya needs exclusive model ownership" }
+        check(modelLock.isHeldByCurrentThread && !writing && !destroyed) { "Laya needs exclusive live model ownership" }
         main.removeCallbacks(idleRelease)
+        modelsUsedAt = SystemClock.uptimeMillis()
         return warm ?: LayaEngine(this).also { warm = it }
     }
 
     internal fun layaIdle() {
         main.removeCallbacks(idleRelease)
-        main.postDelayed(idleRelease, IDLE_MS)
+        if (destroyed) return
+        modelsUsedAt = SystemClock.uptimeMillis()
+        if (trimModels) idleRelease.run() else main.postDelayed(idleRelease, IDLE_MS)
     }
 
     private fun freeLaya() {
         check(modelLock.isHeldByCurrentThread)
         main.removeCallbacks(idleRelease)
-        warm?.close()
+        val previous = warm
         warm = null
+        previous?.close()
     }
 
-    private fun releaseLaya() {
-        if (running || !modelLock.tryLock()) return
-        try { if (!running) freeLaya() } finally { modelLock.unlock() }
+    private fun freeTaskModels() {
+        check(modelLock.isHeldByCurrentThread)
+        try { freeLaya() } finally { IconNamer.release() }
+    }
+
+    private fun releaseIdleModels() {
+        if (busy) return
+        if (!modelLock.tryLock()) {
+            // Prewarm also owns this lock, but has no endRequest callback to retry a pending trim.
+            if (!destroyed) main.postDelayed(idleRelease, 1000)
+            return
+        }
+        try {
+            if (busy) return
+            val remaining = IDLE_MS - (SystemClock.uptimeMillis() - modelsUsedAt)
+            if (!destroyed && !trimModels && remaining > 0) {
+                main.removeCallbacks(idleRelease)
+                main.postDelayed(idleRelease, remaining)
+                return
+            }
+            trimModels = false
+            freeTaskModels()
+        } finally { modelLock.unlock() }
     }
 
     /** Writer requests are text-only; it is always freed before this model lock can pass to Laya. */
     internal fun write(request: WriterRequest, stopped: () -> Boolean = { false }): JSONObject {
         check(modelLock.isHeldByCurrentThread)
-        if (request.errors().isEmpty()) freeLaya()
+        if (request.errors().isEmpty()) freeTaskModels()
         writing = true
         return try { Writer.run(this, request) { destroyed || stopped() } }
         finally { writing = false }
@@ -438,7 +471,20 @@ class AgentService : AccessibilityService() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) idleRelease.run()
+        if (level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+            level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) requestModelTrim()
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        requestModelTrim()
+    }
+
+    private fun requestModelTrim() {
+        trimModels = true
+        main.removeCallbacks(idleRelease)
+        idleRelease.run()
     }
 
     // ---- Teach mode (D-033): taps and typing are subscribed to only while the owner is teaching ----
@@ -458,7 +504,9 @@ class AgentService : AccessibilityService() {
     }
 
     internal fun teachingEnded(message: String) {
+        modelsUsedAt = SystemClock.uptimeMillis()
         teacher = null
+        layaIdle()
         listenForTeaching(false)
         bubble?.show()
         toast(message)
@@ -692,8 +740,8 @@ class AgentService : AccessibilityService() {
 
     companion object {
         @Volatile var instance: AgentService? = null
-        private const val IDLE_MS = 3 * 60_000L  // ~700 MB stays resident this long after a request (D-016)
-        private val MODEL_COMMANDS = setOf("ask", "writer", "route", "bench", "decide_test", "step_parity", "shortlist_eval", "laya_pin", "coordinator_selfcheck")
+        private const val IDLE_MS = 3 * 60_000L
+        private val MODEL_COMMANDS = setOf("ask", "writer", "route", "bench", "decide_test", "step_parity", "shortlist_eval", "laya_pin", "coordinator_selfcheck", "icons")
         private val SEARCH_BOX = Regex("search|query|find|look ?up", RegexOption.IGNORE_CASE)
         private val TEACH_EVENTS = AccessibilityEvent.TYPE_VIEW_CLICKED or AccessibilityEvent.TYPE_VIEW_LONG_CLICKED or
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED

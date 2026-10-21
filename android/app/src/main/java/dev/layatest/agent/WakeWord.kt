@@ -113,6 +113,7 @@ class WakeWord(private val svc: AgentService) : AutoCloseable {
     private val events = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) = update() }
     private var modeListener: AudioManager.OnModeChangedListener? = null
     private var listener: Listener? = null
+    @Volatile private var closed = false
 
     // debug stats for the bridge "wake" command, reset at each read; no audio or scores are logged or stored
     @Volatile private var frames = 0
@@ -135,10 +136,10 @@ class WakeWord(private val svc: AgentService) : AutoCloseable {
     }
 
     @Synchronized fun update() {
-        val want = isOn(svc) && plugged() && audio.mode == AudioManager.MODE_NORMAL  // calls: IN_CALL, IN_COMMUNICATION
+        val want = !closed && !svc.stopping && isOn(svc) && plugged() && audio.mode == AudioManager.MODE_NORMAL  // calls: IN_CALL, IN_COMMUNICATION
         val l = listener
         if (want && (l == null || l.stopped)) listener = Listener(l).also { it.start() }
-        if (!want) l?.stopped = true
+        if (!want) l?.stopListening()
     }
 
     private fun plugged() = (svc.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -146,6 +147,7 @@ class WakeWord(private val svc: AgentService) : AutoCloseable {
 
     /** "Hey Friday": a short buzz, then the request box with the keyboard up. Not while Friday is busy. */
     private fun woke() {
+        if (closed || svc.stopping || !isOn(svc) || !plugged()) return
         detections++
         if (svc.busy) return
         val buzz = VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK)
@@ -172,10 +174,12 @@ class WakeWord(private val svc: AgentService) : AutoCloseable {
         return out
     }
 
-    override fun close() {
+    @Synchronized override fun close() {
+        if (closed) return
+        closed = true
         runCatching { svc.unregisterReceiver(events) }
         if (Build.VERSION.SDK_INT >= 31) modeListener?.let { audio.removeOnModeChangedListener(it) }
-        listener?.stopped = true
+        listener?.stopListening()
     }
 
     /** One capture session: 16 kHz mono from VOICE_RECOGNITION, scored frame by frame; joins [prev] first. */
@@ -183,19 +187,27 @@ class WakeWord(private val svc: AgentService) : AutoCloseable {
         @Volatile var stopped = false
         @Volatile var record: AudioRecord? = null
 
+        fun stopListening() {
+            stopped = true
+            // Unblock AudioRecord.read; only the listener's finally releases audio and ONNX resources.
+            record?.let { runCatching { it.stop() } }
+        }
+
         @SuppressLint("MissingPermission")  // update() only starts a Listener once RECORD_AUDIO is granted
         override fun run() {
-            prev?.join()
             val frame = ShortArray(FRAME)
             var det: WakeDetector? = null
             var rec: AudioRecord? = null
             try {
+                prev?.join()
+                if (stopped || closed || svc.stopping) return
                 det = WakeDetector(svc)
                 if (stopped) return  // switched off while the models loaded: never open the mic
                 rec = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE, AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT, maxOf(AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO,
                         AudioFormat.ENCODING_PCM_16BIT), RATE * 2))  // 1 s of slack
                 record = rec
+                if (stopped || closed || svc.stopping) return
                 rec.startRecording()
                 var held = 0
                 while (!stopped && rec.read(frame, 0, FRAME) == FRAME) {
@@ -215,7 +227,7 @@ class WakeWord(private val svc: AgentService) : AutoCloseable {
                     }
                 }
             } catch (e: Exception) {
-                lastError = e.toString()  // the next update() (power, call end, switch) tries again
+                if (!stopped && !closed && !svc.stopping) lastError = e.toString()  // the next update() retries
             } finally {
                 stopped = true
                 record = null

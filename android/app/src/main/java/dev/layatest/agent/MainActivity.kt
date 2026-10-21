@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.text.Editable
@@ -40,6 +41,7 @@ class MainActivity : Activity() {
     private lateinit var turns: LinearLayout
     private lateinit var transcript: ScrollView
     private lateinit var taskCard: LinearLayout
+    private var permissionsDialog: AlertDialog? = null
     private var shownTaskId: String? = null
     private val taskWorker = Executors.newSingleThreadExecutor { Thread(it, "friday-task-card") }
     private var taskStore: TaskStore? = null // worker thread only
@@ -71,7 +73,7 @@ class MainActivity : Activity() {
             textSize = 18f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END
             setPadding(dp(4), dp(8), dp(4), dp(8))
             setOnClickListener {
-                if (AgentService.instance == null) startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                if (AgentService.instance == null) openAccessibilitySettings()
             }
         }
         stats = TextView(this).apply { textSize = 12f; typeface = android.graphics.Typeface.MONOSPACE; setPadding(dp(12), dp(8), dp(12), dp(8)) }
@@ -101,7 +103,7 @@ class MainActivity : Activity() {
             val g = goal.text.toString().trim()
             val submittedAt = System.currentTimeMillis()
             when {
-                svc == null -> toast("Turn on Friday in Accessibility first")
+                svc == null -> openAccessibilitySettings()
                 g.isEmpty() -> toast(if (research) "Type a topic to research" else "Type a goal")
                 svc.runGoal(g, research = research) -> {
                     pending = g; pendingAt = submittedAt
@@ -133,7 +135,7 @@ class MainActivity : Activity() {
                 val svc = AgentService.instance
                 val g = goal.text.toString().trim()
                 when {
-                    svc == null -> toast("Turn on Friday in Accessibility first")
+                    svc == null -> openAccessibilitySettings()
                     g.isEmpty() -> toast("First type what you'll do")
                     svc.startTeaching(g) -> toast("Recording — do the task, then tap Done on the red banner")
                     else -> toast("Friday is busy — try again in a moment")
@@ -157,8 +159,8 @@ class MainActivity : Activity() {
             }
         }
         val open = Button(this).apply {
-            text = "Open Accessibility settings"
-            setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+            text = "Permissions"
+            setOnClickListener { showPermissions() }
         }
         // the wake word (D-035), opt-in; a click listener, so onResume can set the state without asking for the mic
         listen = Switch(this).apply {
@@ -236,8 +238,68 @@ class MainActivity : Activity() {
         // every launch (icon, "Hey Google, open Friday", Quick Tap, the wake word) opens ready to type; the
         // manifest's stateAlwaysVisible brings the keyboard up whenever this window gets focus
         goal.requestFocus()
+        val featurePermission = intent?.getBooleanExtra(ASK_MIC, false) == true || intent?.getBooleanExtra(ASK_CALENDAR, false) == true
         askMicForBubble(intent)
         askCalendarAccess(intent)
+        if (!featurePermission && (savedInstanceState?.getBoolean("permissions_open") == true ||
+                !getSharedPreferences("setup", MODE_PRIVATE).getBoolean("permissions_prompted", false))) {
+            root.post { showPermissions() }
+        }
+    }
+
+    private fun openAccessibilitySettings() {
+        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        toast("Open Friday under Downloaded apps, then enable Use Friday")
+    }
+
+    private fun showPermissions() {
+        if (isFinishing || isDestroyed) return
+        permissionsDialog?.dismiss()
+        getSharedPreferences("setup", MODE_PRIVATE).edit().putBoolean("permissions_prompted", true).apply()
+        val choices = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), 0, dp(16), 0)
+        }
+        fun access(label: String, granted: Boolean, request: () -> Unit) {
+            choices.addView(Button(this).apply {
+                text = if (granted) "$label · allowed" else "Allow $label"
+                isEnabled = !granted
+                setOnClickListener { request() }
+            })
+        }
+        access("app control (Accessibility)", AgentService.instance != null) {
+            openAccessibilitySettings()
+        }
+        access("microphone", micGranted()) {
+            requestSetupAccess(arrayOf(Manifest.permission.RECORD_AUDIO))
+        }
+        access("calendar", CalendarEvents.hasAccess(this)) {
+            requestSetupAccess(CalendarEvents.permissions)
+        }
+        access("system settings", Settings.System.canWrite(this)) {
+            startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")))
+        }
+        permissionsDialog = AlertDialog.Builder(this)
+            .setTitle("Set up Friday")
+            .setMessage("Accessibility is required to control apps. Microphone enables voice input, calendar enables reading and creating events, and system settings enables brightness control.\n\nApprove access in Android's screens. You can skip optional access and return through Tools → Permissions. Microphone access does not turn on wake-word listening.")
+            .setView(ScrollView(this).apply { addView(choices) })
+            .setPositiveButton("Done", null)
+            .create().also { dialog ->
+                dialog.setOnDismissListener { permissionsDialog = null }
+                dialog.show()
+            }
+    }
+
+    private fun requestSetupAccess(permissions: Array<String>) {
+        val needed = permissions.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }.toTypedArray()
+        if (needed.isEmpty()) return
+        val prefs = getSharedPreferences("setup", MODE_PRIVATE)
+        if (needed.any { prefs.getBoolean("requested_$it", false) && !shouldShowRequestPermissionRationale(it) }) {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+            return
+        }
+        prefs.edit().also { edit -> needed.forEach { edit.putBoolean("requested_$it", true) } }.apply()
+        requestPermissions(needed, SETUP_ACCESS)
     }
 
     private fun micGranted() = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -264,6 +326,11 @@ class MainActivity : Activity() {
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        if (requestCode == SETUP_ACCESS) {
+            if (permissions.any { it in CalendarEvents.permissions }) CalendarEvents.permissionResult = CalendarEvents.hasAccess(this)
+            if (permissionsDialog?.isShowing == true) showPermissions()
+            return
+        }
         if (requestCode == CALENDAR_ACCESS) {
             CalendarEvents.permissionResult = CalendarEvents.hasAccess(this)
             return
@@ -284,8 +351,9 @@ class MainActivity : Activity() {
         schedulePrewarm()
         listen.isChecked = WakeWord.isOn(this)
         bubble.isChecked = Bubble.isOn(this)
-        AgentService.instance?.wake?.update()  // picks up a mic grant made outside the app (setup_phone.py, Settings)
+        AgentService.instance?.wake?.update()  // picks up a mic grant made in Android Settings
         refreshServiceStatus()
+        if (permissionsDialog?.isShowing == true) showPermissions()
     }
 
     override fun onPause() {
@@ -301,6 +369,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         destroyed = true
+        permissionsDialog?.dismiss()
         taskWorker.execute {
             if (taskObserving) { taskStore?.removeObserver(taskChanged); taskObserving = false }
         }
@@ -313,6 +382,7 @@ class MainActivity : Activity() {
         outState.putLong("pending_at", pendingAt)
         outState.putString("pending_chat_id", pendingChatId)
         outState.putString("composer", goal.text.toString())
+        outState.putBoolean("permissions_open", permissionsDialog?.isShowing == true)
         super.onSaveInstanceState(outState)
     }
 
@@ -435,12 +505,12 @@ class MainActivity : Activity() {
         if (!terminal) taskCard.addView(LinearLayout(this).apply {
             if (state !in setOf("WAITING_INPUT", "WAITING_APPROVAL")) addView(Button(this@MainActivity).apply {
                 text = "Resume"
-                isEnabled = AgentService.instance != null && AgentService.instance?.busy != true && !clearingChat
+                isEnabled = AgentService.instance?.busy != true && !clearingChat
                 setOnClickListener {
                     val svc = AgentService.instance
                     when {
                         clearingChat -> toast("Wait for this chat to finish clearing")
-                        svc == null -> toast("Turn on Friday in Accessibility first")
+                        svc == null -> openAccessibilitySettings()
                         svc.resumeTask(task.id) -> { refreshTask(); toast("Resuming saved task…") }
                         else -> toast("Friday is busy or this task can't resume yet")
                     }
@@ -522,5 +592,6 @@ class MainActivity : Activity() {
         const val ASK_CALENDAR = "ask_calendar"
         private const val BUBBLE_MIC = 2
         private const val CALENDAR_ACCESS = 3
+        private const val SETUP_ACCESS = 4
     }
 }

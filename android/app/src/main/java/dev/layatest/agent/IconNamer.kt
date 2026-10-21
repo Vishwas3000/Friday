@@ -32,6 +32,14 @@ object IconNamer {
     private var loaded: String? = null  // the pushed files [model] came from: a re-push loads again, a bad push is tried once
     private var model: Model? = null
 
+    /** Same lock as classify: never close an ONNX session while its inference is using it. */
+    @Synchronized internal fun release() {
+        val previous = model ?: return
+        model = null
+        loaded = null
+        previous.close()
+    }
+
     /**
      * [cands] with their unnamed icons named, from the cache or the model; [note] gets a trace line when the model ran.
      * Nothing runs unless an unnamed icon is on screen, the model is on the phone and no money app is on screen.
