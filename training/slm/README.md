@@ -50,10 +50,13 @@ Friday's production prompt or constrained grammar.
 | [monitor_prepared.py](monitor_prepared.py) | Read-only health checks, validation curves and graph refresh alongside training |
 | [plot_prepared.py](plot_prepared.py) | Matplotlib PNG/SVG and a self-contained HTML dashboard from recorded metrics |
 | [sync_prepared.py](sync_prepared.py) | Verified SSH transfer of the live dashboard to local storage |
+| [evaluate_prepared.py](evaluate_prepared.py) | Post-selection base/selected comparison on identical prepared validation IDs, with public writing inputs for semantic review |
 
 [MONITORING.md](MONITORING.md) explains the six graphs, continuous checks and
 isolated plotting setup. Graphs use recorded losses and runtime metrics; generated
 answers and Android actions still require their separate evaluations.
+Versioned graph snapshots and their numeric data are in
+[reports/prepared-state-stage1](reports/prepared-state-stage1/README.md).
 
 Frozen evaluation never supplies labels, tunes prompts, selects a checkpoint or
 drives Optuna. Candidate train and validation use separate template/value pools;

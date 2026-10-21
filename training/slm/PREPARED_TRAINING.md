@@ -249,6 +249,32 @@ The diagnostic verifies selected-weight and cache hashes before reading our own
 validation cache. It uses the fixed validation selection policy with a 96-row
 cap and writes `final-prepared-validation.json` with `selection_eligible=false`.
 
+### Comparing generated responses with the pinned base
+
+After the queued pipeline releases the GPU, the separate
+[evaluate_prepared.py](evaluate_prepared.py) can run the pinned base on the same
+validation IDs, cached prompts, 96-row selection policy, BF16/SDPA and 256-token
+generation limit:
+
+```sh
+bash job.sh evaluate_prepared.py \
+  --run out/prepared-state-stage1-throughput --checkpoint base \
+  --output out/prepared-state-stage1-throughput/base-prepared-validation.json
+```
+
+The helper requires a completed epoch and checks configuration, frozen helper
+code, cache hashes and tokenizer IDs before generation. It records model and
+artifact hashes, selection IDs, raw responses and scores. Public source messages
+are included for writing outputs so semantic review can check the request and
+source facts. It refuses to overwrite a report. `--checkpoint selected` can
+reproduce the selected-model diagnostic with the same settings into a new file.
+
+This comparison is for reporting after checkpoint selection. Keep generated
+state accuracy, writing judgments, old-contract frozen regression and Android
+actions separate. The same-subset initial base token loss is comparable with
+this run's loss curve; the earlier synthetic pilot's loss uses a different
+corpus and objective.
+
 ## Instance and artifacts
 
 The [continuous dashboard](MONITORING.md) refreshes training graphs and health

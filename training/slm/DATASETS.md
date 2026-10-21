@@ -10,6 +10,23 @@ ignored `training/slm/out/external-full/`; the two initial sample shards remain 
 document records source versions, download counts, adapter gates and limits.
 No private app data, model weights or large UI dataset shards were downloaded.
 
+### Local storage update, 22 October 2026
+
+The local public caches `external-full`, `dialogue-v2`, `dialogue-v2-clean`,
+`dialogue-v2-sample` and `dialogue-v2-final` are now lossless archives under ignored
+`training/slm/out/local-cache-archives/`. Every archive was independently streamed
+and checked against every original file's SHA256 before reclaiming its unpacked
+cache. Matching JSON manifests retain archive hashes, member hashes and restore
+commands. The remote run still uses its original input paths and bytes.
+
+Restore the needed local cache before rerunning a loader or source audit. From
+`training/slm/out/`, for example:
+
+```sh
+tar -xzf local-cache-archives/external-full.tar.gz
+tar -xzf local-cache-archives/dialogue-v2-final.tar.gz
+```
+
 ## Candidate sources
 
 | Dataset | Format and size | Useful Friday supervision | Access/license and adaptation limits |
@@ -40,10 +57,12 @@ records** from CoEdIT and DialogSum and the exact source/output hashes. The sepa
 1,151 future validation rows**. Raw and prepared files remain under ignored
 `out/writing-external/`; publisher validation/test files were not downloaded.
 
-These are publisher targets with lexical filters, not Qwen labels or semantically
-verified answers. They need a future `messages`/`response` loader, reviewed examples,
-tokenizer checks and an independent writing evaluation. They have not entered the
-completed pilot or any new training run and are separate from `dialogue_state_v2`.
+Publisher targets require semantic screening beyond lexical filters. The active
+[prepared-data stage](PREPARED_TRAINING.md) includes 23 independently AI-approved
+writing training references and 30 approved validation references after sampled
+review. Rejected and unreviewed targets remain excluded following the failed
+teacher-filter calibration. These rows remain separate from the completed
+synthetic pilot and use a different manifest from `dialogue_state_v2`.
 The writing guide supplies the standard-library `--self-check`/`--fetch` commands,
 grouped split rules, licenses and measured exclusions.
 
