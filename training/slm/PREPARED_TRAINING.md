@@ -65,10 +65,10 @@ python3 train_prepared.py --self-check
 bash job.sh train_prepared.py \
   --writing-review out/writing-external/prepared/semantic-sample-review.json \
   --frozen ../../tests/slm-regression.json ../../tests/slm-domain-regression.json \
-  --out out/prepared-state-stage1-batched \
+  --out out/prepared-state-stage1-throughput \
   --batch-size 4 --accumulate 4 --max-sequence 2048 \
   --learning-rate 2e-5 --writing-share 0.02 \
-  --validation-loss-limit 192 --validation-generation-limit 96 \
+  --validation-loss-limit 192 --validation-generation-limit 0 \
   --max-steps 2
 ```
 
@@ -106,12 +106,27 @@ IDs, masks and validation prefixes in all 16 equivalence checks. The full scan
 subsequently exceeded 520 rows/second. Tokenization results are cached and bound
 to source, review, template, configuration and code hashes.
 
-The managed `friday-slm-prepared-state` pipeline uses
-`out/prepared-state-stage1-batched/`. It automatically runs two real optimization
-steps, verifies the stopped status and recoverable checkpoint, resumes the same
-configuration for the full epoch, and runs the original 84-case and 24-case frozen
-reports only after completion. The pipeline survives the local SSH session ending;
-no model evaluation result changes checkpoint selection.
+The first two-step check then exposed a second bottleneck: serial generated
+responses held GPU use near 14% for minutes. Generated diagnostics were moved
+after final checkpoint selection. The 192-row capped validation-loss checks still
+run every 500 steps. This changes diagnostic timing, not the validation-loss
+objective or the data. The at-most-two warmup updates were replayed from the same
+pinned base; both original run directories remain as audit artifacts.
+
+The managed `friday-slm-prepared-state` pipeline now uses
+`out/prepared-state-stage1-throughput/`. It reuses the verified prepared cache
+through hard links, with a new declared configuration and no imported model or
+optimizer state. It automatically runs two real optimization steps, verifies the
+stopped status and recoverable checkpoint, and resumes the same configuration for
+the full epoch. The original 84-case and 24-case frozen reports and a separate
+prepared-validation generation report run only after completion. The last report
+uses the same deterministic selection policy, up to 96 rows, without selection
+eligibility. The pipeline survives the local SSH session ending.
+
+The active pipeline SHA256 is
+`56f70988b298a80cbc6c760f4642f35b133cf31fbe97ca64f22deb5698ec8353`.
+The larger epoch remains on the RTX 4090; the proposed machine migration was
+cancelled before any destination installs, data transfer or job changes.
 
 The reference-judge audit and hardware probes are backed up locally as ignored
 `out/prepared-quality-audit.zip` (73,447 bytes), SHA256
