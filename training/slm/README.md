@@ -1,46 +1,227 @@
-# Small text model GPU smoke probe
+# Friday text model regression and distillation
 
-Replays four synthetic cases from the first Friday SLM comparison: duration,
-combined calendar fields, a short message and a negated message with a reference
-code. This is **BF16, unconstrained GPU generation using each model's chat
-template**. It does not reproduce Friday's production prompts, grammar, GGUF
-runtime, quantization, phone memory or end-to-end task execution.
+This folder compares a pinned teacher and small student, generates separate
+synthetic training data, and trains a student on accepted teacher responses.
+[EXPERIMENT.md](EXPERIMENT.md) holds the experiment contract and measured results;
+[TEACHER_REVIEW.md](TEACHER_REVIEW.md) records interpretation and prose review limits.
+The [expanded app scenario catalogue](../../research/21-friday-use-case-catalogue.md)
+defines separate proposed device acceptance work; it is not another model score.
 
-Run in a job folder on the rented PyTorch image:
+These are **offline language experiments**. They do not change the installed
+Writer or test Android app navigation, sending, calendar writes, research collection
+or booking completion. Shared [prompts.py](prompts.py) is a research interface, not
+Friday's production prompt or constrained grammar.
+
+## Files and split rules
+
+| File | Purpose |
+|---|---|
+| [tests/slm-regression.json](../../tests/slm-regression.json) | Frozen evaluation across task updates, writing, intent and goal interpretation |
+| [tests/slm-task-updates.json](../../tests/slm-task-updates.json) | Original 24 context cases, included in the frozen regression |
+| [make_data.py](make_data.py) | Seeded synthetic train/validation candidates with independent structured gold |
+| [regression.py](regression.py) | Strict JSON, schema, source spans, normalized values, gold and writing canaries |
+| [distill.py](distill.py) | Teacher labeling, writing review gate, response-only full SFT and bounded Optuna study |
+| [probe.py](probe.py) | Separate four-case development smoke probe |
+
+Frozen evaluation never supplies labels, tunes prompts, selects a checkpoint or
+drives Optuna. Candidate train and validation use separate template/value pools;
+the generator checks exact prompt overlap with each other and frozen evaluation.
+Those checks do not prove semantic independence or broad generalization.
+
+Structured responses must match independently defined gold and pass schema/span
+checks. Query and intent cases distinguish a search target from app names, command
+words and library scopes; cited text remains data, without authority to operate an
+app. Writing checks cover literal facts, numbers, IDs and lexical negation, with
+independent AI review before a writing target can enter training loss. A mechanical
+pass or AI approval is not human semantic certification or app-task success.
+
+## 1. Prepare the checkout and environment
+
+Keep the repository layout, including `tests/`. Commands below start at the repo
+root, then stay in `training/slm/`:
+
+```sh
+cd training/slm
+python3 probe.py --self-check
+python3 regression.py --self-check
+python3 make_data.py --self-check
+python3 distill.py self-check
+```
+
+These focused checks and candidate generation need only Python's standard library;
+they can run locally. GPU inference and training run on the rented machine. On its
+PyTorch image:
 
 ```sh
 bash setup.sh
-.venv/bin/python probe.py
 ```
 
-Setup inherits PyTorch/CUDA from `/venv/main` through a job-local venv and pins
-Transformers 4.57.6 and safetensors 0.8.0. It changes no drivers or global packages.
-The probe records actual package/CUDA versions and pinned model revisions. It
-requires a CUDA GPU supporting BF16; there is no CPU fallback. Model files go into
-the job's ignored `.hf/` cache and reports into ignored `out/`.
+Setup creates `.venv` with `--system-site-packages`, inheriting PyTorch/CUDA from
+`/venv/main`, and locally installs Transformers **4.57.6**, safetensors **0.8.0** and
+Optuna **4.5.0**. No global packages or drivers change. Reports record actual
+PyTorch/CUDA versions. The pilot uses a 24 GB RTX 4090; CUDA BF16 support is required.
+Teacher inference is BF16; full student SFT uses FP32 weights/optimizer with BF16
+autocast. There is no CPU training fallback.
 
-SmolLM2-360M and LFM2-350M run by default; select one with `--models smollm2` or
-`--models lfm2`. `--models qwen3` runs the pinned Qwen3-4B-Instruct-2507 comparison.
-Use `--output PATH` to select a report destination. Reports retain
-raw decoded outputs, templates, exact inputs, timings and peak allocated GPU
-memory. Generation time excludes loading and tokenization; it is not phone latency.
-GPU memory is PyTorch peak allocated memory, not total process/device memory.
+For long runs, submit the following `bash job.sh ...` commands to the instance's
+existing supervisor, following its guide. Retain its job/PID/log metadata and watch
+the emitted JSON progress. `job.sh` selects the job venv, unbuffered output and
+bounded CPU threads; it is not itself a supervisor. Run teacher and student jobs
+sequentially so the teacher exits and releases GPU memory before training.
 
-JSON validation parses the entire output, rejects fences, duplicate keys and
-nonfinite values, and checks the exact required string fields. Duration and
-calendar extraction have exact expected fields. Message cases have **no automatic
-semantic pass**: review the recorded criteria and raw text for preserved facts,
-negation and reference codes. Four cases are a smoke check, not a benchmark or
-evidence that a model is ready to ship or distill.
+**Flat remote copies:** `make_data.py` resolves fixtures from the repo's `tests/`
+directory; copying only that script into a flat job directory will break it.
+Preserve the checkout, or generate data from the local checkout and upload the
+entire `out/data/` with its manifest. For flat inference/training jobs, upload the
+frozen manifest too and pass its actual path explicitly via `--cases` and
+`--regression`; the relative paths below assume the preserved layout.
 
-The separate [task-update pilot](../../tests/slm-task-updates.json) has 24 synthetic
-evaluation-only cases for Friday's saved-context schema. This four-case probe does
-not execute those cases. Keep evaluation cases out of training/model selection;
-the fixture metadata distinguishes native routing, native rejection and possible
-SLM calls so they are not mislabeled as model failures.
+## 2. Freeze data, then measure teacher and base student
 
-The focused parser/report check needs only Python's standard library:
+Generate 1,200 train and 240 validation candidates once. Existing output files
+are deliberately not overwritten:
 
 ```sh
-python3 probe.py --self-check
+python3 make_data.py --output-dir out/data --rows 1440 --seed 20261021
 ```
+
+Keep `out/data/manifest.json`: it records counts, hashes, split templates and frozen
+fixture hash. Smaller `--rows` picks prefixes of the same seeded split streams for
+throughput pilots; it does not create a new distribution from evaluation feedback.
+
+Run both models against the same frozen manifest, prompts and generation settings:
+
+```sh
+bash job.sh regression.py --cases ../../tests/slm-regression.json \
+  --model Qwen/Qwen3-4B-Instruct-2507 \
+  --revision cdbee75f17c01a7cc42f958dc650907174af0554 \
+  --output out/teacher-regression.json
+bash job.sh regression.py --cases ../../tests/slm-regression.json \
+  --model HuggingFaceTB/SmolLM2-360M-Instruct \
+  --revision a10cc1512eabd3dde888204e902eca88bddb4951 \
+  --output out/base-regression.json
+```
+
+Outputs retain raw responses, rendered prompts, revisions, timing, truncation,
+per-family checks and pending review. Do not repair fenced/partial JSON or change
+the frozen cases in response to these results. Native guard expectations in the
+fixtures are unmeasured metadata until exercised in Kotlin.
+
+## 3. Label and independently review writing targets
+
+```sh
+bash job.sh distill.py label \
+  --train out/data/train.jsonl --validation out/data/validation.jsonl \
+  --regression ../../tests/slm-regression.json --out out/labels --batch-size 8
+```
+
+Structured labels need exact independent gold, schema, provenance and value checks;
+bad or truncated responses are rejected without repair. Writing labels first pass
+mechanical checks. Raw accepted/rejected responses remain in atomic
+`out/labels/label_batches/*.json`; accepted rows become `train.labels.jsonl` and
+`validation.labels.jsonl`. The label manifest records source/code/model hashes.
+
+`--resume` reuses atomic batches only with identical inputs/configuration. Keep the
+exact labeling source version: the recorded whole-script hash is audit metadata,
+not part of the automatic resume configuration check. Resume with that original
+source, rather than mixing responses produced by changed labeling code.
+
+Independently review **every accepted writing response** against its source,
+instruction and rubric, including names, actors, deadlines, uncertainty, negation,
+new commitments and claims that actions already happened. Save decisions outside
+Git, for example `out/writing-review.json`, using this exact shape with real IDs and
+computed hashes in place of the placeholders:
+
+```json
+{
+  "version": 1,
+  "reviewer": "Codex independent agent (AI, not human)",
+  "reviews": {
+    "<accepted-writing-row-id>": {
+      "response_sha256": "<sha256-of-exact-response-UTF8>",
+      "approved": true,
+      "reason": "Preserves each source fact, actor, qualifier and requested tone."
+    }
+  }
+}
+```
+
+Hash the exact `response` string from the accepted JSONL row, including whitespace;
+do not hash its parsed/reformatted JSON. `approved` must be a JSON boolean. Unknown
+or non-writing IDs, missing reasons and stale response hashes fail the gate.
+Rejected and unreviewed writing targets are excluded from **both train and
+validation loss**. Without `--writing-review`, all writing targets are excluded;
+structured labels are unchanged. Reports identify the AI reviewer, review-file hash
+and inclusion/exclusion counts. AI review does not certify the model's semantics.
+
+## 4. Train and select with synthetic validation responses
+
+```sh
+bash job.sh distill.py train --data out/labels --out out/study \
+  --trials 3 --epochs 1 --batch-size 4 --accumulate 4 \
+  --validation-generation-limit 48 \
+  --validation-candidates out/data/validation.jsonl \
+  --writing-review out/writing-review.json
+```
+
+The bounded Optuna grid tests learning rates `2e-5`, `5e-5` and `1e-4`, with the same
+seed and data. Validation response loss selects an epoch inside each trial. A fixed
+family-stratified subset of the **original validation candidates**, including
+teacher-rejected cases, supplies generated-answer checks for trial selection;
+its SHA must match the label job. The objective maximizes accepted mechanical/exact
+responses. Ties use lower validation loss, then lower trial number. Frozen regression
+never chooses a trial or checkpoint. Writing scores still leave meaning for review.
+
+`out/study/study.sqlite3` persists Optuna history; `study.json` records the selected
+checkpoint, objective, hashes and trials. Each trial retains its best full weights,
+tokenizer, `training.json` and raw validation responses. Assistant response and EOS
+tokens are supervised; system/user and padding tokens are masked. Sequences are
+bounded without silent truncation. Best inference weights are retained rather than
+duplicate epoch/optimizer copies; mid-epoch training resume is unsupported. Repeating
+a study reuses completed trials, but stops on an unfinished `RUNNING` trial for
+inspection. Keep source, data and review files unchanged throughout the study.
+
+## 5. Evaluate the selected checkpoint once on frozen cases
+
+Read `selected_checkpoint` in `out/study/study.json`. Use that path, rather than
+choosing a different trial using frozen evaluation results:
+
+```sh
+SELECTED_CHECKPOINT=$(.venv/bin/python -c 'import json; print(json.load(open("out/study/study.json"))["selected_checkpoint"])')
+bash job.sh regression.py --cases ../../tests/slm-regression.json \
+  --model "$SELECTED_CHECKPOINT" --output out/student-regression.json
+```
+
+Compare teacher, base and selected student by family, exact/provenance checks,
+writing errors, truncations and raw responses. A gain on these synthetic cases is
+not a general reliability claim. This checkpoint is unquantized; GGUF conversion,
+quantized regression, production template/grammar integration and Pixel
+memory/latency/battery measurements are separate acceptance steps. GPU generation
+time excludes loading/tokenization and is not phone or end-to-end app latency.
+PyTorch peak allocated bytes are not total process/device memory.
+
+## Separate four-case development smoke
+
+```sh
+bash job.sh probe.py --models smollm2 lfm2 qwen3
+```
+
+`probe.py` uses the models' chat templates with unconstrained BF16 generation on
+duration, combined fields, a short message and negation. Its four cases do not run
+the full regression, use Android prompts or establish a release threshold. It
+defaults to pinned SmolLM2-360M and LFM2-350M; Qwen3 is optional.
+
+## Artifacts and backup
+
+Commit source, original synthetic fixtures, commands and sanitized measured
+summaries. Keep weights, `.hf/`, generated data, raw responses, review decisions and
+SQLite files in ignored `out/`, local `captures/` or `models/`. Never commit device
+transcripts, contacts, credentials or instance connection details.
+
+Before destroying/recycling the instance, copy data/label manifests, raw label
+batches, reviews, study files, training/regression reports and the selected full
+checkpoint off the rented disk. Put reports in local ignored captures and weights
+in ignored models; verify file hashes against the job manifests. Cache can be
+downloaded again from pinned revisions; trained weights and audit artifacts need
+backup. `/workspace` is persistent only when an actual persistent host volume is
+mounted—check the instance guide and capabilities rather than assuming it survives.

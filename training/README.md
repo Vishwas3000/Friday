@@ -1,7 +1,8 @@
 # Training on a rented GPU (Vast.ai)
 
 All training happens here, never on the Mac (D-042). Each job lives in its own folder under `/root/friday-laya/` with its
-own venv: no global installs, drivers, cron or shell changes. Results come back to the Mac's git-ignored `models/`.
+own venv: no global installs, drivers, cron or shell changes. Weights come back to the Mac's git-ignored `models/`;
+raw reports and job audit files go into ignored local `captures/`.
 
 ## What to rent
 | | Icon classifier only | + Laya fine-tune pilots / wake word later |
@@ -56,32 +57,41 @@ Needs Job 2's `data/READY` (it reads `/root/friday-laya/laya/data/`). The two jo
 
 Shared Hugging Face cache for both jobs: `export HF_HOME=/root/friday-laya/hf` (the model is ~0.65 GB).
 
-## Small SLM baseline before distillation
+## Job 4: Friday text distillation, `training/slm/`
 
-`training/slm/` contains a pinned, four-case GPU smoke probe for SmolLM2-360M,
-LFM2-350M and the optional Qwen3-4B-Instruct-2507 teacher. Copy its files into
-`/root/friday-laya/slm/`, then run:
+Use the [complete reproduction guide](slm/README.md),
+[experiment contract/results](slm/EXPERIMENT.md) and
+[teacher review](slm/TEACHER_REVIEW.md). This is an offline language pilot on a 24 GB
+RTX 4090, separate from Laya navigation training and Android app acceptance.
+The [expanded app scenarios](../research/21-friday-use-case-catalogue.md) include
+follow-up context, media, spending, holdings, activity, notes and task modifications.
 
-```sh
-cd /root/friday-laya/slm
-bash setup.sh
-.venv/bin/python probe.py --models smollm2 lfm2 qwen3
-```
+| Step | What runs |
+|---|---|
+| 1. Checkout/setup | Keep `training/slm/` and `tests/` in repo layout. `bash setup.sh` inherits `/venv/main` PyTorch/CUDA through a local venv; pins Transformers 4.57.6, safetensors 0.8.0 and Optuna 4.5.0. |
+| 2. Checks/data | Standard-library self-checks, then `make_data.py`: 1,200 synthetic train and 240 validation candidates, hashes and split/fixture overlap checks. |
+| 3. Baselines | Run pinned Qwen3-4B teacher and SmolLM2-360M base student on the same frozen [language regression](../tests/slm-regression.json). Never use it for tuning. |
+| 4. Teacher labels | Batched greedy generation; strict schema/source spans and independent gold gate structured labels. Keep rejected raw answers and atomic batch checkpoints. |
+| 5. Writing review | Independently AI-review every accepted prose target, bound to its exact response SHA. Unreviewed/rejected writing is excluded from train/validation loss; AI review is not semantic certification. |
+| 6. Student/Optuna | Response-only full SFT. Three fixed LR trials score generated answers on original synthetic validation candidates, including teacher-rejected ones. Validation loss selects an epoch; frozen evaluation does not select anything. |
+| 7. Final comparison | Evaluate the selected checkpoint against the same frozen cases; report per-family exact/provenance, prose and truncation failures. Keep full weights, tokenizer, manifests, study SQLite and hashes. |
+| 8. Backup | Sync reports to ignored local captures and selected weights to ignored models before recycling/destroying the instance. |
 
-Setup reuses the PyTorch image's `/venv/main` environment through a job-local venv.
-It installs no drivers or global packages. Results retain exact prompts, raw outputs,
-model revisions, framework versions and GPU timing/allocation measurements in `out/`.
-This is unconstrained BF16 inference, separate from Android grammar/GGUF evaluation.
+Submit long `job.sh` commands to the instance's existing supervisor and retain its
+logs/PID metadata. Run teacher and student sequentially to release teacher GPU memory.
+The four-case `probe.py` remains a separate development smoke; it does not run the
+full regression. The [original 24 context cases](../tests/slm-task-updates.json) are
+included in frozen evaluation, with native guard expectations labeled as metadata.
 
-The [24 context cases](../tests/slm-task-updates.json) are a separate evaluation-only
-pilot for the current `task_update` interface. They are not loaded by this four-case
-probe and have not had model/native-runtime execution. Keep them out of training and
-checkpoint selection; three native guard cases are marked separately.
+For a flat remote job directory, generate candidates from the local full checkout,
+upload all `out/data/` and its manifest, and pass explicit frozen file paths through
+`--cases`/`--regression`. Do not copy `make_data.py` alone without its repo `tests/`.
 
-Sync useful reports off the rented instance. `/workspace` is only persistent across
-recycle/destroy when a host volume is actually mounted; inspect the instance's guide
-and `vast-capabilities` rather than assuming persistence. The first SLM instance had
-no such volume; its synthetic outputs were backed up to ignored local captures.
+These results do not establish app-task success or production prompt/grammar parity.
+The student still needs quantization, quantized regression and Pixel memory/latency
+checks before replacing Friday's Writer. `/workspace` only survives recycle/destroy
+when a persistent host volume is actually mounted; inspect the instance guide and
+capabilities before relying on it.
 
 ## If the box is lost
 Everything needed to rebuild is in this folder. Rent again (the table above), add the Mac's key, then redo the jobs'

@@ -1,0 +1,213 @@
+{
+  "version": 1,
+  "title": "Friday additional domain language regression",
+  "scope": "24 original synthetic evaluation-only language cases. Existing shared writing, task_update and intent interfaces only; no app collection, navigation, financial transaction, medical assessment or device completion is tested.",
+  "provenance": "Authored from the owner's requested additional domains before model calls on this suite. All records, amounts, holdings, people, tracks and activity values are fictional. No private app captures or chats were used.",
+  "split_policy": "Frozen evaluation only. Never use these rows or teacher outputs as training data, prompt-tuning data or checkpoint-selection data. The earlier 84-case outputs were available to the project; this is explicitly additional domain coverage, not a claim of an independently blinded benchmark. Freeze the file hash before GPU execution.",
+  "interface": "Use training/slm/prompts.py unchanged. text is always a string; task_update text contains a JSON-serialized envelope. Structured expected objects are independently authored; update order is immaterial. Writing uses literal/mechanical checks and a separate semantic rubric, not exact reference prose.",
+  "evaluation_limits": "The supplied app labels establish fictional source context, not actual authorization, collection coverage or API support. Writing canary checks cannot prove relational faithfulness or the absence of every invented fact. An intent or patch match is not task completion. Missing app data remains unknown; no investment recommendation or medical conclusion is requested.",
+  "domain_counts": {
+    "spending_cred": 3,
+    "investment_holdings": 3,
+    "google_fit_activity": 3,
+    "calendar": 3,
+    "todos": 3,
+    "notes": 3,
+    "request_changes": 3,
+    "songs": 3
+  },
+  "cases": [
+    {
+      "id": "DOM-SPEND-01", "family": "writing", "kind": "summary", "split": "evaluation",
+      "instruction": "Summarize the supplied fictional spending breakdown in at most 65 words. Keep each category paired with its amount and preserve the exact date window and reference. Do not infer any unseen transactions or give financial advice.",
+      "text": "SPEND-J81: Fictional CRED category totals for 03 March 2034 to 09 March 2034. Groceries: INR 1,350. Transport: INR 420. Subscriptions: INR 399. These are category totals, not card balances.",
+      "provenance": "Original synthetic category totals; not collected from CRED.",
+      "checks": {"required": ["SPEND-J81", "03 March 2034", "09 March 2034", "Groceries", "INR 1,350", "Transport", "INR 420", "Subscriptions", "INR 399"], "max_words": 65, "forbidden": ["should invest", "should borrow"]},
+      "metadata": {"domain": "spending_cred", "semantic_review": ["All three category-to-amount relationships survive.", "The output retains the source window and distinguishes spending totals from balances.", "No unseen transaction, behavioral diagnosis or money recommendation is added."]}
+    },
+    {
+      "id": "DOM-SPEND-02", "family": "writing", "kind": "summary", "split": "evaluation",
+      "instruction": "Summarize only the supplied fictional transaction states in at most 60 words. Retain the reference, dates, merchant names, currencies and amounts exactly. Do not combine pending and completed entries into a claimed settled total.",
+      "text": "SPEND-Q62: On 11 March 2034, Cedar Books charged INR 860, completed. On 12 March 2034, Metro Grocer shows INR 540, pending. No refund is recorded.",
+      "provenance": "Original synthetic ledger entries; not real transactions.",
+      "checks": {"required": ["SPEND-Q62", "11 March 2034", "Cedar Books", "INR 860", "completed", "12 March 2034", "Metro Grocer", "INR 540", "pending"], "max_words": 60, "forbidden": ["INR 1,400", "refund received"]},
+      "metadata": {"domain": "spending_cred", "semantic_review": ["The book charge remains completed and the grocery entry remains pending.", "No refund is reported and no settled aggregate is invented.", "This is a summary of provided text, not a refreshed CRED read."]}
+    },
+    {
+      "id": "DOM-SPEND-03", "family": "writing", "kind": "summary", "split": "evaluation",
+      "instruction": "Explain the supplied fictional coverage limitation in at most 45 words. Keep the reference and last-sync time. State what remains unknown without inventing a current total.",
+      "text": "SPEND-V43: Last sync was 14 March 2034 at 18:40 UTC. Purchases after that sync are unavailable. The current week total is unknown.",
+      "provenance": "Original synthetic incomplete-sync record.",
+      "checks": {"required": ["SPEND-V43", "14 March 2034", "18:40", "UTC", "unknown"], "max_words": 45, "forbidden": ["INR", "USD", "up to date"]},
+      "metadata": {"domain": "spending_cred", "semantic_review": ["The last-sync time is preserved and not presented as a current successful refresh.", "Missing later purchases prevent a complete current-week total."]}
+    },
+    {
+      "id": "DOM-HOLD-01", "family": "writing", "kind": "summary", "split": "evaluation",
+      "instruction": "Summarize this fictional holdings snapshot in at most 60 words. Preserve reference, date, security labels, quantities, units and currency values exactly. Provide no buy, sell or allocation recommendation.",
+      "text": "HOLD-P73: Snapshot dated 21 April 2034. Cedar Index Fund: 12.5 units, value INR 3,125. Harbor Bond Fund: 8 units, value INR 920. These are reported values, not guaranteed returns.",
+      "provenance": "Original fictional holdings statement; no investment app was read.",
+      "checks": {"required": ["HOLD-P73", "21 April 2034", "Cedar Index Fund", "12.5 units", "INR 3,125", "Harbor Bond Fund", "8 units", "INR 920"], "max_words": 60, "forbidden": ["should buy", "should sell", "risk-free", "guaranteed profit"]},
+      "metadata": {"domain": "investment_holdings", "semantic_review": ["Each quantity and reported value stays attached to its named holding.", "Reported snapshot values are not called forecasts, guaranteed returns or live quotes.", "No recommendation is made."]}
+    },
+    {
+      "id": "DOM-HOLD-02", "family": "writing", "kind": "summary", "split": "evaluation",
+      "instruction": "Summarize the fictional historical figures in at most 55 words. Preserve the exact reference, period, currency figures and negative change. Do not calculate or recommend anything new.",
+      "text": "HOLD-M54: From 01 April 2034 to 30 April 2034, the reported portfolio value changed from USD 2,040 to USD 1,980. The reported change is minus USD 60. Fees are not included.",
+      "provenance": "Original synthetic historical portfolio figures.",
+      "checks": {"required": ["HOLD-M54", "01 April 2034", "30 April 2034", "USD 2,040", "USD 1,980", "minus USD 60"], "max_words": 55, "forbidden": ["INR", "profit of USD 60", "fees included"]},
+      "metadata": {"domain": "investment_holdings", "semantic_review": ["The value declines, rather than rises, over the stated period.", "The amount is a reported historical change with fees excluded.", "No future return or investment decision is inferred."]}
+    },
+    {
+      "id": "DOM-HOLD-03", "family": "writing", "kind": "summary", "split": "evaluation",
+      "instruction": "Summarize only the known and missing information in at most 45 words. Keep reference, holding and quantity. Do not invent a price, currency value or trading suggestion.",
+      "text": "HOLD-C36: Larch Growth Fund has 7 units. The latest price and valuation date are unavailable. Current market value is unknown.",
+      "provenance": "Original synthetic holdings record with missing valuation inputs.",
+      "checks": {"required": ["HOLD-C36", "Larch Growth Fund", "7 units", "unknown"], "max_words": 45, "forbidden": ["INR", "USD", "buy more", "sell now"]},
+      "metadata": {"domain": "investment_holdings", "semantic_review": ["Quantity is known but a current valuation cannot be established.", "No fictional price, valuation time or action recommendation is supplied."]}
+    },
+    {
+      "id": "DOM-FIT-01", "family": "writing", "kind": "summary", "split": "evaluation",
+      "instruction": "Summarize this supplied fictional Google Fit snapshot in at most 50 words. Preserve reference, date, time, step counts and the partial-day limitation. Do not make a medical assessment or calculate new figures.",
+      "text": "FIT-D82: On 07 June 2034 as of 12:30 UTC, recorded activity is 4,800 steps. The displayed goal is 7,500 steps. This is a partial day, not a final daily total.",
+      "provenance": "Original synthetic activity snapshot; no Google Fit data was accessed.",
+      "checks": {"required": ["FIT-D82", "07 June 2034", "12:30", "UTC", "4,800 steps", "7,500 steps", "partial"], "max_words": 50, "forbidden": ["diagnosed", "healthy enough", "final total"]},
+      "metadata": {"domain": "google_fit_activity", "semantic_review": ["Recorded steps remain distinct from the goal.", "The snapshot remains a partial day at the stated time, not a complete day or medical conclusion."]}
+    },
+    {
+      "id": "DOM-FIT-02", "family": "writing", "kind": "summary", "split": "evaluation",
+      "instruction": "Summarize the two fictional activities in at most 55 words. Preserve the reference, date, activity names, durations, distances and units. Do not combine them or infer calories or health effects.",
+      "text": "FIT-L65: On 08 June 2034, Walking lasted 25 minutes over 1.8 km. Cycling lasted 40 minutes over 9.2 km. Calories were not provided.",
+      "provenance": "Original synthetic activity log.",
+      "checks": {"required": ["FIT-L65", "08 June 2034", "Walking", "25 minutes", "1.8 km", "Cycling", "40 minutes", "9.2 km"], "max_words": 55, "forbidden": ["kcal", "weight loss", "diagnosis"]},
+      "metadata": {"domain": "google_fit_activity", "semantic_review": ["Each duration and distance stays with the correct activity.", "No calorie estimate, combined activity or medical inference is invented."]}
+    },
+    {
+      "id": "DOM-FIT-03", "family": "writing", "kind": "summary", "split": "evaluation",
+      "instruction": "Summarize the supplied fictional sync coverage in at most 45 words. Preserve the reference, covered dates and last sync. Explain the missing day as unknown, not zero activity.",
+      "text": "FIT-R47: Available dates are 09 June 2034 and 10 June 2034. Last sync was 10 June 2034 at 20:15 UTC. Activity for 11 June 2034 is unknown, not zero.",
+      "provenance": "Original synthetic fitness coverage record.",
+      "checks": {"required": ["FIT-R47", "09 June 2034", "10 June 2034", "20:15", "UTC", "11 June 2034", "unknown"], "max_words": 45, "forbidden": ["0 steps", "no exercise"]},
+      "metadata": {"domain": "google_fit_activity", "semantic_review": ["The missing day's activity remains unknown rather than measured zero.", "The last sync is distinguished from the requested later day."]}
+    },
+    {
+      "id": "DOM-CAL-01", "family": "task_update", "kind": "task_update", "split": "evaluation",
+      "instruction": "Complete the saved calendar slot for Planning sync.",
+      "text": "{\"capability\":\"calendar.create\",\"fields\":[\"date\",\"start\",\"end\",\"duration\",\"title\",\"zone\"],\"current\":\"Use 2034-04-18 at 15:25 UTC.\",\"date\":\"2034-04-10\",\"zone\":\"UTC\",\"known\":{\"title\":\"Planning sync\",\"duration\":\"40\"},\"missing\":[\"date\",\"start\"],\"question\":\"Which date and start time should I use?\"}",
+      "expected": {"operation": "update", "updates": [{"field": "date", "text": "2034-04-18", "value": "2034-04-18"}, {"field": "start", "text": "15:25", "value": "15:25"}, {"field": "zone", "text": "UTC", "value": "UTC"}]},
+      "provenance": "Original synthetic multi-field calendar reply.",
+      "metadata": {"domain": "calendar", "semantic_checks": ["Collect all three supplied fields while retaining the known title and duration.", "No calendar or alarm action is performed by this language test."]}
+    },
+    {
+      "id": "DOM-CAL-02", "family": "task_update", "kind": "task_update", "split": "evaluation",
+      "instruction": "Finish the saved Planning sync calendar interval.",
+      "text": "{\"capability\":\"calendar.create\",\"fields\":[\"date\",\"start\",\"end\",\"duration\",\"title\",\"zone\"],\"current\":\"End at 16:05.\",\"date\":\"2034-04-10\",\"zone\":\"UTC\",\"known\":{\"date\":\"2034-04-18\",\"start\":\"15:25\",\"title\":\"Planning sync\"},\"missing\":[\"end\"],\"question\":\"What end time should I use?\"}",
+      "expected": {"operation": "update", "updates": [{"field": "end", "text": "16:05", "value": "16:05"}]},
+      "provenance": "Original synthetic explicit end-time reply.",
+      "metadata": {"domain": "calendar", "semantic_checks": ["The explicitly labeled end must not replace start.", "Known date and title remain context, not newly supplied current spans."]}
+    },
+    {
+      "id": "DOM-CAL-03", "family": "task_update", "kind": "task_update", "split": "evaluation",
+      "instruction": "Continue the saved Planning sync calendar task only when the missing detail is supplied.",
+      "text": "{\"capability\":\"calendar.create\",\"fields\":[\"date\",\"start\",\"end\",\"duration\",\"title\",\"zone\"],\"current\":\"I haven't chosen an end time yet.\",\"date\":\"2034-04-10\",\"zone\":\"UTC\",\"known\":{\"date\":\"2034-04-18\",\"start\":\"15:25\",\"title\":\"Planning sync\"},\"missing\":[\"end\"],\"question\":\"What end time or duration should I use?\"}",
+      "expected": {"operation": "clarify", "updates": []},
+      "provenance": "Original synthetic missing-end reply.",
+      "metadata": {"domain": "calendar", "semantic_checks": ["An explicitly unchosen end provides no patch value.", "Native guards and task state are not executed here."]}
+    },
+    {
+      "id": "DOM-TODO-01", "family": "writing", "kind": "title", "split": "evaluation",
+      "instruction": "Write a todo title in at most 8 words. Keep the reference and exact due date. Do not say the task was completed.",
+      "text": "TODO-M68: Book bike service before 16 April 2034.",
+      "provenance": "Original synthetic todo request.",
+      "checks": {"required": ["TODO-M68", "16 April 2034"], "max_words": 8, "forbidden": ["completed", "booked successfully"]},
+      "metadata": {"domain": "todos", "semantic_review": ["The title describes a future task to book bike service.", "The supplied due date is retained without claiming a todo was saved or the service was booked."]}
+    },
+    {
+      "id": "DOM-TODO-02", "family": "writing", "kind": "summary", "split": "evaluation",
+      "instruction": "Summarize this todo in at most 40 words. Preserve reference, responsible person and exact deadline, and keep its status pending.",
+      "text": "TODO-R19: Kiran will order replacement filters by 20 April 2034. The task is pending, not completed.",
+      "provenance": "Original synthetic pending task record.",
+      "checks": {"required": ["TODO-R19", "Kiran", "20 April 2034", "pending"], "max_words": 40, "forbidden": ["has ordered", "already ordered"]},
+      "metadata": {"domain": "todos", "semantic_review": ["Kiran remains responsible for the future order by the deadline.", "The task is not reported as completed or saved in an app by Friday."]}
+    },
+    {
+      "id": "DOM-TODO-03", "family": "intent", "kind": "intent", "split": "evaluation",
+      "instruction": "Open the second task above.",
+      "text": "{\"sources\":[{\"id\":\"todo-list-6\",\"text\":\"Selected tasks:\\n1. Pack chargers\\n2. Renew parking permit\"}],\"destination_app\":{\"package\":\"com.google.android.apps.tasks\",\"label\":\"Google Tasks\"}}",
+      "expected": {"mode": "act", "action": "Open", "target": "Renew parking permit", "scope": "", "source_id": "todo-list-6"},
+      "provenance": "Original fictional task titles and synthetic selected-result source.",
+      "metadata": {"domain": "todos", "semantic_checks": ["Resolve the ordinal to the actual second task title rather than searching for the referring words.", "This fixture does not establish Tasks app navigation."]}
+    },
+    {
+      "id": "DOM-NOTE-01", "family": "writing", "kind": "rewrite", "split": "evaluation",
+      "instruction": "Correct the grammar of this note in at most 40 words. Preserve the reference, address and relative location. Add no new facts.",
+      "text": "NOTE-F42: I has saved the address as Cedar Lane 18. The entrance is opposite the library.",
+      "provenance": "Original synthetic note with a fictional address.",
+      "checks": {"required": ["NOTE-F42", "Cedar Lane 18", "opposite the library"], "max_words": 40, "forbidden": ["next to the library", "behind the library"]},
+      "metadata": {"domain": "notes", "semantic_review": ["The grammatical error is corrected without changing address or entrance location.", "First-person source voice is preserved; no map result or new app write is claimed."]}
+    },
+    {
+      "id": "DOM-NOTE-02", "family": "writing", "kind": "summary", "split": "evaluation",
+      "instruction": "Summarize this note in at most 45 words. Preserve reference, names, deadline and who collects quotes versus who will decide. Keep the decision unresolved.",
+      "text": "NOTE-U63: The decision is not final. Mila gathers venue quotes by 19 May 2034. Arun will decide after review.",
+      "provenance": "Original synthetic planning note.",
+      "checks": {"required": ["NOTE-U63", "Mila", "Arun", "19 May 2034"], "max_words": 45, "forbidden": ["decision is final", "Mila decided", "Arun gathers"]},
+      "metadata": {"domain": "notes", "semantic_review": ["Mila gathers quotes by the deadline; Arun is the future decision maker.", "The note does not establish that a venue was selected or a decision completed."]}
+    },
+    {
+      "id": "DOM-NOTE-03", "family": "intent", "kind": "intent", "split": "evaluation",
+      "instruction": "Show my pinned notes.",
+      "text": "{\"sources\":[],\"destination_app\":{\"package\":\"com.google.android.keep\",\"label\":\"Google Keep\"}}",
+      "expected": {"mode": "navigate", "action": "Show", "target": "", "scope": "my pinned notes", "source_id": "request"},
+      "provenance": "Original synthetic notes-collection request; destination metadata is not app-access evidence.",
+      "metadata": {"domain": "notes", "semantic_checks": ["The requested collection is navigation scope, not an item or search query."]}
+    },
+    {
+      "id": "DOM-EDIT-01", "family": "task_update", "kind": "task_update", "split": "evaluation",
+      "instruction": "Revise the saved search in the already selected app.",
+      "text": "{\"capability\":\"app.search\",\"fields\":[\"query\"],\"current\":\"Replace the phrase with \\\"train timetable Bergen\\\".\",\"date\":\"2034-04-10\",\"zone\":\"UTC\",\"known\":{\"query\":\"coach timetable Bergen\"},\"missing\":[\"query\"],\"question\":\"Which query should replace the saved one?\"}",
+      "expected": {"operation": "update", "updates": [{"field": "query", "text": "train timetable Bergen", "value": "train timetable Bergen"}]},
+      "provenance": "Original synthetic search correction.",
+      "metadata": {"domain": "request_changes", "semantic_checks": ["Only the new quoted phrase becomes the query; preserve the already selected app."]}
+    },
+    {
+      "id": "DOM-EDIT-02", "family": "task_update", "kind": "task_update", "split": "evaluation",
+      "instruction": "Adjust the duration of the saved calendar slot without changing its other fields.",
+      "text": "{\"capability\":\"calendar.create\",\"fields\":[\"date\",\"start\",\"end\",\"duration\",\"title\",\"zone\"],\"current\":\"Use 50 minutes instead.\",\"date\":\"2034-04-10\",\"zone\":\"UTC\",\"known\":{\"date\":\"2034-04-18\",\"start\":\"15:25\",\"duration\":\"40\",\"title\":\"Planning sync\"},\"missing\":[\"duration\"],\"question\":\"What corrected duration should I use?\"}",
+      "expected": {"operation": "update", "updates": [{"field": "duration", "text": "50 minutes", "value": "50"}]},
+      "provenance": "Original synthetic duration correction.",
+      "metadata": {"domain": "request_changes", "semantic_checks": ["The new duration replaces 40 while date, start and title remain unchanged.", "This does not update an actual calendar event."]}
+    },
+    {
+      "id": "DOM-EDIT-03", "family": "task_update", "kind": "task_update", "split": "evaluation",
+      "instruction": "Search the previously selected app when the owner supplies a query.",
+      "text": "{\"capability\":\"app.search\",\"fields\":[\"query\"],\"current\":\"Open Google Fit.\",\"date\":\"2034-04-10\",\"zone\":\"UTC\",\"known\":{},\"missing\":[\"query\"],\"question\":\"What should I search for?\"}",
+      "expected": {"operation": "new", "updates": []},
+      "provenance": "Original synthetic independent-app request while search clarification is pending.",
+      "metadata": {"domain": "request_changes", "semantic_checks": ["The app-opening request is a new task, not a search phrase or permission to change the old destination.", "No Google Fit access or launch occurs in this test."]}
+    },
+    {
+      "id": "DOM-SONG-01", "family": "intent", "kind": "intent", "split": "evaluation",
+      "instruction": "Play something from my downloaded albums in Spotify.",
+      "text": "{\"sources\":[],\"destination_app\":{\"package\":\"com.spotify.music\",\"label\":\"Spotify\"}}",
+      "expected": {"mode": "navigate", "action": "Play", "target": "", "scope": "my downloaded albums", "source_id": "request"},
+      "provenance": "Original synthetic collection-scoped playback request.",
+      "metadata": {"domain": "songs", "semantic_checks": ["Retain the downloaded-album scope rather than searching for those words or inventing an item.", "A later actual playback test needs collection membership and playing-state evidence."]}
+    },
+    {
+      "id": "DOM-SONG-02", "family": "intent", "kind": "intent", "split": "evaluation",
+      "instruction": "Play the second track in the recommendations.",
+      "text": "{\"sources\":[{\"id\":\"song-list-8\",\"text\":\"Recommendations:\\n1. Silver Lantern\\n2. Harbor Tempo\"}],\"destination_app\":{\"package\":\"com.spotify.music\",\"label\":\"Spotify\"}}",
+      "expected": {"mode": "act", "action": "Play", "target": "Harbor Tempo", "scope": "", "source_id": "song-list-8"},
+      "provenance": "Original fictional track titles and synthetic cited recommendations.",
+      "metadata": {"domain": "songs", "semantic_checks": ["Resolve the requested ordinal to the second real cited track, retaining the exact source identifier.", "No track availability or playback is asserted."]}
+    },
+    {
+      "id": "DOM-SONG-03", "family": "intent", "kind": "intent", "split": "evaluation",
+      "instruction": "Play one of my earlier recommendations.",
+      "text": "{\"sources\":[],\"destination_app\":{\"package\":\"com.spotify.music\",\"label\":\"Spotify\"}}",
+      "expected": {"mode": "act", "action": "Play", "target": "", "scope": "", "source_id": "request"},
+      "provenance": "Original synthetic unresolved-reference request with no provided earlier items.",
+      "metadata": {"domain": "songs", "native_guard": {"scope": "intent_grounding", "expected": "reject", "reason": "No named item or section was resolved; native clarification is required. This expectation is not exercised by GPU generation."}, "semantic_checks": ["Do not invent a song or use the referring sentence as its title.", "An empty extraction is an unresolved language result, not an executable media action."]}
+    }
+  ]
+}
