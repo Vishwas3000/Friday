@@ -45,6 +45,8 @@ Friday's production prompt or constrained grammar.
 | [writing_data.py](writing_data.py) | Pinned CoEdIT/DialogSum TRAIN references for a future writing loader; lexical filtering and grouped splits |
 | [review_references.py](review_references.py) | Blind teacher reference screening with fixed calibration gates and hash-bound decisions |
 | [train_prepared.py](train_prepared.py) | Larger prepared-data SFT, batched tokenization, reviewed writing, live progress and recoverable checkpoints |
+| [migrate_prepared.py](migrate_prepared.py) | Verified upgrade of the recorded OOM checkpoint to token-budget batching, with original state and a receipt preserved |
+| [watch_prepared.py](watch_prepared.py) | CPU-only Optuna record of the fixed prepared run, persistent validation losses and completion/failure state |
 
 Frozen evaluation never supplies labels, tunes prompts, selects a checkpoint or
 drives Optuna. Candidate train and validation use separate template/value pools;
@@ -273,10 +275,11 @@ The verifier uses normal Python without `-O` and writes `independent-check.json`
 The output predicts full service state from a schema, prior annotated states and
 the latest SYSTEM/USER utterances. It is not accepted by `distill.py` or the current
 Android Writer. No v2 student has been trained or installed by this preparation
-step. [DATASETS.md](DATASETS.md#human-annotated-dialogue-state-next-stage-data)
+step; the separate [prepared trainer](PREPARED_TRAINING.md) now runs the first
+state/context epoch. [DATASETS.md](DATASETS.md#human-annotated-dialogue-state-next-stage-data)
 records measured counts, full manifest/report hashes, exclusions and rollout/token limits.
 
-## Next stage: writing references
+## Writing references
 
 The separate [writing data guide](WRITING_DATA.md) records sources, exact hashes and
 filters for **21,768 publisher-reference pairs**. It contains 19,697 grammatical
@@ -290,11 +293,12 @@ python3 training/slm/writing_data.py --fetch
 
 The prepared directory must be empty; the default is
 `training/slm/out/writing-external/prepared/`. Its 20,617/1,151 source-grouped
-train/validation split is for a future writing loader and experiment. No new model
-has been trained on these rows. Lexical filters and publisher provenance do not
-establish semantic accuracy; retain those limits during future sample review and
-evaluation. These rows are separate from `dialogue_state_v2` and the current
-pilot's teacher-label manifest format.
+train/validation split supplies candidates for the prepared trainer. The active
+state/context stage retains only 23 approved training targets and 30 approved
+validation targets after sampled review; the other writing references remain
+excluded. Lexical filters and publisher provenance do not establish semantic
+accuracy. These rows use a separate manifest from `dialogue_state_v2` and the
+original pilot's teacher labels.
 
 ## Artifacts and backup
 

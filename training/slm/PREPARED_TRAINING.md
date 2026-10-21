@@ -45,6 +45,10 @@ uses a **98% state / 2% writing response-token objective**, not the trainer's
 general 70/30 default; the small writing set is rehearsal, not broad writing
 training.
 
+The tokenized run retains **234,834 training rows and 25,781 validation rows**.
+One epoch is one pass through the training rows: **14,678 optimizer updates**
+with the final partial group included.
+
 ## Training and validation
 
 The run uses response-only full SFT, FP32 weights/optimizer, BF16 autocast and
@@ -54,19 +58,27 @@ before optimization, with overlong rows excluded and counted rather than cut.
 
 Hardware calibration at a full 2,048-token sequence passed batch size 4 with peak
 allocated memory **23,465,776,640 bytes**. Batch size 8 ran out of memory. The
-initial configuration is batch 4, accumulation 4, one epoch and learning rate
-`2e-5`; the actual weighted-loss trainer must also pass its GPU smoke check.
+real weighted-loss run later exhausted memory at step 30, so that calibration
+did not establish enough headroom for variable-length training batches.
+
+Training now caps each padded microbatch at **6,000 tokens**. Short examples can
+still use four rows; four 2,048-token examples split into two pairs. Nominal
+batch size 4, accumulation 4, example order, optimizer groups and their loss
+denominators remain unchanged: normally 16 examples per optimizer update.
+`PYTORCH_ALLOC_CONF=expandable_segments:True` also reduces fragmentation from
+changing allocation sizes; the token limit addresses capacity. See the
+[PyTorch CUDA memory documentation](https://docs.pytorch.org/docs/2.14/notes/cuda.html).
 
 From a checkout preserving the repository layout:
 
 ```sh
 cd training/slm
 python3 train_prepared.py --self-check
-bash job.sh train_prepared.py \
+PYTORCH_ALLOC_CONF=expandable_segments:True bash job.sh train_prepared.py \
   --writing-review out/writing-external/prepared/semantic-sample-review.json \
   --frozen ../../tests/slm-regression.json ../../tests/slm-domain-regression.json \
   --out out/prepared-state-stage1-throughput \
-  --batch-size 4 --accumulate 4 --max-sequence 2048 \
+  --batch-size 4 --accumulate 4 --max-sequence 2048 --max-batch-tokens 6000 \
   --learning-rate 2e-5 --writing-share 0.02 \
   --validation-loss-limit 192 --validation-generation-limit 0 \
   --max-steps 2
@@ -90,6 +102,8 @@ cannot tune this run. Public validation is held out from this SFT; unknown base
 pretraining exposure means it is not guaranteed unseen by the base model.
 Dialogue validation supplies human previous states and does not measure errors
 accumulating through predicted-state rollouts.
+The initial base checkpoint remains eligible if no trained checkpoint improves
+the fixed validation objective.
 
 Progress reports include optimizer steps, response tokens, throughput, elapsed
 time and ETA. Periodic recovery checkpoints preserve model, optimizer, scheduler,
@@ -108,23 +122,24 @@ to source, review, template, configuration and code hashes.
 
 The first two-step check then exposed a second bottleneck: serial generated
 responses held GPU use near 14% for minutes. Generated diagnostics were moved
-after final checkpoint selection. The 192-row capped validation-loss checks still
-run every 500 steps. This changes diagnostic timing, not the validation-loss
+after final checkpoint selection. Validation-loss checks still run every 500
+steps with a cap of 192 rows: this run has 128 state and 30 approved writing
+rows, so each check uses **158 rows**. This changes diagnostic timing, not the validation-loss
 objective or the data. The at-most-two warmup updates were replayed from the same
 pinned base; both original run directories remain as audit artifacts.
 
-The managed `friday-slm-prepared-state` pipeline now uses
+The managed `friday-slm-prepared-state` pipeline uses
 `out/prepared-state-stage1-throughput/`. It reuses the verified prepared cache
 through hard links, with a new declared configuration and no imported model or
-optimizer state. It automatically runs two real optimization steps, verifies the
-stopped status and recoverable checkpoint, and resumes the same configuration for
-the full epoch. The original 84-case and 24-case frozen reports and a separate
-prepared-validation generation report run only after completion. The last report
+optimizer state from the superseded attempts. Its two-step recovery check passed
+before the full-epoch continuation. Following the memory failure, the wrapper
+resumes the saved checkpoint directly. The original 84-case and 24-case frozen
+reports and a separate prepared-validation generation report run only after completion. The last report
 uses the same deterministic selection policy, up to 96 rows, without selection
 eligibility. The pipeline survives the local SSH session ending.
 
 The active pipeline SHA256 is
-`56f70988b298a80cbc6c760f4642f35b133cf31fbe97ca64f22deb5698ec8353`.
+`33fd7163ad85af6d994e9099e333eec8d15d223d2b1347f44f957a50e517ca4c`.
 The larger epoch remains on the RTX 4090; the proposed machine migration was
 cancelled before any destination installs, data transfer or job changes.
 
@@ -132,8 +147,107 @@ The reference-judge audit and hardware probes are backed up locally as ignored
 `out/prepared-quality-audit.zip` (73,447 bytes), SHA256
 `009fe67da5aec4f7ce7d98d5980d0a3b7d600538b7b66ea581b827b152eec396`.
 The active trainer SHA256 is
-`83b7aea989532b30e6cd82b6730d3e5e2ad2cf0a22989f6438352d7bad39fff5`.
+`b271afcb5d64cceb362cd1c2bc77f2e60ebd00da41088932dbc7c64c76aa2967`.
 No teacher bulk screening was run after the failed calibration.
+
+### Preserving the checkpoint through the memory fix
+
+[migrate_prepared.py](migrate_prepared.py) accepts only the recorded failed OOM
+configuration and the reviewed trainer version. Run it with training stopped:
+
+```sh
+bash job.sh migrate_prepared.py --run out/prepared-state-stage1-throughput
+```
+
+It backs up the original checkpoint and small metadata files, changes only the
+trainer identity and `max_batch_tokens=6000`, and checks exact equality of every
+other checkpoint field after serialization: weights, optimizer, scheduler,
+random state, progress and sampler. Prepared feature file hashes stay unchanged.
+The receipt and originals live in `compatibility-token-budget/`; the best model
+keeps its original configuration fingerprint in its metadata. Recovery starts
+from saved step 2, replaying updates that were lost before the next checkpoint.
+Changing kernel shapes and dropout grouping can change subsequent numerical
+results; this is a documented execution-policy continuation, not a claim of
+bitwise equivalence with the failed run.
+
+## Optuna tracking
+
+The earlier synthetic pilot compared three learning rates and selected `2e-5`.
+That does not establish the best rate for this larger corpus. The current full
+run records a **single fixed-parameter baseline** in Optuna 4.5.0, so later
+experiments can compare against its validation curve and exact source identity.
+There is no new parameter search, pruning or automatic adjustment during this
+epoch. The trainer itself selects the best checkpoint using held-out loss.
+
+[watch_prepared.py](watch_prepared.py) runs alongside training without loading a
+model or using the GPU:
+
+```sh
+bash job.sh watch_prepared.py \
+  --run out/prepared-state-stage1-throughput \
+  --config-sha256 cfd6d194c94dda3996d962deb499b0fdfe60ef351ff446f1be779bf6f9ece2db
+```
+
+Launch it under the existing supervisor as `friday-slm-optuna`. Its configuration
+pin must match the actual post-migration report; reproducing with another
+environment requires that run's own fingerprint. It saves
+`optuna/study.sqlite3` and `optuna/latest.json` inside the run directory, binds
+source/configuration hashes, and records each weighted validation loss and its
+file hash. The retained step-2 validation belongs to the verified checkpoint
+lineage. Initial base loss remains in `training.json`.
+
+Stopping the observer leaves training untouched and its trial resumable; restarting
+it reuses that trial. A completed epoch records the best validation loss as the
+objective. A training failure closes the trial as `FAIL`; a later attempt needs a
+separate study/run rather than reopening a finished trial. A second observer is
+blocked by a local lock. The fixed 84-case and 24-case Friday reports never feed
+Optuna or checkpoint selection.
+
+The installed-library smoke check passed SQLite creation, signal-driven pause,
+same-trial resume, intermediate losses, final objective, completed restart,
+configuration mismatch rejection and training failure. Both managed processes
+were then observed running; the memory-safe trainer passed step 520 and saved a
+new recovery checkpoint at step 500. Optuna recorded both step-2 and step-500
+validation losses. At step 500 the weighted loss was **0.0669005**, compared with
+the initial base's **0.4028262**. State loss was 0.0413922 and writing loss was
+1.3168048. These are fixed held-out token losses, not generated-answer accuracy
+or Android task success.
+
+Recovery and observer metadata are backed up locally in ignored
+`out/prepared-state-recovery-audit.zip` (71,914 bytes), SHA256
+`4d6b1d7da94a09d7e05dd939671e914d0a9d67844f8bf76ba779a30ed439b201`.
+Its SQLite snapshot passed an independent integrity check. This small archive
+contains scripts, configuration, reports and the migration receipt; it does not
+contain the active model weights or prepared feature cache.
+
+### Queued reports and their reproduction
+
+The recovery archive preserves the exact managed wrapper as
+`out/prepared-state-stage1-throughput-pipeline.sh` and the generated diagnostic
+source as `out/prepared-final-diagnostics.py`. Both use the recorded flat job
+layout; adjust the archived diagnostic's `root` if moving to a different job
+directory. Restore it alongside the run artifacts for the final command below.
+`job.sh` places the training directory on Python's module path so scripts
+under `out/` can import the shared helpers; its import and incomplete-training
+guards were checked while the epoch continued.
+
+After the epoch is complete and its `selected_checkpoint` is verified as `best`,
+the queued pipeline performs the following reports (fixture paths shown for a
+normal checkout):
+
+```sh
+bash job.sh regression.py --cases ../../tests/slm-regression.json \
+  --model out/prepared-state-stage1-throughput/best \
+  --output out/prepared-state-stage1-throughput/frozen-main.json
+bash job.sh regression.py --cases ../../tests/slm-domain-regression.json \
+  --model out/prepared-state-stage1-throughput/best \
+  --output out/prepared-state-stage1-throughput/frozen-domains.json
+bash job.sh out/prepared-final-diagnostics.py
+```
+
+The diagnostic verifies selected-weight and cache hashes before reading our own
+validation cache. It uses the fixed validation selection policy with a 96-row
+cap and writes `final-prepared-validation.json` with `selection_eligible=false`.
 
 ## Instance and artifacts
 

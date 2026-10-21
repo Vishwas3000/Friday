@@ -419,6 +419,23 @@ def batches_for(features, batch_size, seed, bucket_size):
     return batches
 
 
+def microbatches_for(indices, features, token_budget):
+    """Split one nominal batch contiguously; never change its sampler position."""
+    start, width = 0, 0
+    for offset, index in enumerate(indices):
+        length = len(features[index]["input_ids"])
+        if length > token_budget:
+            raise ValueError("Single example exceeds microbatch token budget")
+        candidate = max(width, length)
+        if (offset - start + 1) * candidate > token_budget:
+            yield indices[start:offset]
+            start, width = offset, length
+        else:
+            width = candidate
+    if start < len(indices):
+        yield indices[start:]
+
+
 def stratified(rows, limit, salt):
     groups = defaultdict(list)
     for row in sorted(rows, key=lambda r: digest((salt + r["id"]).encode())):
@@ -579,7 +596,9 @@ def train(args):
                        "family_loss_factors": factors, "train_branch_response_tokens": dict(branch_tokens),
                        "loss_formula": "factor(branch)=share(branch)*all_train_tokens/branch_train_tokens; group weighted token NLL / (global_mean_tokens_per_train_row * group_rows). No per-group weighted-token renormalization; not a claim about realized gradient contribution.",
                        "validation_loss_ids": [r["id"] for r in loss_rows], "validation_generation_ids": [r["id"] for r in generation_rows],
-                       "sampler_sha256": sampler_hash, "chat_template": tokenizer.chat_template})
+                       "sampler_sha256": sampler_hash, "chat_template": tokenizer.chat_template,
+                       "microbatching": {"max_batch_tokens": args.max_batch_tokens, "nominal_batch_size": args.batch_size,
+                           "policy": "Contiguous splits within nominal batches; original optimizer-group rows and loss denominator unchanged"}})
         save_json(report_path, report)
         model = transformers.AutoModelForCausalLM.from_pretrained(STUDENT, revision=STUDENT_REVISION, cache_dir=ROOT / ".hf",
                     torch_dtype=torch.float32, attn_implementation="sdpa").to("cuda")
@@ -630,6 +649,8 @@ def train(args):
                 raise ValueError("Recoverable checkpoint names a better model than the retained best weights")
             progress["best_loss"], progress["best_step"] = best_loss, best_info["step"]
             report["weight_sha256"] = best_info["weight_sha256"]
+        progress.setdefault("max_microbatch_rows", 0)
+        progress.setdefault("max_padded_microbatch_tokens", 0)
         base_wall, loop_started = progress["loop_wall_s"], None
 
         def tensors(items):
@@ -717,7 +738,8 @@ def train(args):
             group_rows = sum(map(len, group))
             denominator = mean_tokens * group_rows
             began = time.perf_counter()
-            for indices in group:
+            microbatches = (chunk for indices in group for chunk in microbatches_for(indices, features["train"], args.max_batch_tokens))
+            for indices in microbatches:
                 rows = [features["train"][i] for i in indices]
                 sums = losses(rows)
                 weights = torch.tensor([factors[r["branch"]] for r in rows], device="cuda", dtype=torch.float32)
@@ -725,6 +747,9 @@ def train(args):
                 if not bool(torch.isfinite(loss).item()):
                     raise ValueError("Nonfinite training loss")
                 loss.backward()
+                progress["max_microbatch_rows"] = max(progress["max_microbatch_rows"], len(rows))
+                progress["max_padded_microbatch_tokens"] = max(progress["max_padded_microbatch_tokens"],
+                                                              len(rows) * max(len(row["input_ids"]) for row in rows))
                 for row, value in zip(rows, sums.detach().tolist()):
                     family = row["family"]
                     progress["nll_by_family"][family] = progress["nll_by_family"].get(family, 0.0) + value
@@ -765,6 +790,8 @@ def train(args):
                          "response_tokens_per_active_train_s": progress["tokens"] / progress["active_train_s"],
                          "eta_s": remaining / throughput if throughput else None,
                          "gradient_norm": float(norm.item()), "learning_rate": scheduler.get_last_lr()[0],
+                         "max_batch_tokens": args.max_batch_tokens, "max_microbatch_rows": progress["max_microbatch_rows"],
+                         "max_padded_microbatch_tokens": progress["max_padded_microbatch_tokens"],
                          "loop_wall_s": elapsed, "invocation_wall_s": time.perf_counter() - started}
                 report["last_progress"] = event
                 report["progress"] = progress
@@ -827,6 +854,17 @@ def self_check():
     items = [{"input_ids": [0] * n} for n in (5, 9, 1, 8, 3)]
     batches = batches_for(items, 2, 42, 4)
     assert sorted(i for batch in batches for i in batch) == list(range(5)) and batches == batches_for(items, 2, 42, 4)
+    long_items = [{"input_ids": [0] * n, "response_tokens": 10 + i} for i, n in enumerate((2000, 2000, 1200, 50, 2048, 2048, 2048, 2048))]
+    nominal = [0, 1, 2, 3]
+    chunks = list(microbatches_for(nominal, long_items, 6000))
+    assert chunks == [[0, 1, 2], [3]]  # Exactly the budget is accepted.
+    assert list(microbatches_for([4, 5, 6, 7], long_items, 6000)) == [[4, 5], [6, 7]]
+    assert [i for chunk in chunks for i in chunk] == nominal and list(microbatches_for([], long_items, 6000)) == []
+    assert all(len(chunk) * max(len(long_items[i]["input_ids"]) for i in chunk) <= 6000 for chunk in chunks)
+    denominator = 123.0 * len(nominal)
+    assert math.isclose(sum(sum((i + 1) * 0.7 for i in chunk) / denominator for chunk in chunks),
+                        sum((i + 1) * 0.7 for i in nominal) / denominator)
+    assert sum(long_items[i]["response_tokens"] for chunk in chunks for i in chunk) == sum(long_items[i]["response_tokens"] for i in nominal)
     schema = {"service_name": "rail", "intents": [{"name": "find"}], "slots": [{"name": "time"}]}
     gold = {"service": "rail", "active_intent": "find", "slot_values": {"time": ["09:00", "9:00"]}, "requested_slots": []}
     score = state_score(gold, {**gold, "slot_values": {"time": ["9:00"]}}, schema)
@@ -852,7 +890,7 @@ def self_check():
             pass
         else:
             raise AssertionError("Tampered source accepted")
-    print("Prepared trainer self-check passed: single/batch equivalence, response/EOS/pad masks, whole-sequence rejection, global family factors, deterministic buckets, alias-aware states, review hashes and source tampering")
+    print("Prepared trainer self-check passed: token-budget splits/coverage/objective, single/batch equivalence, response/EOS/pad masks, whole-sequence rejection, global family factors, deterministic buckets, alias-aware states, review hashes and source tampering")
 
 
 def main():
@@ -869,6 +907,7 @@ def main():
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--max-sequence", type=int, default=2048)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--max-batch-tokens", type=int, default=6000)
     parser.add_argument("--accumulate", type=int, default=4)
     parser.add_argument("--bucket-size", type=int, default=512)
     parser.add_argument("--learning-rate", type=float, default=2e-5)
@@ -889,7 +928,7 @@ def main():
         parser.error("--out and --writing-review are required")
     if (min(args.max_sequence, args.batch_size, args.accumulate, args.bucket_size, args.validate_every, args.checkpoint_every, args.log_every) < 1
             or args.validation_loss_limit < 3 or args.validation_generation_limit < 0 or args.max_steps < 0
-            or args.learning_rate <= 0 or not 0 < args.writing_share < 1):
+            or args.max_batch_tokens < args.max_sequence or args.learning_rate <= 0 or not 0 < args.writing_share < 1):
         parser.error("Invalid training bounds")
     train(args)
 
